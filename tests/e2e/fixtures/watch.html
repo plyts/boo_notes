@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vidéo de test E2E - YouTube</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; background: #fff; color: #111; }
+      #masthead-container { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #f2f2f2; z-index: 10; }
+      main { padding: 72px 24px 24px; }
+      #movie_player { position: relative; width: 640px; height: 360px; background: #000; }
+      #movie_player video { width: 100%; height: 100%; display: block; }
+      .ytp-progress-bar { position: absolute; left: 12px; right: 12px; bottom: 40px; height: 4px; background: rgba(255, 255, 255, 0.4); }
+      #comment { margin-top: 16px; width: 300px; }
+      html[dark] body { background: #0f0f0f; color: #f1f1f1; }
+      html[dark] #masthead-container { background: #212121; }
+    </style>
+    <script>
+      if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.setAttribute('dark', '');
+    </script>
+  </head>
+  <body>
+    <div id="masthead-container">YouTube (fixture)</div>
+    <main>
+      <div id="movie_player" tabindex="-1">
+        <video class="html5-main-video" src="/__fixtures/sample.webm" muted playsinline preload="auto"></video>
+        <div class="ytp-progress-bar"></div>
+      </div>
+      <ytd-watch-metadata><h1>Vidéo de test E2E</h1></ytd-watch-metadata>
+      <input id="comment" placeholder="Ajouter un commentaire" />
+    </main>
+    <script>
+      // Like YouTube: double-click toggles fullscreen on the player container.
+      const player = document.getElementById('movie_player');
+      player.addEventListener('dblclick', () =>
+        document.fullscreenElement ? document.exitFullscreen() : player.requestFullscreen(),
+      );
+    </script>
+  </body>
+</html>

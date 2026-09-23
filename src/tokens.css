@@ -1,0 +1,65 @@
+/*
+ * Boo Notes design tokens — shared by the panel and the options page.
+ * Contrast ratios are documented in docs/DESIGN.md (WCAG 2.2 AA minimum).
+ */
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+}
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #16161a;
+  --surface: #1e1e24;
+  --surface-2: #2a2a33;
+  --border: #33333d;
+  --text: #ececf1;
+  --muted: #a4a4b0;
+  --faint: #8a8a97;
+  --accent: #9b8cff;
+  --accent-strong: #6d5ef0;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(155, 140, 255, 0.16);
+  --ts-bg: rgba(155, 140, 255, 0.18);
+  --ts-text: #cdc5ff;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --danger: #f87171;
+  --now-bg: #2a2716;
+  --now-border: #facc15;
+  --selection: rgba(155, 140, 255, 0.3);
+  --focus: #a5b4fc;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f6f6f9;
+  --surface-2: #ebebf1;
+  --border: #dcdce4;
+  --text: #1b1b22;
+  --muted: #555562;
+  --faint: #6e6e7b;
+  --accent: #5143c9;
+  --accent-strong: #4c3dc4;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(81, 67, 201, 0.1);
+  --ts-bg: rgba(81, 67, 201, 0.12);
+  --ts-text: #3f32a8;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --now-bg: #fdf3d3;
+  --now-border: #a16207;
+  --selection: rgba(81, 67, 201, 0.2);
+  --focus: #4f46e5;
+  --shadow: 0 12px 32px rgba(20, 20, 40, 0.16);
+}

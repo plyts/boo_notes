@@ -1,0 +1,331 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+/* --- Header ------------------------------------------------------------ */
+
+.header {
+  position: relative;
+  padding: var(--space-2) var(--space-3) var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.status[data-state='connected'] .status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.status[data-state='connecting'] .status-dot {
+  animation: pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.icon-btn[aria-pressed='true'],
+.icon-btn[aria-expanded='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.title {
+  margin: 6px 0 2px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.meta-text[data-state='error'] {
+  color: var(--danger);
+}
+
+.notice {
+  margin-left: auto;
+  text-align: right;
+  color: var(--accent);
+}
+
+.notice[data-kind='error'] {
+  color: var(--danger);
+}
+
+/* --- Export menu -------------------------------------------------------- */
+
+.menu {
+  position: absolute;
+  z-index: 10;
+  top: 44px;
+  right: var(--space-3);
+  min-width: 250px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover:not(:disabled),
+.menu button:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.menu button:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.menu svg {
+  color: var(--muted);
+  flex: none;
+}
+
+/* --- Banner / editor ---------------------------------------------------- */
+
+.banner {
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg));
+  color: var(--text);
+  font-size: 13px;
+}
+
+.editor {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor .cm-editor {
+  height: 100%;
+}
+
+.cm-boo-ts {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--ts-bg);
+  color: var(--ts-text);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Syntax-highlight spans nested in the chip must not override its colour. */
+.cm-boo-ts * {
+  color: inherit !important;
+}
+
+.cm-boo-ts:hover {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+.cm-boo-img {
+  display: block;
+  margin: 6px 0 8px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.cm-boo-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cm-boo-img:hover {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.cm-boo-img.missing {
+  display: grid;
+  place-items: center;
+  aspect-ratio: auto;
+  padding: 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* Drawn in the content padding so list markers stay visible. */
+.cm-boo-now {
+  background: var(--now-bg);
+  box-shadow:
+    -6px 0 0 var(--now-bg),
+    -9px 0 0 var(--now-border);
+}
+
+.cm-boo-quote {
+  box-shadow: inset 3px 0 0 var(--border);
+  padding-left: 10px !important;
+  color: var(--muted);
+}
+
+.cm-boo-codeblock {
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.cm-boo-h {
+  padding-top: 6px !important;
+}
+
+/* --- Footer --------------------------------------------------------------- */
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px var(--space-3) 4px var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.clock {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.clock::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 6px;
+  border-style: solid;
+  border-width: 4px 0 4px 7px;
+  border-color: transparent transparent transparent var(--faint);
+  vertical-align: 0;
+}
+
+.clock[data-playing='true']::before {
+  border-left-color: var(--ok);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status[data-state='connecting'] .status-dot {
+    animation: none;
+  }
+}

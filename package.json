@@ -1,0 +1,39 @@
+{
+  "name": "boo-notes-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boo Notes — prise de notes horodatées sur YouTube / Udemy / Coursera (extension navigateur MV3).",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "node scripts/build.mjs && playwright test",
+    "mock:desktop": "node tools/mock-desktop/server.mjs",
+    "fixtures": "node scripts/make-fixture-video.mjs",
+    "screenshots": "node scripts/build.mjs && SCREENSHOTS=1 playwright test screenshots",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/common": "^1.5.2",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/markdown": "^1.7.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/chrome": "^0.3.0",
+    "@types/node": "^26.6.2",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "ws": "^8.21.3"
+  }
+}

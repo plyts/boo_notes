@@ -1,0 +1,621 @@
+import { captureLine } from '../shared/markdown';
+import {
+  callBackground,
+  isCommand,
+  PANEL_PORT,
+  type BackgroundRequest,
+  type BackgroundResponses,
+  type CommandId,
+  type ContentToPanel,
+  type PanelToContent,
+  type TabMessage,
+} from '../shared/messages';
+import { detectVideoContext, readStartTime, timestampUrl, type VideoContext } from '../shared/platforms';
+import { loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from '../shared/settings';
+import { findBinding, inPageBindings, type InPageBinding } from '../shared/shortcuts';
+import { formatTimecode } from '../shared/time';
+import { adapterForHost, detectPageTheme, headerInset, queryVisible, type PlatformAdapter } from './adapters';
+import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
+import { Drawer } from './drawer';
+import { Overlay } from './overlay';
+import { VideoController } from './player';
+
+const PINNED_KEY = 'boo-notes:pinned';
+const TEARDOWN_EVENT = 'boo-notes:teardown';
+const MEDIA_EVENTS = ['play', 'playing', 'pause', 'seeked', 'ratechange', 'durationchange', 'loadedmetadata', 'emptied', 'waiting'];
+
+type Port = chrome.runtime.Port;
+
+function isEditableTarget(e: Event): boolean {
+  const t = e.composedPath()[0];
+  if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return true;
+  if (t instanceof HTMLInputElement) {
+    return !['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'file', 'color', 'image'].includes(t.type);
+  }
+  return t instanceof HTMLElement && t.isContentEditable;
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Content script: attaches to the page's <video>, draws the HUD / toasts,
+ * hosts the drawer and executes the keyboard commands routed by the
+ * background service worker.
+ */
+class ContentApp {
+  private readonly abort = new AbortController();
+  private readonly player: VideoController;
+  private readonly overlay: Overlay;
+  private readonly drawer: Drawer;
+  private settings: Settings = normalizeSettings(undefined);
+  private tabId = -1;
+  private ctx: VideoContext | null = null;
+  private title = '';
+  private pinned = false;
+  private embeddedPort: Port | null = null;
+  private popoutPort: Port | null = null;
+  private embeddedWaiters: Array<(port: Port) => void> = [];
+  private intervals: Array<ReturnType<typeof setInterval>> = [];
+  private titleWatch: ReturnType<typeof setInterval> | null = null;
+  private lastHref = location.href;
+  private lastInteraction = 0;
+  private capturing = false;
+  /** Default shortcuts Chrome did not register globally, handled here instead. */
+  private pageBindings: InPageBinding[] = inPageBindings([]).filter((b) => b.command === 'replay');
+  private readonly seekedFromUrl = new Set<string>();
+  private stopSettingsWatch: (() => void) | null = null;
+  private dead = false;
+
+  constructor(private readonly adapter: PlatformAdapter) {
+    this.player = new VideoController(adapter);
+    this.overlay = new Overlay(
+      {
+        videoRect: () => this.player.rect(),
+        contentRect: () => this.player.contentRect(),
+        progressBarRect: () => this.player.progressBarRect(),
+        currentTime: () => this.player.time(),
+        duration: () => this.player.playback().duration,
+        isOverUi: (x, y) => this.drawer.containsPoint(x, y),
+      },
+      {
+        copyTimestamp: () => void this.copyTimestamp(),
+        capture: () => void this.capture(),
+        togglePin: () => this.setPinned(!this.pinned),
+        openSettings: () => void this.bg({ type: 'options:open' }),
+      },
+    );
+    this.drawer = new Drawer({
+      panelUrl: () => chrome.runtime.getURL(`panel/panel.html?tab=${this.tabId}&mode=embedded`),
+      width: this.settings.drawerWidth,
+      layout: this.settings.layout,
+      topInset: () => headerInset(this.adapter),
+      onResized: (width) => void saveSettings({ drawerWidth: width }).catch(() => undefined),
+    });
+  }
+
+  async start(): Promise<void> {
+    document.addEventListener(TEARDOWN_EVENT, this.destroy, { once: true });
+    this.applySettings(await loadSettings());
+    this.tabId = (await this.bg({ type: 'hello' })).tabId;
+    try {
+      this.pinned = sessionStorage.getItem(PINNED_KEY) === '1';
+    } catch {
+      this.pinned = false;
+    }
+    this.overlay.setPinned(this.pinned);
+    this.overlay.mount();
+    this.bindEvents();
+    await this.syncContext(true);
+    if (this.pinned && this.ctx) this.openDrawer(null);
+  }
+
+  readonly destroy = () => {
+    if (this.dead) return;
+    this.dead = true;
+    this.abort.abort();
+    for (const id of this.intervals) clearInterval(id);
+    if (this.titleWatch) clearInterval(this.titleWatch);
+    this.stopSettingsWatch?.();
+    try {
+      chrome.runtime.onMessage.removeListener(this.onTabMessage);
+      chrome.runtime.onConnect.removeListener(this.onPanelConnect);
+    } catch {
+      // Extension context already gone.
+    }
+    this.embeddedPort?.disconnect();
+    this.popoutPort?.disconnect();
+    this.overlay.destroy();
+    this.drawer.destroy();
+  };
+
+  // --- Wiring -------------------------------------------------------------------
+
+  private bindEvents(): void {
+    const opts = { signal: this.abort.signal, capture: true } as const;
+    document.addEventListener(
+      'mousemove',
+      (e) => this.overlay.onPointerMove(e.clientX, e.clientY, e.composedPath()),
+      { ...opts, passive: true },
+    );
+    window.addEventListener('keydown', this.onKeyDown, opts);
+    window.addEventListener('pointerdown', () => this.markInteraction(), { ...opts, passive: true });
+    for (const type of MEDIA_EVENTS) {
+      document.addEventListener(
+        type,
+        (e) => {
+          if (!(e.target instanceof HTMLVideoElement)) return;
+          if (type === 'play') this.player.adopt(e.target);
+          if (e.target === this.player.current) this.broadcastPlayback();
+        },
+        opts,
+      );
+    }
+    document.addEventListener('fullscreenchange', this.onFullscreenChange, opts);
+    window.addEventListener('popstate', () => this.checkUrl(), opts);
+    // YouTube is a single-page app and announces its navigations.
+    document.addEventListener('yt-navigate-finish', () => this.checkUrl(), opts);
+
+    chrome.runtime.onMessage.addListener(this.onTabMessage);
+    chrome.runtime.onConnect.addListener(this.onPanelConnect);
+    this.stopSettingsWatch = onSettingsChanged((s) => this.applySettings(s));
+
+    this.intervals.push(setInterval(() => this.checkUrl(), 750));
+    // Periodic resync so the panels' extrapolated clock never drifts.
+    this.intervals.push(
+      setInterval(() => {
+        if (this.embeddedPort || this.popoutPort) this.broadcastPlayback();
+      }, 2000),
+    );
+    void this.loadShortcuts();
+    // Shortcuts may be edited in chrome://extensions/shortcuts while the page is open.
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (document.visibilityState === 'visible') void this.loadShortcuts();
+      },
+      opts,
+    );
+  }
+
+  private async loadShortcuts(): Promise<void> {
+    try {
+      const list = await this.bg({ type: 'shortcuts:list' });
+      this.pageBindings = inPageBindings(list);
+      this.overlay.setCaptureShortcut(list.find((c) => c.name === 'capture-screenshot')?.shortcut ?? '');
+    } catch {
+      // Keep the previous bindings.
+    }
+  }
+
+  private applySettings(s: Settings): void {
+    this.settings = s;
+    this.overlay.setEnabled(s.hudEnabled);
+    this.drawer.setWidth(s.drawerWidth);
+    this.drawer.setLayout(s.layout);
+  }
+
+  private bg<R extends BackgroundRequest>(request: R): Promise<BackgroundResponses[R['type']]> {
+    if (!chrome.runtime?.id) {
+      // The extension was reloaded / updated: this copy of the script is orphaned.
+      this.destroy();
+      return Promise.reject(new Error('Extension rechargée'));
+    }
+    return callBackground(request).catch((e: unknown) => {
+      if (/context invalidated/i.test(errorMessage(e))) this.destroy();
+      throw e;
+    });
+  }
+
+  private readonly onTabMessage = (msg: TabMessage, sender: chrome.runtime.MessageSender): boolean => {
+    if (sender.id !== chrome.runtime.id) return false;
+    if (msg.type === 'command') void this.onCommand(msg.command);
+    else if (msg.type === 'popout:closed') this.popoutPort = null;
+    return false;
+  };
+
+  private readonly onPanelConnect = (port: Port): void => {
+    if (port.name !== PANEL_PORT || port.sender?.id !== chrome.runtime.id) return;
+    port.onMessage.addListener((msg: PanelToContent) => this.onPanelMessage(port, msg));
+    port.onDisconnect.addListener(() => {
+      if (port === this.embeddedPort) this.embeddedPort = null;
+      if (port === this.popoutPort) this.popoutPort = null;
+      this.overlay.hideMarker();
+    });
+  };
+
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    this.markInteraction();
+    if (!this.ctx || isEditableTarget(e)) return;
+    const plain = !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
+    if (e.key === 'Escape' && plain && this.drawer.isOpen && !this.pinned && !document.fullscreenElement) {
+      this.closeDrawer();
+      return;
+    }
+    if (!this.settings.pageShortcuts) return;
+    const binding = findBinding(this.pageBindings, e);
+    if (!binding) return;
+    e.preventDefault(); // Alt+← would otherwise navigate back.
+    e.stopImmediatePropagation();
+    void this.onCommand(binding.command);
+  };
+
+  private readonly onFullscreenChange = (): void => {
+    const fs = document.fullscreenElement;
+    // A bare <video> in fullscreen cannot host children: nothing can be drawn then.
+    const target = fs && !(fs instanceof HTMLVideoElement) ? fs : null;
+    this.overlay.reparent(target);
+    if (target && this.drawer.isOpen && !this.pinned) this.drawer.close();
+    this.drawer.setFullscreenTarget(target);
+  };
+
+  // --- Page / video context ---------------------------------------------------------
+
+  private checkUrl(): void {
+    if (location.href === this.lastHref) return;
+    this.lastHref = location.href;
+    void this.syncContext();
+  }
+
+  private async syncContext(force = false): Promise<void> {
+    const ctx = detectVideoContext(location.href);
+    const changed = force || ctx?.noteId !== this.ctx?.noteId;
+    this.ctx = ctx;
+    if (ctx) this.maybeSeekFromUrl();
+    if (!changed) return;
+
+    this.player.reset();
+    this.overlay.hideMarker();
+    this.title = ctx ? this.adapter.title() : '';
+    this.postPanels({ type: 'context', ctx, title: this.title });
+    if (ctx) {
+      this.watchTitle();
+      await this.bg({ type: 'player:ready', ctx, title: this.title }).catch(() => undefined);
+    } else {
+      if (this.drawer.isOpen) this.closeDrawer();
+      await this.bg({ type: 'player:gone' }).catch(() => undefined);
+    }
+  }
+
+  /** SPAs update the title some time after the URL: follow it for a few seconds. */
+  private watchTitle(): void {
+    if (this.titleWatch) clearInterval(this.titleWatch);
+    let ticks = 0;
+    this.titleWatch = setInterval(() => {
+      const title = this.adapter.title();
+      if (this.ctx && title && title !== this.title) {
+        this.title = title;
+        this.postPanels({ type: 'context', ctx: this.ctx, title });
+        void this.bg({ type: 'player:ready', ctx: this.ctx, title }).catch(() => undefined);
+      }
+      if (++ticks >= 15 && this.titleWatch) {
+        clearInterval(this.titleWatch);
+        this.titleWatch = null;
+      }
+    }, 1000);
+  }
+
+  /** Opens `URL#t=255` links (the format of copied timestamps) at the right time on every platform. */
+  private maybeSeekFromUrl(): void {
+    const href = location.href;
+    if (this.seekedFromUrl.has(href)) return;
+    this.seekedFromUrl.add(href);
+    const hashTime = new URLSearchParams(new URL(href).hash.slice(1)).get('t');
+    // YouTube already honours its own `?t=` parameter.
+    if (hashTime === null && this.adapter.platform === 'youtube') return;
+    const target = readStartTime(href);
+    if (target === null) return;
+    let tries = 0;
+    const attempt = () => {
+      const v = this.player.current;
+      if (v && v.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        if (Math.abs(v.currentTime - target) > 1.5) this.player.seek(target);
+        return;
+      }
+      if (++tries < 40 && !this.dead) setTimeout(attempt, 500);
+    };
+    attempt();
+  }
+
+  private markInteraction(): void {
+    const now = Date.now();
+    if (!this.ctx || now - this.lastInteraction < 3000) return;
+    this.lastInteraction = now;
+    void this.bg({ type: 'player:interaction' }).catch(() => undefined);
+  }
+
+  // --- Commands -------------------------------------------------------------------------
+
+  private async onCommand(command: CommandId): Promise<void> {
+    if (!this.ctx) {
+      this.overlay.toast('Boo Notes : aucune vidéo détectée sur cette page', 'error');
+      return;
+    }
+    this.markInteraction();
+    switch (command) {
+      case 'toggle-sidebar':
+        // With a pop-out, the background switches window focus instead.
+        if (!this.popoutPort) {
+          if (this.drawer.isOpen) this.closeDrawer();
+          else this.openDrawer('keep');
+        }
+        break;
+      case 'insert-timestamp':
+        await this.insertTimestamp();
+        break;
+      case 'capture-screenshot':
+        await this.capture();
+        break;
+      case 'smart-pause':
+        await this.smartPause();
+        break;
+      case 'replay':
+        this.replay();
+        break;
+    }
+  }
+
+  private openDrawer(focus: 'keep' | 'end' | null): void {
+    if (this.popoutPort) return;
+    this.drawer.open();
+    this.postPanels({ type: 'page-theme', theme: detectPageTheme(this.adapter) });
+    if (focus) {
+      this.drawer.focus();
+      void this.embedded().then((port) => port.postMessage({ type: 'focus', where: focus } satisfies ContentToPanel));
+    }
+  }
+
+  private closeDrawer(): void {
+    this.drawer.close();
+    this.overlay.hideMarker();
+    queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
+  }
+
+  private embedded(): Promise<Port> {
+    if (this.embeddedPort) return Promise.resolve(this.embeddedPort);
+    return new Promise((resolve) => this.embeddedWaiters.push(resolve));
+  }
+
+  /** The editor that receives keyboard input: the pop-out if any, else the (opened) drawer. */
+  private async inputEditor(): Promise<Port> {
+    if (this.popoutPort) return this.popoutPort;
+    if (!this.drawer.isOpen) this.openDrawer(null);
+    this.drawer.focus();
+    return this.embedded();
+  }
+
+  private async insertTimestamp(): Promise<void> {
+    const seconds = this.player.time();
+    const port = await this.inputEditor();
+    port.postMessage({ type: 'insert-timestamp', seconds, focus: true } satisfies ContentToPanel);
+  }
+
+  private async smartPause(): Promise<void> {
+    this.player.pause();
+    this.postPanels({ type: 'typing-release' });
+    const port = await this.inputEditor();
+    port.postMessage({ type: 'focus', where: 'end' } satisfies ContentToPanel);
+  }
+
+  private replay(): void {
+    if (!this.player.current) {
+      this.overlay.toast('Aucune vidéo à rembobiner', 'error');
+      return;
+    }
+    const t = this.player.skip(-this.settings.replaySeconds);
+    this.overlay.toast(`${formatTimecode(t)} - Retour de ${this.settings.replaySeconds} s`);
+  }
+
+  private async copyTimestamp(): Promise<void> {
+    if (!this.ctx) return;
+    const t = this.player.time();
+    const tc = formatTimecode(t);
+    try {
+      await navigator.clipboard.writeText(`[${tc}](${timestampUrl(this.ctx.canonicalUrl, t)})`);
+      this.overlay.toast(`${tc} - Lien horodaté copié`, 'success');
+    } catch {
+      this.overlay.toast('Copie impossible (presse-papier refusé)', 'error');
+    }
+  }
+
+  /** Flow 2: frame capture → flash → asset stored → thumbnail line in the note → toast. */
+  private async capture(): Promise<void> {
+    const video = this.player.current;
+    const ctx = this.ctx;
+    if (!ctx || !video) {
+      this.overlay.toast('Aucune vidéo à capturer', 'error');
+      return;
+    }
+    if (this.capturing) return;
+    this.capturing = true;
+    const seconds = video.currentTime;
+    const { captureFormat: mime, captureQuality: quality } = this.settings;
+    try {
+      const probe = probeFrame(video);
+      if (probe === 'not-ready') throw new Error('la vidéo n’est pas encore chargée');
+      let shot: Shot;
+      let warning = '';
+      if (probe === 'ok') {
+        const pending = captureVideoFrame(video, mime, quality); // frame drawn synchronously
+        this.overlay.flash();
+        shot = await pending;
+      } else {
+        // Cross-origin source (tainted canvas) or black frame (DRM): screenshot the visible area instead.
+        try {
+          shot = await this.captureVisibleArea(mime, quality);
+        } catch (e) {
+          if (probe !== 'blank') throw e;
+          shot = await captureVideoFrame(video, mime, quality);
+          warning = ' (image noire : contenu protégé ?)';
+        }
+        this.overlay.flash();
+      }
+      const { path } = await this.bg({
+        type: 'asset:save',
+        noteId: ctx.noteId,
+        dataUrl: shot.dataUrl,
+        mime: shot.mime,
+        width: shot.width,
+        height: shot.height,
+        time: seconds,
+      });
+      const line = captureLine(seconds, path);
+      const port = this.popoutPort ?? this.embeddedPort;
+      if (port && this.ctx?.noteId === ctx.noteId) {
+        port.postMessage({ type: 'insert-block', text: line } satisfies ContentToPanel);
+      } else {
+        await this.bg({
+          type: 'note:append',
+          noteId: ctx.noteId,
+          meta: { platform: ctx.platform, url: ctx.canonicalUrl, title: this.title },
+          text: line,
+        });
+      }
+      this.overlay.toast(`${formatTimecode(seconds)} - Capture sauvegardée${warning}`, warning ? 'error' : 'success');
+    } catch (e) {
+      this.overlay.toast(`Capture impossible : ${errorMessage(e)}`, 'error', 3500);
+    } finally {
+      this.capturing = false;
+    }
+  }
+
+  private async captureVisibleArea(mime: string, quality: number): Promise<Shot> {
+    if (document.visibilityState !== 'visible') throw new Error('l’onglet vidéo doit être visible');
+    const rect = this.player.contentRect();
+    if (!rect) throw new Error('vidéo introuvable');
+    this.overlay.setHidden(true);
+    try {
+      await nextFrame();
+      await nextFrame();
+      const res = await this.bg({
+        type: 'capture:visible-tab',
+        rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+        viewportWidth: innerWidth,
+        mime,
+        quality,
+      });
+      return { ...res, mime };
+    } finally {
+      this.overlay.setHidden(false);
+    }
+  }
+
+  private setPinned(pinned: boolean): void {
+    this.pinned = pinned;
+    try {
+      if (pinned) sessionStorage.setItem(PINNED_KEY, '1');
+      else sessionStorage.removeItem(PINNED_KEY);
+    } catch {
+      // Storage unavailable: pinning only lasts for this page.
+    }
+    this.overlay.setPinned(pinned);
+    this.postPanels({ type: 'pinned', value: pinned });
+    if (pinned && this.ctx && !this.drawer.isOpen && !this.popoutPort) this.openDrawer(null);
+  }
+
+  // --- Panels (drawer iframe / pop-out window) ------------------------------------------
+
+  private postPanels(msg: ContentToPanel): void {
+    for (const port of [this.embeddedPort, this.popoutPort]) {
+      try {
+        port?.postMessage(msg);
+      } catch {
+        // Port closed in the meantime.
+      }
+    }
+  }
+
+  private broadcastPlayback(): void {
+    this.postPanels({ type: 'playback', playback: this.player.playback(), hasVideo: this.player.current !== null });
+  }
+
+  private onPanelMessage(port: Port, msg: PanelToContent): void {
+    switch (msg.type) {
+      case 'hello':
+        if (msg.mode === 'popout') {
+          this.popoutPort = port;
+          this.drawer.destroyFrame();
+          this.embeddedPort = null;
+        } else {
+          this.embeddedPort = port;
+          for (const resolve of this.embeddedWaiters.splice(0)) resolve(port);
+        }
+        port.postMessage({
+          type: 'init',
+          ctx: this.ctx,
+          title: this.title,
+          pinned: this.pinned,
+          hasVideo: this.player.current !== null,
+          playback: this.player.playback(),
+          pageTheme: detectPageTheme(this.adapter),
+        } satisfies ContentToPanel);
+        return;
+      case 'seek':
+        this.player.seek(msg.seconds);
+        this.broadcastPlayback();
+        break;
+      case 'mark':
+        if (msg.seconds === null) this.overlay.hideMarker();
+        else this.overlay.showMarker(msg.seconds);
+        return;
+      case 'play':
+        this.player.play();
+        break;
+      case 'pause':
+        this.player.pause();
+        break;
+      case 'capture':
+        void this.capture();
+        break;
+      case 'replay':
+        this.replay();
+        break;
+      case 'timestamp':
+        port.postMessage({ type: 'insert-timestamp', seconds: this.player.time(), focus: true } satisfies ContentToPanel);
+        break;
+      case 'escape':
+        if (port === this.popoutPort) return;
+        if (this.pinned) {
+          this.drawer.blurToPage();
+          queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
+        } else {
+          this.closeDrawer();
+        }
+        return;
+      case 'close':
+        if (port !== this.popoutPort) this.closeDrawer();
+        return;
+      case 'pin':
+        this.setPinned(msg.value);
+        return;
+      case 'popout':
+        if (this.ctx) {
+          void this.bg({ type: 'popout:open', noteId: this.ctx.noteId }).catch((e: unknown) =>
+            this.overlay.toast(`Pop-out impossible : ${errorMessage(e)}`, 'error'),
+          );
+        }
+        return;
+      case 'dock':
+        void this.bg({ type: 'popout:close', tabId: this.tabId }).catch(() => undefined);
+        this.popoutPort = null;
+        this.openDrawer('keep');
+        return;
+      case 'toast':
+        this.overlay.toast(msg.text);
+        return;
+      case 'command':
+        if (isCommand(msg.command)) void this.onCommand(msg.command);
+        return;
+    }
+    this.markInteraction();
+  }
+}
+
+const adapter = adapterForHost(location.hostname);
+if (adapter && window.top === window) {
+  // Tear down a previous copy (extension reloaded, or injected twice).
+  document.dispatchEvent(new CustomEvent(TEARDOWN_EVENT));
+  const app = new ContentApp(adapter);
+  app.start().catch((e: unknown) => console.warn('[Boo Notes]', errorMessage(e)));
+}

@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "name": "Boo Notes",
+  "short_name": "Boo Notes",
+  "version": "0.0.0",
+  "description": "Prise de notes horodatées et captures d’écran au clavier sur YouTube, Udemy et Coursera.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Boo Notes — ouvrir / réduire les notes",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "alarms",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.udemy.com/*",
+    "*://*.coursera.org/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.udemy.com/*",
+        "*://*.coursera.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel/panel.html",
+        "panel/panel.js",
+        "panel/panel.css",
+        "tokens.css"
+      ],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.udemy.com/*",
+        "*://*.coursera.org/*"
+      ]
+    }
+  ],
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "toggle-sidebar": {
+      "suggested_key": {
+        "default": "Alt+Shift+N"
+      },
+      "description": "Ouvrir / réduire le panneau de notes"
+    },
+    "insert-timestamp": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Insérer l’horodatage courant au curseur"
+    },
+    "capture-screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Capturer l’image de la vidéo"
+    },
+    "smart-pause": {
+      "suggested_key": {
+        "default": "Alt+Shift+Space"
+      },
+      "description": "Mettre en pause et écrire (Smart Pause)"
+    },
+    "replay": {
+      "description": "Reculer de 5 secondes (Alt+← dans la page par défaut)"
+    }
+  }
+}
