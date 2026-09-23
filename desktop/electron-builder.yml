@@ -1,0 +1,52 @@
+# Installateurs de Boo Notes Desktop. Windows : `npm run dist:win` (NSIS x64 ; ajoutez `--arm64` pour ARM).
+# Le programme d'installation se construit sous Windows (voir .github/workflows/desktop.yml).
+appId: app.boonotes.desktop
+productName: Boo Notes
+copyright: Copyright © 2026 Boo Notes
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - '!dist/**/*.map'
+  - package.json
+asar: true
+# Everything is bundled by esbuild: no runtime node_modules.
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: Boo-Notes-Setup-${version}-${arch}.${ext}
+  # Windows SmartScreen shows "Unknown publisher" until the installer is signed
+  # (set CSC_LINK / CSC_KEY_PASSWORD in CI to sign).
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Boo Notes
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  uninstallDisplayName: Boo Notes
+  # French installer UI.
+  installerLanguages: [fr_FR]
+  language: '1036'
+  # Notes live in the user's folder: never deleted on uninstall.
+  deleteAppDataOnUninstall: false
+
+mac:
+  target: [dmg]
+  icon: build/icon.png
+  category: public.app-category.education
+
+linux:
+  target: [AppImage]
+  icon: build/icon.png
+  category: Education

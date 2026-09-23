@@ -15,16 +15,14 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "test:ui": "npm run build && playwright test",
-    "mock:notion": "node tools/mock-notion.mjs",
     "icons": "node scripts/make-ico.mjs",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "mock:notion": "node tools/mock-notion.mjs",
+    "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never"
   },
-  "dependencies": {
-    "ws": "^8.21.3"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
+    "@playwright/test": "1.56.1",
     "@types/node": "^26.6.2",
     "@types/ws": "^8.18.1",
     "electron": "^44.4.5",
@@ -32,6 +30,7 @@
     "esbuild": "^0.28.2",
     "pdfjs-dist": "^6.3.289",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "ws": "^8.21.3"
   }
 }

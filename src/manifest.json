@@ -58,6 +58,7 @@
       "resources": [
         "panel/panel.html",
         "panel/panel.js",
+        "panel/editor.css",
         "panel/panel.css",
         "tokens.css"
       ],

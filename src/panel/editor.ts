@@ -29,7 +29,7 @@ import {
 import { tags as t } from '@lezer/highlight';
 import type { Tree } from '@lezer/common';
 import { shouldAutoStamp } from '../shared/autostamp';
-import { findTimestamps, timestampToken, type TimestampMatch } from '../shared/markdown';
+import { findPageRefs, findTimestamps, timestampToken, type TimestampMatch } from '../shared/markdown';
 import { parseTimecode } from '../shared/time';
 
 export interface EditorHooks {
@@ -48,6 +48,13 @@ export interface EditorHooks {
   /** Ctrl/⌘ + / : keyboard shortcuts sheet. */
   onHelp(): void;
   loadAsset(path: string): Promise<string>;
+  /**
+   * Token prefixed to a new line (Flow 1). Defaults to the timestamp of `now()`;
+   * documents return a page reference (`[p. 12]`).
+   */
+  stampToken?(): string | null;
+  /** Click on a `[p. N]` chip (PDF notes). */
+  onPageRefClick?(page: number): void;
 }
 
 export interface NoteMarker {
@@ -205,6 +212,21 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
         }
       }
       const stamps = findTimestamps(line.text, line.from);
+      const pages = findPageRefs(line.text, line.from);
+      if (!capture && pages[0]?.from === line.from && !inCode(tree, line.from)) {
+        out.push(Decoration.line({ class: 'cm-boo-stamped' }).range(line.from));
+      }
+      for (const p of pages) {
+        if (inCode(tree, p.from)) continue;
+        out.push(
+          Decoration.mark({
+            class: 'cm-boo-ts cm-boo-page',
+            attributes: { 'data-page': String(p.page), title: `Aller à la page ${p.page} (Alt+clic pour éditer)` },
+          }).range(p.from, p.to),
+        );
+        const touched = view.hasFocus && state.selection.ranges.some((r) => r.from <= p.to && r.to >= p.from);
+        if (!touched) out.push(hide.range(p.from, p.from + 1), hide.range(p.to - 1, p.to));
+      }
       if (!capture && stamps[0]?.from === line.from && !inCode(tree, line.from)) {
         // Transcript layout: wrapped text aligns after the leading timestamp.
         const cls = stamps[0].label.length > 5 ? 'cm-boo-stamped cm-boo-long' : 'cm-boo-stamped';
@@ -352,17 +374,19 @@ export class NotesEditor {
           const target = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t]');
           if (!target || e.altKey || e.button !== 0) return false;
           e.preventDefault();
-          hooks.onTimestampClick(Number(target.getAttribute('data-t')));
+          const page = target.getAttribute('data-page');
+          if (page !== null) hooks.onPageRefClick?.(Number(page));
+          else hooks.onTimestampClick(Number(target.getAttribute('data-t')));
           return true;
         },
         mouseover: (e) => {
-          const target = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t]');
+          const target = (e.target as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           if (target) hooks.onTimestampHover(Number(target.getAttribute('data-t')));
           return false;
         },
         mouseout: (e) => {
-          const from = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t]');
-          const to = (e.relatedTarget as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t]');
+          const from = (e.target as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
+          const to = (e.relatedTarget as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           if (from && from !== to) hooks.onTimestampHover(null);
           return false;
         },
@@ -441,7 +465,12 @@ export class NotesEditor {
 
   /** `[MM:SS] ` at the cursor (or on a new last line when the editor is not focused). */
   insertTimestamp(seconds: number, focus: boolean): void {
-    const token = `${timestampToken(seconds)} `;
+    this.insertToken(timestampToken(seconds), focus);
+  }
+
+  /** A stamp token (`[MM:SS]`, `[p. 12]`) followed by a space, at the cursor or on a new last line. */
+  insertToken(stamp: string, focus: boolean): void {
+    const token = `${stamp} `;
     const { state } = this.view;
     if (this.view.hasFocus) {
       const sel = state.selection.main;
@@ -466,10 +495,13 @@ export class NotesEditor {
     if (focus) this.view.focus();
   }
 
-  /** A whole line (screenshot): under the cursor line when editing, appended otherwise. */
-  insertBlock(text: string): void {
+  /**
+   * A whole line (screenshot, quote): under the cursor line when editing,
+   * appended otherwise (or always, with `at: 'end'`).
+   */
+  insertBlock(text: string, at: 'cursor' | 'end' = 'cursor'): void {
     const { state } = this.view;
-    if (this.view.hasFocus) {
+    if (at === 'cursor' && this.view.hasFocus) {
       const line = state.doc.lineAt(state.selection.main.head);
       const at = line.length === 0 ? line.from : line.to;
       let insert = (line.length === 0 ? '' : '\n') + text;
@@ -511,6 +543,20 @@ export class NotesEditor {
     if (pos !== state.field(nowLine).pos) this.view.dispatch({ effects: setNowLine.of(pos) });
   }
 
+  /** Document equivalent of `setPlaybackTime`: highlights the last note about `page` or before. */
+  setCurrentPage(page: number | null): void {
+    const { state } = this.view;
+    let pos: number | null = null;
+    if (page !== null) {
+      let best: { from: number; page: number } | null = null;
+      for (const m of findPageRefs(state.doc.toString())) {
+        if (m.page <= page && (!best || m.page >= best.page)) best = m;
+      }
+      pos = best?.from ?? null;
+    }
+    if (pos !== state.field(nowLine).pos) this.view.dispatch({ effects: setNowLine.of(pos) });
+  }
+
   private createState(doc: string): EditorState {
     return EditorState.create({ doc, selection: { anchor: doc.length }, extensions: this.extensions });
   }
@@ -518,12 +564,17 @@ export class NotesEditor {
   /** Flow 1: the first character typed on an empty line prefixes it with the video time. */
   private autoStamp(view: EditorView, from: number, to: number, text: string): boolean {
     if (from !== to || !this.hooks.autoTimestamp()) return false;
-    const seconds = this.hooks.now();
-    if (seconds === null) return false;
+    let token: string | null;
+    if (this.hooks.stampToken) token = this.hooks.stampToken();
+    else {
+      const seconds = this.hooks.now();
+      token = seconds === null ? null : timestampToken(seconds);
+    }
+    if (token === null) return false;
     const line = view.state.doc.lineAt(from);
     if (from !== line.to || !shouldAutoStamp(line.text, text)) return false;
     if (inCode(syntaxTree(view.state), Math.max(line.from, from - 1))) return false;
-    const stamp = `${timestampToken(seconds)} `;
+    const stamp = `${token} `;
     view.dispatch({
       changes: { from, to, insert: stamp + text },
       selection: { anchor: from + stamp.length + text.length },

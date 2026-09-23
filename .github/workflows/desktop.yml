@@ -1,0 +1,85 @@
+# Boo Notes Desktop: tests on Linux, Windows installer (NSIS) built on Windows.
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    tags: ['desktop-v*']
+    paths:
+      - 'desktop/**'
+      - 'src/shared/**'
+      - 'src/panel/editor.ts'
+      - 'src/panel/editor.css'
+      - 'src/tokens.css'
+      - 'src/background/sync.ts'
+      - 'scripts/icon-art.mjs'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'src/shared/**'
+      - 'src/panel/editor.ts'
+      - 'src/panel/editor.css'
+      - 'src/tokens.css'
+      - 'src/background/sync.ts'
+      - 'scripts/icon-art.mjs'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      # The desktop UI reuses the extension editor (CodeMirror is installed at the root).
+      - run: npm ci
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run typecheck
+        working-directory: desktop
+      - run: npm test
+        working-directory: desktop
+      - name: Interface tests (Electron under Xvfb)
+        working-directory: desktop
+        run: |
+          npm run build
+          xvfb-run -a npx playwright test
+
+  windows:
+    name: Installer (Windows x64)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run dist:win
+        working-directory: desktop
+        env:
+          # Optional code signing: set these repository secrets to sign the installer.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Boo-Notes-Setup-Windows
+          path: desktop/release/*.exe
+          if-no-files-found: error

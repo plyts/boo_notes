@@ -114,6 +114,42 @@ const ICONS = {
     ['path', { d: 'M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z' }],
     ['circle', { cx: '12', cy: '12', r: '2.5' }],
   ],
+  more: [
+    ['circle', { cx: '5.5', cy: '12', r: '1.2' }],
+    ['circle', { cx: '12', cy: '12', r: '1.2' }],
+    ['circle', { cx: '18.5', cy: '12', r: '1.2' }],
+  ],
+  trash: [
+    ['path', { d: 'M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5' }],
+    ['path', { d: 'M10 11v5M14 11v5' }],
+  ],
+  library: [
+    ['rect', { x: '4', y: '4', width: '4', height: '16', rx: '1' }],
+    ['rect', { x: '10', y: '4', width: '4', height: '16', rx: '1' }],
+    ['path', { d: 'M16.5 5.2l3.8-1 3.2 15.5-3.8 1z' }],
+  ],
+  book: [
+    ['path', { d: 'M12 6.5C10 5 7 4.5 3.5 5v13c3.5-.5 6.5 0 8.5 1.5 2-1.5 5-2 8.5-1.5V5C17 4.5 14 5 12 6.5z' }],
+    ['path', { d: 'M12 6.5v13' }],
+  ],
+  highlight: [
+    ['path', { d: 'M14.5 4.5l5 5-8 8H6.5v-5z' }],
+    ['path', { d: 'M4 20.5h16' }],
+  ],
+  sun: [
+    ['circle', { cx: '12', cy: '12', r: '4' }],
+    ['path', { d: 'M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4' }],
+  ],
+  link: [
+    ['path', { d: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1' }],
+    ['path', { d: 'M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1' }],
+  ],
+  fit: [
+    ['path', { d: 'M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4' }],
+  ],
+  flag: [
+    ['path', { d: 'M5 21V4M5 4h11l-2 4 2 4H5' }],
+  ],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

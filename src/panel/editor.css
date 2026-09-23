@@ -1,0 +1,154 @@
+/*
+ * Notes editor (CodeMirror live preview): timestamp and page chips, capture
+ * cards, "now" line. Shared by the extension panel and the desktop app.
+ */
+
+/* Timestamp chips */
+.cm-boo-ts {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--ts-bg);
+  color: var(--ts-text);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+/* Syntax-highlight spans nested in the chip must not override its colour. */
+.cm-boo-ts * {
+  color: inherit !important;
+}
+
+.cm-boo-ts:hover {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+/* Page references ([p. 12]) of PDF notes. */
+.cm-boo-page::before {
+  content: '¶ ';
+  opacity: 0.7;
+}
+
+/* Transcript layout: wrapped lines align after the leading timestamp. */
+.cm-content {
+  --stamp-indent: 52px;
+}
+
+.cm-line.cm-boo-stamped {
+  padding-left: calc(var(--stamp-indent) + 2px) !important;
+  text-indent: calc(-1 * var(--stamp-indent));
+}
+
+.cm-line.cm-boo-stamped.cm-boo-long {
+  --stamp-indent: 66px;
+}
+
+.cm-line.cm-boo-stamped + .cm-line.cm-boo-stamped {
+  margin-top: 2px;
+}
+
+/* Capture cards */
+.cm-boo-capture-line {
+  padding-top: 4px !important;
+  padding-bottom: 6px !important;
+}
+
+.cm-boo-img {
+  position: relative;
+  display: block;
+  margin: 2px 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-s);
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) ease;
+}
+
+.cm-boo-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cm-boo-img:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow);
+}
+
+.cm-boo-img-tc,
+.cm-boo-img-replay {
+  position: absolute;
+  bottom: 8px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.72);
+  color: #fff;
+  font: 600 11px / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(6px);
+}
+
+.cm-boo-img-tc {
+  left: 8px;
+}
+
+.cm-boo-img-replay {
+  right: 8px;
+  font-family: var(--font-sans);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+
+.cm-boo-img-replay::before {
+  content: '▶';
+  margin-right: 5px;
+  font-size: 9px;
+}
+
+.cm-boo-img:hover .cm-boo-img-replay {
+  opacity: 1;
+  transform: none;
+}
+
+.cm-boo-img.missing {
+  display: grid;
+  place-items: center;
+  aspect-ratio: auto;
+  padding: 12px;
+  color: var(--faint);
+  font-size: var(--text-s);
+}
+
+/* "Now playing" line — drawn in the content padding so list markers stay visible. */
+.cm-boo-now {
+  background: var(--now-bg);
+  box-shadow:
+    -6px 0 0 var(--now-bg),
+    -9px 0 0 var(--now-border);
+  border-radius: 0 4px 4px 0;
+}
+
+.cm-boo-quote {
+  box-shadow: inset 3px 0 0 var(--border);
+  padding-left: 12px !important;
+  color: var(--muted);
+}
+
+.cm-boo-codeblock {
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.cm-boo-h {
+  padding-top: 8px !important;
+}

@@ -34,7 +34,7 @@ async function copyStatic() {
   if (e2e) manifest.host_permissions.push('*://*.test/*');
   await mkdir(out, { recursive: true });
   await writeFile(join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  for (const rel of ['panel/panel.html', 'panel/panel.css', 'options/options.html', 'options/options.css', 'tokens.css']) {
+  for (const rel of ['panel/panel.html', 'panel/panel.css', 'panel/editor.css', 'options/options.html', 'options/options.css', 'tokens.css']) {
     await mkdir(dirname(join(out, rel)), { recursive: true });
     await cp(join(src, rel), join(out, rel));
   }
