@@ -4,31 +4,35 @@
 +----------------------------------------------------------------------------------+
 |                               EXTENSION NAVIGATEUR                               |
 |                                                                                  |
-|  Onglet vidéo (youtube / udemy / coursera)                                       |
+|  Onglet (YouTube, Udemy, Coursera, Notion, tout site activé)                     |
 |  +-------------------------------------------+                                   |
 |  | Content script (src/content)              |   runtime.sendMessage             |
-|  |  - VideoController : <video>, temps, seek | --------------------+             |
+|  |  - MediaController : <video> / <audio>    | --------------------+             |
 |  |  - Overlay (Shadow DOM) : HUD, toasts,    |                     v             |
 |  |    flash, marqueur de progression         |   +----------------------------+  |
 |  |  - Drawer : conteneur + <iframe> panneau  |   | Service worker             |  |
 |  |  - Capture <canvas>                       |   | (src/background)           |  |
 |  |  - Raccourcis de secours dans la page     |   |  - chrome.commands         |  |
 |  +-------------------------------------------+   |  - routage lecteur actif   |  |
-|        ^  port (chrome.tabs.connect)             |  - NoteStore (storage)     |  |
-|        v                                         |  - export / téléchargement |  |
-|  +-------------------------------------------+   |  - DesktopSync (WebSocket) |  |
-|  | Panneau (src/panel, page d’extension)     |   +----------------------------+  |
-|  |  iframe du drawer OU fenêtre pop-out      | ---- note:save / get ---^   |     |
-|  |  - éditeur CodeMirror 6                   |                             |     |
+|        ^  port (chrome.tabs.connect)             |  - injection à la demande  |  |
+|        v                                         |  - NoteStore (storage)     |  |
+|  +-------------------------------------------+   |  - export / téléchargement |  |
+|  | Panneau (src/panel, page d’extension)     |   |  - DesktopSync (WebSocket) |  |
+|  |  iframe du drawer OU fenêtre pop-out      |   +----------------------------+  |
+|  |  - éditeur CodeMirror 6 (partagé Desktop) | ---- note:save / get ---^   |     |
 |  |  - badge sync, export, pin, pop-out       |                             |     |
 |  +-------------------------------------------+                             |     |
 +----------------------------------------------------------------------------|-----+
-                                                  WebSocket ws://localhost:43117
+                                    WebSocket ws://localhost:43117 + jeton   |
                                                                              v
-                                                        +-----------------------------+
-                                                        |     APPLICATION DESKTOP     |
-                                                        |  (Stockage / Notion Sync)   |
-                                                        +-----------------------------+
++----------------------------------------------------------------------------------+
+|                       BOO NOTES DESKTOP (desktop/, Electron)                     |
+|  core/server.ts  ── notes, captures, progression ──► core/library.ts             |
+|                                                      (dossier Markdown + .boo/)  |
+|  Lecteur PDF (pdf.js), lecteur audio / vidéo  ─────►        |                    |
+|                                                             v                    |
+|                                           core/notion/sync.ts ──HTTPS──► Notion  |
++----------------------------------------------------------------------------------+
 ```
 
 ## Rôles
@@ -36,11 +40,31 @@
 | Contexte | Fichier d’entrée | Responsabilités |
 | --- | --- | --- |
 | **Service worker** | `src/background/index.ts` | Reçoit les raccourcis globaux (`chrome.commands`) et le clic sur l’icône ; choisit le lecteur cible ; seul écrivain du stockage (`NoteStore`) ; captures de repli (`captureVisibleTab`) ; export `.md` ; fenêtre pop-out ; synchronisation Desktop (`DesktopSync`). |
-| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection de la vidéo et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, exécution des commandes. |
+| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes. |
 | **Panneau** | `src/panel/index.ts` | Éditeur de notes ; tourne soit dans l’iframe du drawer, soit dans la fenêtre pop-out. Communique avec le script de contenu de l’onglet vidéo par un *port*. |
 | **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données. |
 
-La logique pure est dans `src/shared/` et couverte par les tests unitaires.
+La logique pure est dans `src/shared/` et couverte par les tests unitaires. L’application Desktop
+(`desktop/`, voir [DESKTOP.md](DESKTOP.md)) réutilise `src/shared/`, l’éditeur `src/panel/editor.ts`
+et les jetons `src/tokens.css`.
+
+## Médias et sites pris en charge
+
+| Source | Détection | Note |
+| --- | --- | --- |
+| YouTube, Udemy, Coursera | URL (script déclaré dans le manifeste) | `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<leçon>` |
+| Page Notion avec un bloc vidéo / audio | `notion.so` / `notion.site` (script déclaré), identifiant de page dans l’URL (`?p=` pour une page ouverte en aperçu) | `notion:<id de page>` |
+| Tout autre site (podcast, radio, plateforme de cours) | Injection **à la demande** : icône de l’extension ou `Alt+Shift+N` (`activeTab` + `scripting.executeScript`) ; « Toujours activer ici » demande la permission du site (`optional_host_permissions`) et enregistre un script de contenu dynamique | `web:<hôte><chemin>` (paramètres de suivi `utm_*`, `fbclid`… retirés) |
+
+`MediaController` choisit la plus grande `<video>` visible, sinon un `<audio>` (même caché) qui
+joue ou a une source ; une vidéo sans image (`videoWidth = 0`) est traitée comme un audio. Pour un
+audio, la capture est désactivée (message explicite) ; horodatage, auto-pause, saut arrière et
+progression fonctionnent à l’identique. Sur Notion et les sites génériques, une page n’a de note que
+si elle contient un média (`requiresMedia`).
+
+La **progression** (position / durée) d’un média qui a une note est enregistrée à la pause, à la
+fin, après un saut, toutes les 15 s de lecture et à la fermeture de la page, puis envoyée à
+l’application Desktop (`media.progress`).
 
 ## Pourquoi un `<iframe>` pour l’éditeur
 
@@ -111,8 +135,12 @@ macOS Option).
 | `notes:index` | résumé de chaque note (page d’options) |
 | `sync:outbox` | `{ noteId: rev }` en attente d’acquittement Desktop |
 | `sync:assets` | captures déjà envoyées |
+| `progress:<noteId>` | dernière position de lecture `{ position, duration, updatedAt }` |
+| `sync:progress` | positions pas encore envoyées à l’application Desktop |
+| `sites:enabled` | origines où Boo Notes s’active à chaque visite |
 
-`noteId` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<item>` — une note par vidéo.
+`noteId` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<item>`, `notion:<page>`,
+`web:<hôte><chemin>` — une note par vidéo / audio.
 Les écritures passent toutes par le SW et sont sérialisées ; `rev` croît à chaque sauvegarde, ce
 qui permet à un second éditeur (pop-out) d’ignorer ses propres échos et d’appliquer les autres.
 
@@ -132,7 +160,12 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
 
 - Le port du panneau n’est accepté que depuis l’extension elle-même (`sender.id`).
 - Les pages ne peuvent pas envoyer de messages à l’extension (`externally_connectable` absent).
-- Le panneau n’est *web accessible* que sur les trois plateformes.
+- Le panneau est *web accessible* sur tous les sites (il doit pouvoir s’afficher sur un site activé
+  à la demande) : un site peut donc détecter que l’extension est installée. `use_dynamic_url` éviterait
+  cette détection mais empêche l’écriture dans le presse-papier depuis le panneau (constaté sur Chromium 141).
+- Aucun site n’est lu sans action de l’utilisateur : hors YouTube / Udemy / Coursera / Notion, le
+  script n’est injecté qu’après un clic sur l’icône ou un raccourci (`activeTab`), ou sur un site
+  explicitement autorisé (« Toujours activer ici », permission révocable dans les réglages).
 - L’adresse Desktop est limitée à `localhost` / `127.0.0.1` ; jeton d’appairage ; l’application doit
   vérifier l’en-tête `Origin: chrome-extension://…` (voir [PROTOCOL.md](PROTOCOL.md)).
 - Les icônes sont construites en DOM (pas d’`innerHTML`), compatible Trusted Types (YouTube).

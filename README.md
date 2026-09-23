@@ -1,8 +1,16 @@
-# Boo Notes — extension navigateur (YouTube / Udemy / Coursera)
+# Boo Notes — notes horodatées pour vos cours
 
-Prise de notes horodatées **au clavier** pendant une vidéo : un panneau latéral rétractable, un
-horodatage automatique sur chaque ligne, des captures d’écran en résolution native insérées en
-vignette dans la note Markdown, et une synchronisation locale avec l’application Desktop.
+Prise de notes **au clavier** pendant une vidéo, un audio ou la lecture d’un PDF : chaque ligne est
+horodatée (ou rattachée à sa page), les captures d’écran arrivent en vignette dans la note Markdown,
+la progression de chaque cours est suivie, et tout se synchronise avec **Notion**.
+
+- **Extension navigateur** (Chrome, Edge, Brave…) : YouTube, Udemy, Coursera, vidéos et audios
+  déposés dans **Notion**, et n’importe quel site vidéo ou audio (podcasts, radios, plateformes
+  de cours) activé d’un clic.
+- **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : bibliothèque de tous vos
+  cours, lecteur **PDF** annoté (notes par page, surlignage, citations, suivi de lecture), lecteur
+  audio / vidéo local, dossier de notes Markdown, et synchronisation **Notion** : une page par
+  cours avec sa progression ([docs/NOTION.md](docs/NOTION.md)).
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
 
@@ -14,8 +22,13 @@ vignette dans la note Markdown, et une synchronisation locale avec l’applicati
 | --- | --- |
 | ![Réglages](docs/screenshots/options.png) | ![HUD](docs/screenshots/hud-floating.png) |
 
-Extension Chrome / Chromium **Manifest V3**, écrite en TypeScript, sans framework UI. L’éditeur
-s’appuie sur **CodeMirror 6** (Markdown « à la volée »).
+| Desktop : bibliothèque | Desktop : lecteur PDF annoté |
+| --- | --- |
+| ![Bibliothèque](docs/screenshots/desktop-library.png) | ![PDF](docs/screenshots/desktop-pdf.png) |
+
+Extension Chrome / Chromium **Manifest V3** et application **Electron**, écrites en TypeScript,
+sans framework UI. L’éditeur, partagé par les deux, s’appuie sur **CodeMirror 6** (Markdown « à la
+volée ») ; les PDF sont affichés avec **pdf.js**.
 
 ---
 
@@ -28,7 +41,9 @@ npm run build        # → dist/
 
 1. Ouvrir `chrome://extensions`, activer le **mode développeur**.
 2. **Charger l’extension non empaquetée** → sélectionner le dossier `dist/`.
-3. Ouvrir une vidéo YouTube, une leçon Udemy ou Coursera, puis `Alt+Shift+N`.
+3. Ouvrir une vidéo YouTube, une leçon Udemy ou Coursera, une page Notion contenant une vidéo ou
+   un audio, puis `Alt+Shift+N`. Sur tout autre site (podcast…), cliquer l’icône Boo Notes ou
+   `Alt+Shift+N` active l’extension pour l’onglet ; « Toujours activer ici » la garde pour le site.
 
 `npm run watch` reconstruit à chaque modification (recharger l’extension ensuite).
 
@@ -72,6 +87,17 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Desktop** | WebSocket local `ws://localhost:43117` + jeton d’appairage ; stockage `chrome.storage.local` d’abord, file d’envoi rejouée à la reconnexion. Voir [docs/PROTOCOL.md](docs/PROTOCOL.md). |
 | **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés. |
 
+### Formats et sources
+
+| | Extension | Application Desktop |
+| --- | --- | --- |
+| **Vidéo en ligne** | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé | Notes reçues de l’extension, « Reprendre à 21:00 » |
+| **Audio** | Podcasts, radios, audios Notion, tout `<audio>` : notes horodatées, auto-pause, saut arrière (capture désactivée) | MP3, M4A, WAV, OGG, Opus, FLAC… locaux |
+| **Vidéo locale** | — | MP4, WebM, MKV, MOV… avec captures |
+| **PDF** | — | Notes par page `[p. 12]`, surlignage 4 couleurs, citations, suivi de lecture |
+| **Progression** | Dernière position de chaque média noté (page d’options) | Bibliothèque « Reprendre », statut, temps d’étude |
+| **Notion** | Export › Notion (via l’application) | Base « Boo Notes — Cours », une page par cours, synchro automatique |
+
 ### Au-delà du cahier des charges (UX)
 
 | | |
@@ -92,17 +118,23 @@ Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes :
 Les liens copiés ou exportés ont la forme demandée `URL#t=255`. Le script de contenu les interprète à
 l’ouverture sur les trois plateformes (Udemy et Coursera ne gèrent pas ce fragment nativement).
 
-## Application Desktop
+## Application Desktop et Notion
 
-L’extension fonctionne entièrement hors-ligne. Quand l’application Desktop écoute sur
-`ws://localhost:43117`, les notes et captures lui sont envoyées (badge vert). Pour développer sans
-l’application réelle, un **mock** implémente le protocole et écrit les notes en Markdown :
+L’extension fonctionne entièrement hors-ligne. Quand **Boo Notes Desktop** tourne (zone de
+notification), les notes, captures et positions de lecture lui sont envoyées sur
+`ws://localhost:43117` (badge vert) : elles rejoignent la bibliothèque, le dossier de notes
+Markdown et, si Notion est connecté, la base de cours Notion.
+
+- Installation, utilisation, build de l’installeur Windows : [docs/DESKTOP.md](docs/DESKTOP.md)
+- Connexion à Notion en 3 étapes : [docs/NOTION.md](docs/NOTION.md)
+- Protocole extension ↔ application : [docs/PROTOCOL.md](docs/PROTOCOL.md)
+
+Pour développer l’extension sans l’application, un **mock** implémente le protocole et écrit les
+notes en Markdown :
 
 ```bash
 npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 ```
-
-Puis renseigner le jeton dans la page d’options de l’extension.
 
 ## Développement
 
@@ -114,6 +146,7 @@ Puis renseigner le jeton dans la page d’options de l’extension.
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
+| `cd desktop && npm start` | Application Desktop (voir [docs/DESKTOP.md](docs/DESKTOP.md) pour ses tests et l’installeur Windows) |
 
 Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Shift+T` (y compris le
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
@@ -122,7 +155,14 @@ chronologie (clic, aimantation, clavier), état vide et statistiques, feuille de
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu,
 synchronisation hors-ligne → en ligne avec le mock Desktop, jeton refusé, auto-pause, routage
-multi-onglets.
+multi-onglets, **podcast audio sur un site quelconque** (activation au raccourci, horodatage,
+progression, capture refusée), « Toujours activer ici » et page d’options, page sans média,
+**vidéo déposée dans une page Notion** (note et capture liées à la page).
+
+Côté Desktop : tests unitaires (bibliothèque, serveur WebSocket avec le vrai client de l’extension,
+conversion Markdown → Notion, synchronisation incrémentale contre une API Notion simulée) et tests
+d’interface Playwright + Electron (PDF, audio, vidéo, extension, Notion). La CI
+([.github/workflows/desktop.yml](.github/workflows/desktop.yml)) construit l’installeur Windows.
 
 ```
 src/
@@ -133,7 +173,8 @@ src/
   shared/       logique pure partagée (testée unitairement)
 tools/mock-desktop/   serveur WebSocket simulant l’application Desktop
 tests/unit, tests/e2e
-docs/         architecture, protocole, design
+desktop/      application Desktop (Electron) : core/ (bibliothèque, serveur, Notion), main/, preload/, renderer/
+docs/         architecture, protocole, design, Desktop, Notion
 ```
 
 ## Limites connues
@@ -156,4 +197,11 @@ docs/         architecture, protocole, design
 - **Noms de fichiers exportés** : si Chrome refuse les caractères accentués (certaines locales
   Linux), le dossier et le fichier sont renommés en ASCII (« Vidéo » → « Video »).
 - **Native Messaging** : non implémenté ; seul le WebSocket local l’est.
+- **Vidéos intégrées dans une page** (iframe YouTube dans Notion, lecteur embarqué d’un autre site) :
+  le script ne s’exécute que dans la page principale ; ouvrez la vidéo sur son site. Les vidéos et
+  audios **déposés** dans Notion (fichiers) sont, eux, pris en charge.
+- **Détection de l’extension** : le panneau étant accessible sur tous les sites (activation à la
+  demande), un site peut savoir que Boo Notes est installé (voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+- **Sélecteurs Notion** (blocs vidéo / audio) : écrits d’après le DOM connu, non vérifiés sur
+  notion.so depuis cet environnement ; à défaut, la plus grande vidéo ou l’audio de la page est utilisé.
 - Cible : Chrome / Chromium ≥ 116 (Edge, Brave… compatibles). Firefox demanderait des adaptations.
