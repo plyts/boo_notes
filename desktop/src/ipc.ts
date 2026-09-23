@@ -3,9 +3,9 @@
  * preload script as `window.boo`. Everything crossing it is plain data.
  */
 import type { Theme } from './core/config';
-import type { ActivePlayer, Highlight, LibraryItem, StudyStatus } from './core/types';
+import type { ActivePlayer, Highlight, LibraryItem, Pin, ReviewAction, StudyStatus } from './core/types';
 
-export type { ActivePlayer, Highlight, LibraryItem, StudyStatus, Theme };
+export type { ActivePlayer, Highlight, LibraryItem, Pin, ReviewAction, StudyStatus, Theme };
 
 /** A library item as displayed: derived status, progress and position label included. */
 export interface ItemView extends LibraryItem {
@@ -13,10 +13,14 @@ export interface ItemView extends LibraryItem {
   /** 0..1 */
   ratio: number;
   positionLabel: string;
+  /** A review is due today. */
+  due: boolean;
 }
 
 export interface NotionView {
   connected: boolean;
+  /** The Notion connection is shared with the paired extensions (sync while the app is closed). */
+  share: boolean;
   workspace: string | null;
   databaseUrl: string | null;
   autoSync: boolean;
@@ -46,6 +50,7 @@ export interface SettingsView {
 
 export type SettingsPatch = Partial<Pick<SettingsView, 'port' | 'openAtLogin' | 'closeToTray' | 'theme' | 'onboarded'>> & {
   notionAutoSync?: boolean;
+  notionShare?: boolean;
 };
 
 export interface AddResult {
@@ -76,6 +81,18 @@ export interface BooApi {
     reveal(id: string): Promise<void>;
     /** Opens the course page in the browser, at `seconds` when given. */
     openSource(id: string, seconds?: number): Promise<void>;
+    /** New revision sheet (or the existing note with this title). */
+    createNote(title: string, body?: string): Promise<ItemView>;
+    /** The note a `[[Titre]]` points to. */
+    findByTitle(title: string): Promise<ItemView | null>;
+    /** Notes linking to this one. */
+    backlinks(id: string): Promise<ItemView[]>;
+    /** Every note title (`[[` completion). */
+    titles(): Promise<string[]>;
+    review(id: string, action: ReviewAction): Promise<ItemView>;
+    setPins(id: string, pins: Pin[]): Promise<ItemView>;
+    /** Content of a local text document. */
+    readText(id: string): Promise<string>;
   };
   notion: {
     connect(token: string, target: string): Promise<SettingsView>;
@@ -100,6 +117,8 @@ export interface BooApi {
   on(event: 'status', cb: (status: AppStatus) => void): () => void;
   on(event: 'open-item', cb: (id: string) => void): () => void;
   on(event: 'navigate', cb: (view: 'settings' | 'library') => void): () => void;
+  /** The browser asked to open a note (`[[Titre]]` clicked in the extension). */
+  on(event: 'open-title', cb: (title: string) => void): () => void;
   /** Absolute path of a dropped file. */
   pathForFile(file: File): string;
 }
@@ -120,6 +139,13 @@ export const CHANNELS = {
   librarySaveCapture: 'library:save-capture',
   libraryReveal: 'library:reveal',
   libraryOpenSource: 'library:open-source',
+  libraryCreateNote: 'library:create-note',
+  libraryFindByTitle: 'library:find-by-title',
+  libraryBacklinks: 'library:backlinks',
+  libraryTitles: 'library:titles',
+  libraryReview: 'library:review',
+  librarySetPins: 'library:set-pins',
+  libraryReadText: 'library:read-text',
   notionConnect: 'notion:connect',
   notionDisconnect: 'notion:disconnect',
   notionSyncItem: 'notion:sync-item',

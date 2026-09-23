@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 /**
  * Markdown (as written in Boo Notes) → Notion blocks.
  *
@@ -24,10 +22,18 @@ export interface Annotations {
   code?: boolean;
 }
 
-export interface RichText {
-  type: 'text';
-  text: { content: string; link?: { url: string } | null };
-  annotations?: Annotations;
+export type RichText =
+  | { type: 'text'; text: { content: string; link?: { url: string } | null }; annotations?: Annotations }
+  | { type: 'mention'; mention: { type: 'page'; page: { id: string } }; annotations?: Annotations };
+
+/** Resolves `[[Titre]]` to the Notion page of that note (id), when it has one. */
+export interface InlineContext {
+  wiki?(title: string): string | null;
+}
+
+/** Link to a Notion page from its id. */
+export function notionPageUrl(id: string): string {
+  return `https://www.notion.so/${id.replace(/-/g, '')}`;
 }
 
 type TextBlockType =
@@ -56,9 +62,12 @@ const MAX_RICH = 100;
 
 const INLINE = new RegExp(
   [
+    '\\[\\[(?<wiki>[^\\[\\]\\n|]{1,200}?)(?:\\|(?<wikiAlias>[^\\[\\]\\n]{1,200}?))?\\]\\]',
     '(?<code>`+)(?<codeText>.+?)\\k<code>',
     '(?<!!)\\[(?<ts>(?:\\d+:)?\\d{1,3}:\\d{2})\\](?:\\((?<tsUrl>[^()\\s]*)\\))?',
     '(?<!!)\\[p\\.\\s?(?<page>\\d{1,5})\\]',
+    '(?<!!)\\[§\\s?(?<section>\\d{1,5})\\]',
+    '(?<!!)\\[pin\\s?(?<pin>\\d{1,4})\\]',
     '(?<!!)\\[(?<linkText>[^\\]\\n]+)\\]\\((?<linkUrl>[^()\\s]+)\\)',
     '<(?<auto>https?:\\/\\/[^>\\s]+)>',
     '\\*\\*(?<bold>.+?)\\*\\*',
@@ -80,36 +89,61 @@ export function safeUrl(url: string | null | undefined): string | null {
   }
 }
 
+function cleanAnnotations(annotations: Annotations): Annotations | undefined {
+  const ann = Object.fromEntries(Object.entries(annotations).filter(([, v]) => v)) as Annotations;
+  return Object.keys(ann).length ? ann : undefined;
+}
+
 function text(content: string, annotations: Annotations = {}, link: string | null = null): RichText[] {
   const out: RichText[] = [];
   for (let i = 0; i < content.length; i += MAX_TEXT) {
-    const rt: RichText = { type: 'text', text: { content: content.slice(i, i + MAX_TEXT) } };
+    const rt: Extract<RichText, { type: 'text' }> = { type: 'text', text: { content: content.slice(i, i + MAX_TEXT) } };
     if (link) rt.text.link = { url: link };
-    const ann = Object.fromEntries(Object.entries(annotations).filter(([, v]) => v)) as Annotations;
-    if (Object.keys(ann).length) rt.annotations = ann;
+    const ann = cleanAnnotations(annotations);
+    if (ann) rt.annotations = ann;
     out.push(rt);
   }
   return out;
 }
 
-export function parseInline(input: string, annotations: Annotations = {}, link: string | null = null): RichText[] {
+/** Plain text of rich text items (mentions excluded). */
+export function richPlainText(items: RichText[]): string {
+  return items.map((i) => (i.type === 'text' ? i.text.content : '')).join('');
+}
+
+export function parseInline(
+  input: string,
+  annotations: Annotations = {},
+  link: string | null = null,
+  ctx: InlineContext = {},
+): RichText[] {
   const out: RichText[] = [];
   let last = 0;
+  const inner = (t: string, a: Annotations, l: string | null) => parseInline(t, a, l, ctx);
   for (const m of input.matchAll(INLINE)) {
     const g = m.groups ?? {};
     const at = m.index ?? 0;
     if (at > last) out.push(...text(input.slice(last, at), annotations, link));
     last = at + m[0].length;
-    if (g.codeText !== undefined) out.push(...text(g.codeText.trim(), { ...annotations, code: true }, link));
+    if (g.wiki !== undefined) {
+      // [[Titre]]: a mention of the note's Notion page (Notion then lists the backlink), or plain text.
+      const title = g.wiki.trim();
+      const alias = g.wikiAlias?.trim();
+      const pageId = ctx.wiki?.(title) ?? null;
+      if (pageId && !alias && !link) out.push({ type: 'mention', mention: { type: 'page', page: { id: pageId } }, annotations: cleanAnnotations(annotations) });
+      else out.push(...text(alias || title, { ...annotations, bold: true }, pageId ? notionPageUrl(pageId) : link));
+    } else if (g.codeText !== undefined) out.push(...text(g.codeText.trim(), { ...annotations, code: true }, link));
     else if (g.ts !== undefined) out.push(...text(g.ts, { ...annotations, code: true }, safeUrl(g.tsUrl) ?? link));
     else if (g.page !== undefined) out.push(...text(`p. ${g.page}`, { ...annotations, code: true }, link));
-    else if (g.linkText !== undefined) out.push(...parseInline(g.linkText, annotations, safeUrl(g.linkUrl) ?? link));
+    else if (g.section !== undefined) out.push(...text(`§ ${g.section}`, { ...annotations, code: true }, link));
+    else if (g.pin !== undefined) out.push(...text(`◉ ${g.pin}`, { ...annotations, code: true }, link));
+    else if (g.linkText !== undefined) out.push(...inner(g.linkText, annotations, safeUrl(g.linkUrl) ?? link));
     else if (g.auto !== undefined) out.push(...text(g.auto, annotations, safeUrl(g.auto)));
     else if (g.bold !== undefined || g.bold2 !== undefined)
-      out.push(...parseInline(g.bold ?? g.bold2, { ...annotations, bold: true }, link));
-    else if (g.strike !== undefined) out.push(...parseInline(g.strike, { ...annotations, strikethrough: true }, link));
+      out.push(...inner(g.bold ?? g.bold2, { ...annotations, bold: true }, link));
+    else if (g.strike !== undefined) out.push(...inner(g.strike, { ...annotations, strikethrough: true }, link));
     else if (g.em !== undefined || g.em2 !== undefined)
-      out.push(...parseInline(g.em ?? g.em2, { ...annotations, italic: true }, link));
+      out.push(...inner(g.em ?? g.em2, { ...annotations, italic: true }, link));
   }
   if (last < input.length) out.push(...text(input.slice(last), annotations, link));
   return capRich(out);
@@ -118,10 +152,7 @@ export function parseInline(input: string, annotations: Annotations = {}, link: 
 /** Notion accepts at most 100 rich text items per block: the rest is merged as plain text. */
 function capRich(items: RichText[]): RichText[] {
   if (items.length <= MAX_RICH) return items;
-  const rest = items
-    .slice(MAX_RICH - 1)
-    .map((i) => i.text.content)
-    .join('');
+  const rest = richPlainText(items.slice(MAX_RICH - 1));
   return [...items.slice(0, MAX_RICH - 1), ...text(rest).slice(0, 1)];
 }
 
@@ -149,10 +180,13 @@ const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const DIVIDER = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const LIST = /^(\s*)([-*+]|\d{1,9}[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
+const parseInlineCtx = (t: string, a: Annotations, l: string | null, ctx: InlineContext) => parseInline(t, a, l, ctx);
+
 const IMAGE_LINE =
   /^\s*(?:\[((?:\d+:)?\d{1,3}:\d{2})\](?:\(([^()\s]*)\))?\s+)?!\[([^\]\n]*)\]\(([^()\s]+)\)\s*$/;
 
-export function markdownToBlocks(markdown: string): BlockSpec[] {
+export function markdownToBlocks(markdown: string, ctx: InlineContext = {}): BlockSpec[] {
+  const parseInline = (t: string) => parseInlineCtx(t, {}, null, ctx);
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const out: BlockSpec[] = [];
   let lastTopList: Extract<BlockSpec, { children?: BlockSpec[] }> | null = null;
@@ -279,9 +313,24 @@ export async function toNotion(spec: BlockSpec, upload: Uploader): Promise<Json>
   }
 }
 
-/** Stable fingerprint of a block (incremental sync). */
+/** Stable fingerprint of a block (incremental sync). Same value in Node and in the browser. */
 export function hashBlock(spec: BlockSpec): string {
-  return createHash('sha1').update(stableJson(spec)).digest('hex').slice(0, 16);
+  const json = stableJson(spec);
+  return `${cyrb53(json, 1).toString(16).padStart(14, '0')}${cyrb53(json, 2).toString(16).padStart(14, '0')}`;
+}
+
+/** cyrb53: fast 53-bit string hash (public domain). */
+function cyrb53(str: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
 function stableJson(value: unknown): string {

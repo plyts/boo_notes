@@ -250,6 +250,6 @@ test('Notion : connexion puis une page par cours', async ({ ctx }) => {
   // Manual sync from the menu.
   await page.locator('.notion-btn').click();
   await page.getByRole('menuitem', { name: 'Synchroniser maintenant' }).click();
-  await expect(page.locator('.toast', { hasText: 'Cours synchronisé avec Notion' })).toBeVisible();
+  await expect(page.locator('.toast', { hasText: 'Note synchronisée avec Notion' })).toBeVisible();
   expect(coursePages()).toHaveLength(1);
 });

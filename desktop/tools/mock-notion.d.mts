@@ -19,6 +19,7 @@ export interface MockNotion {
   readonly url: string;
   seedPage(id: string, title: string): void;
   pageContent(pageId: string): MockBlockView[] | null;
+  titleOf(pageId: string): string;
   close(): Promise<void>;
 }
 

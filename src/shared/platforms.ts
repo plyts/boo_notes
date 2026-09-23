@@ -15,14 +15,31 @@ export const PLATFORM_LABELS: Record<Platform, string> = {
   local: 'Fichier local',
 };
 
-/** What is being studied: time-based media (timestamps) or a document (page references). */
-export type MediaKind = 'video' | 'audio' | 'pdf';
+/**
+ * What is being studied, and therefore how notes are anchored to it:
+ * - `video`, `audio`: timestamps `[04:15]`;
+ * - `pdf`: pages `[p. 12]`;
+ * - `text` (local .txt / .md): paragraphs `[§ 12]`;
+ * - `image` (graph, diagram, whiteboard photo): numbered pins `[pin 3]`;
+ * - `page` (web article / text course): quoted passages linked with a text fragment `#:~:text=`;
+ * - `note`: a free revision sheet ("fiche"), linked to others with `[[Titre]]`.
+ */
+export type MediaKind = 'video' | 'audio' | 'pdf' | 'text' | 'image' | 'page' | 'note';
 
 export const KIND_LABELS: Record<MediaKind, string> = {
   video: 'Vidéo',
   audio: 'Audio',
   pdf: 'PDF',
+  text: 'Texte',
+  image: 'Image',
+  page: 'Page web',
+  note: 'Fiche',
 };
+
+/** Kinds whose position is a time (seconds). */
+export function isTimeKind(kind: MediaKind): boolean {
+  return kind === 'video' || kind === 'audio';
+}
 
 /** Identifies the media (and therefore the note) a page is about. */
 export interface VideoContext {

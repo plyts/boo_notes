@@ -20,6 +20,8 @@ export interface PdfViewerOptions {
   onHighlightsChange(highlights: Highlight[]): void;
   onQuote(text: string, page: number): void;
   onActivity(): void;
+  /** Note badge of a page clicked: show the notes of that page. */
+  onMarkerClick?(page: number): void;
 }
 
 interface PageSlot {
@@ -63,6 +65,7 @@ export class PdfViewer {
   private navigatingTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private selection: { text: string; page: number; rects: Highlight['rects'] } | null = null;
+  private noteCounts = new Map<number, number>();
   private selectedHighlight: Highlight | null = null;
 
   constructor(private readonly opts: PdfViewerOptions) {
@@ -140,6 +143,7 @@ export class PdfViewer {
     this.slots = Array.from({ length: this.doc.numPages }, (_, i) => this.createSlot(i + 1, vp.width, vp.height));
     this.slots[0].proxy = first;
     this.pagesEl.replaceChildren(...this.slots.map((s) => s.el));
+    for (const s of this.slots) this.renderBadge(s);
     this.observer = new IntersectionObserver((entries) => this.onVisible(entries), {
       root: this.scroller,
       rootMargin: '800px 0px',
@@ -185,6 +189,31 @@ export class PdfViewer {
   setFitWidth(): void {
     this.fitWidth = true;
     this.applyScale(this.fitScale());
+  }
+
+  /** Notes per page: a badge in the margin of each annotated page (click = show its notes). */
+  setNoteCounts(counts: Map<number, number>): void {
+    this.noteCounts = counts;
+    for (const s of this.slots) this.renderBadge(s);
+  }
+
+  private renderBadge(s: PageSlot): void {
+    const count = this.noteCounts.get(s.n) ?? 0;
+    let badge = s.el.querySelector('.pdf-note-badge') as HTMLButtonElement | null;
+    if (!count) {
+      badge?.remove();
+      return;
+    }
+    if (!badge) {
+      badge = h('button', { type: 'button', class: 'pdf-note-badge' });
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.opts.onMarkerClick?.(s.n);
+      });
+      s.el.append(badge);
+    }
+    badge.replaceChildren(icon('quote', 12), h('span', {}, String(count)));
+    badge.title = `${count} note${count > 1 ? 's' : ''} sur la page ${s.n} — cliquer pour les voir`;
   }
 
   /** Selected text (for "quote" / "highlight" shortcuts). */

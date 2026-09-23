@@ -42,6 +42,11 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
 
   function checkRichText(items, where) {
     for (const rt of items ?? []) {
+      if (rt?.type === 'mention') {
+        const id = rt.mention?.page?.id;
+        if (!id || !state.pages.has(compact(id))) throw fail(400, 'validation_error', `Could not find page with ID: ${id}.`);
+        continue;
+      }
       const content = rt?.text?.content ?? '';
       if (content.length > 2000) throw fail(400, 'validation_error', `${where}.text.content.length should be ≤ 2000`);
       const url = rt?.text?.link?.url;
@@ -102,7 +107,29 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       const value = properties[name];
       if (value.title) checkRichText(value.title, `${name}.title`);
       if (value.rich_text) checkRichText(value.rich_text, `${name}.rich_text`);
+      if (value.relation) {
+        if (!db.properties[name].relation) throw fail(400, 'validation_error', `${name} is not a relation.`);
+        for (const r of value.relation) {
+          if (!state.pages.has(compact(r.id))) throw fail(400, 'validation_error', `Relation page ${r.id} not found.`);
+        }
+      }
     }
+  }
+
+  /** Two-way relations: the synced property of the target database lists the pages pointing to it. */
+  function backlinksOf(page) {
+    const db = page.parent?.database_id ? state.databases.get(compact(page.parent.database_id)) : null;
+    if (!db) return {};
+    const out = {};
+    for (const [name, def] of Object.entries(db.properties)) {
+      const synced = def.relation?.dual_property?.synced_property_name;
+      if (!synced) continue;
+      const sources = [...state.pages.values()].filter(
+        (p) => !p.archived && !p.in_trash && (p.properties[name]?.relation ?? []).some((r) => compact(r.id) === compact(page.id)),
+      );
+      out[synced] = { relation: sources.map((p) => ({ id: p.id })) };
+    }
+    return out;
   }
 
   async function route(method, path, body) {
@@ -164,11 +191,27 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
         parent: { type: 'page_id', page_id: parentId },
         title: body.title,
         properties: structuredClone(body.properties),
+        is_inline: Boolean(body.is_inline),
         archived: false,
         in_trash: false,
       };
       state.databases.set(compact(id), db);
       return db;
+    }
+    if ((m = /^\/v1\/databases\/([\w-]+)\/query$/.exec(path)) && method === 'POST') {
+      const db = state.databases.get(compact(m[1]));
+      if (!db) throw fail(404, 'object_not_found', `Could not find database with ID: ${m[1]}.`);
+      const f = body.filter;
+      const results = [...state.pages.values()].filter((p) => {
+        if (compact(p.parent?.database_id ?? '') !== compact(db.id) || p.archived || p.in_trash) return false;
+        if (!f) return true;
+        const prop = p.properties[f.property];
+        const text = (prop?.rich_text ?? prop?.title ?? []).map((r) => r.text?.content ?? '').join('');
+        if (f.rich_text?.equals !== undefined) return text === f.rich_text.equals;
+        if (f.title?.equals !== undefined) return text === f.title.equals;
+        return true;
+      });
+      return { object: 'list', results: results.slice(0, body.page_size ?? 100).map(publicPage), has_more: false, next_cursor: null };
     }
     if ((m = /^\/v1\/databases\/([\w-]+)$/.exec(path))) {
       const db = state.databases.get(compact(m[1]));
@@ -179,10 +222,19 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       }
       if (method === 'GET') return db;
       if (method === 'PATCH') {
-        Object.assign(db.properties, structuredClone(body.properties ?? {}));
+        for (const [name, def] of Object.entries(body.properties ?? {})) {
+          db.properties[name] = structuredClone(def);
+          const synced = def.relation?.dual_property?.synced_property_name;
+          if (synced) {
+            const target = state.databases.get(compact(def.relation.database_id));
+            if (!target) throw fail(400, 'validation_error', 'Relation database not found');
+            target.properties[synced] = { relation: { database_id: db.id, type: 'dual_property', dual_property: { synced_property_name: name } } };
+          }
+        }
         if (typeof body.archived === 'boolean') db.archived = body.archived;
         return db;
       }
+      if (method === 'POST') throw fail(400, 'invalid_request_url', 'Use /query');
     }
 
     if ((m = /^\/v1\/blocks\/([\w-]+)\/children$/.exec(path))) {
@@ -227,7 +279,7 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
   function publicPage(page) {
     const { children, ...rest } = page;
     void children;
-    return rest;
+    return { ...rest, properties: { ...rest.properties, ...backlinksOf(page) } };
   }
 
   const server = createServer((req, res) => {
@@ -272,6 +324,12 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     base = `http://127.0.0.1:${server.address().port}`;
   });
 
+  function titleOf(id) {
+    const page = state.pages.get(compact(id));
+    const prop = page && Object.values(page.properties).find((p) => p.title);
+    return (prop?.title ?? []).map((r) => r.text?.content ?? '').join('');
+  }
+
   /** Visible (non archived) content of a page, simplified for assertions. */
   function pageContent(pageId) {
     const page = state.pages.get(compact(pageId));
@@ -280,7 +338,9 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       const b = state.blocks.get(compact(id));
       if (!b || b.archived) return null;
       const data = b[b.type];
-      const text = (data.rich_text ?? data.caption ?? []).map((r) => r.text?.content ?? '').join('');
+      const text = (data.rich_text ?? data.caption ?? [])
+        .map((r) => (r.type === 'mention' ? `@${titleOf(r.mention.page.id)}` : (r.text?.content ?? '')))
+        .join('');
       const out = { type: b.type, text };
       if (b.children.length) out.children = b.children.map(render).filter(Boolean);
       return out;
@@ -293,6 +353,7 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     ready,
     seedPage,
     pageContent,
+    titleOf,
     get url() {
       return base;
     },

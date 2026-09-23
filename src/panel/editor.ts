@@ -1,3 +1,10 @@
+import {
+  autocompletion,
+  startCompletion,
+  type Completion,
+  type CompletionContext,
+  type CompletionResult,
+} from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
   deleteMarkupBackward,
@@ -29,7 +36,18 @@ import {
 import { tags as t } from '@lezer/highlight';
 import type { Tree } from '@lezer/common';
 import { shouldAutoStamp } from '../shared/autostamp';
-import { findPageRefs, findTimestamps, timestampToken, type TimestampMatch } from '../shared/markdown';
+import {
+  findFragmentLinks,
+  findPageRefs,
+  findPins,
+  findSectionRefs,
+  findTimestamps,
+  findWikiLinks,
+  normalizeTitle,
+  timestampToken,
+  type AnchorMatch,
+  type TimestampMatch,
+} from '../shared/markdown';
 import { parseTimecode } from '../shared/time';
 
 export interface EditorHooks {
@@ -50,11 +68,38 @@ export interface EditorHooks {
   loadAsset(path: string): Promise<string>;
   /**
    * Token prefixed to a new line (Flow 1). Defaults to the timestamp of `now()`;
-   * documents return a page reference (`[p. 12]`).
+   * documents return their own anchor (`[p. 12]`, `[§ 4]`…).
    */
   stampToken?(): string | null;
-  /** Click on a `[p. N]` chip (PDF notes). */
-  onPageRefClick?(page: number): void;
+  /** Click on a page (`[p. 12]`), paragraph (`[§ 4]`) or pin (`[pin 3]`) chip. */
+  onAnchorClick?(kind: AnchorKind, n: number): void;
+  /** Click on a `[[Titre]]` link to another note. */
+  onWikiLinkClick?(title: string): void;
+  /** Hovering a `[[Titre]]` link (preview), `null` when leaving it. */
+  onWikiLinkHover?(title: string | null, target: HTMLElement | null): void;
+  /** Note titles offered after `[[` (autocompletion); no completion when absent. */
+  wikiTitles?(): string[];
+  /** Click on a link to a passage of a web page (`[↗](URL#:~:text=…)`). */
+  onFragmentClick?(url: string): void;
+  /** Text of an empty note. */
+  placeholderText?: string;
+}
+
+export type AnchorKind = 'page' | 'section' | 'pin';
+
+const ANCHOR_TITLES: Record<AnchorKind, (n: number) => string> = {
+  page: (n) => `Aller à la page ${n}`,
+  section: (n) => `Aller au paragraphe ${n}`,
+  pin: (n) => `Montrer le repère ${n} sur l’image`,
+};
+
+/** Page, paragraph and pin anchors of a line. */
+function documentAnchors(text: string, offset: number): AnchorMatch[] {
+  return [
+    ...findPageRefs(text, offset).map((m) => ({ from: m.from, to: m.to, kind: 'page' as const, value: m.page, labelFrom: m.from + 1 })),
+    ...findSectionRefs(text, offset),
+    ...findPins(text, offset),
+  ].sort((a, b) => a.from - b.from);
 }
 
 export interface NoteMarker {
@@ -212,20 +257,45 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
         }
       }
       const stamps = findTimestamps(line.text, line.from);
-      const pages = findPageRefs(line.text, line.from);
-      if (!capture && pages[0]?.from === line.from && !inCode(tree, line.from)) {
+      const touches = (from: number, to: number) =>
+        view.hasFocus && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+      const anchors = documentAnchors(line.text, line.from);
+      if (!capture && anchors[0]?.from === line.from && !inCode(tree, line.from)) {
         out.push(Decoration.line({ class: 'cm-boo-stamped' }).range(line.from));
       }
-      for (const p of pages) {
-        if (inCode(tree, p.from)) continue;
+      for (const a of anchors) {
+        if (inCode(tree, a.from)) continue;
+        const kind = a.kind as AnchorKind;
         out.push(
           Decoration.mark({
-            class: 'cm-boo-ts cm-boo-page',
-            attributes: { 'data-page': String(p.page), title: `Aller à la page ${p.page} (Alt+clic pour éditer)` },
-          }).range(p.from, p.to),
+            class: `cm-boo-ts cm-boo-${kind}`,
+            attributes: { 'data-anchor': `${kind}:${a.value}`, title: `${ANCHOR_TITLES[kind](a.value)} (Alt+clic pour éditer)` },
+          }).range(a.from, a.to),
         );
-        const touched = view.hasFocus && state.selection.ranges.some((r) => r.from <= p.to && r.to >= p.from);
-        if (!touched) out.push(hide.range(p.from, p.from + 1), hide.range(p.to - 1, p.to));
+        if (!touches(a.from, a.to)) {
+          // `[pin 3]` shows as « ◉ 3 » (prefix drawn in CSS), `[p. 3]` as « p. 3 », `[§ 3]` as « § 3 ».
+          out.push(hide.range(a.from, kind === 'pin' ? a.labelFrom : a.from + 1), hide.range(a.to - 1, a.to));
+        }
+      }
+      for (const w of findWikiLinks(line.text, line.from)) {
+        if (inCode(tree, w.from)) continue;
+        out.push(
+          Decoration.mark({
+            class: 'cm-boo-wiki',
+            attributes: { 'data-wiki': w.title, title: `Ouvrir « ${w.title} » (Alt+clic pour éditer)` },
+          }).range(w.from, w.to),
+        );
+        if (!touches(w.from, w.to)) out.push(hide.range(w.from, w.labelFrom), hide.range(w.labelTo, w.to));
+      }
+      for (const f of findFragmentLinks(line.text, line.from)) {
+        if (inCode(tree, f.from)) continue;
+        out.push(
+          Decoration.mark({
+            class: 'cm-boo-ts cm-boo-frag',
+            attributes: { 'data-frag': f.url, title: 'Revoir ce passage dans la page (Alt+clic pour éditer)' },
+          }).range(f.from, f.to),
+        );
+        if (!touches(f.from, f.to)) out.push(hide.range(f.from, f.labelFrom), hide.range(f.labelTo, f.to));
       }
       if (!capture && stamps[0]?.from === line.from && !inCode(tree, line.from)) {
         // Transcript layout: wrapped text aligns after the leading timestamp.
@@ -349,7 +419,7 @@ export class NotesEditor {
       livePreview(hooks.loadAsset),
       nowLine,
       this.editable.of(EditorView.editable.of(true)),
-      placeholder('Écrivez ici…'),
+      placeholder(hooks.placeholderText ?? 'Écrivez ici…'),
       keymap.of([
         { key: 'Mod-s', preventDefault: true, run: () => (hooks.onSaveShortcut(), true) },
         { key: 'Mod-/', preventDefault: true, run: () => (hooks.onHelp(), true) },
@@ -361,6 +431,9 @@ export class NotesEditor {
         ...defaultKeymap,
       ]),
       EditorView.inputHandler.of((view, from, to, text) => this.autoStamp(view, from, to, text)),
+      hooks.wikiTitles
+        ? autocompletion({ override: [(ctx) => this.wikiCompletions(ctx)], icons: false, closeOnBlur: true })
+        : [],
       EditorView.updateListener.of((u) => {
         if (u.docChanged) hooks.onContentChanged();
         if (!u.docChanged || u.transactions.every((tr) => tr.annotation(external))) return;
@@ -371,23 +444,34 @@ export class NotesEditor {
       }),
       EditorView.domEventHandlers({
         mousedown: (e) => {
-          const target = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t]');
+          const target = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t], .cm-boo-wiki');
           if (!target || e.altKey || e.button !== 0) return false;
           e.preventDefault();
-          const page = target.getAttribute('data-page');
-          if (page !== null) hooks.onPageRefClick?.(Number(page));
+          const anchor = target.getAttribute('data-anchor');
+          const wiki = target.getAttribute('data-wiki');
+          const frag = target.getAttribute('data-frag');
+          if (anchor !== null) {
+            const [kind, n] = anchor.split(':');
+            hooks.onAnchorClick?.(kind as AnchorKind, Number(n));
+          } else if (wiki !== null) hooks.onWikiLinkClick?.(wiki);
+          else if (frag !== null) hooks.onFragmentClick?.(frag);
           else hooks.onTimestampClick(Number(target.getAttribute('data-t')));
           return true;
         },
         mouseover: (e) => {
           const target = (e.target as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           if (target) hooks.onTimestampHover(Number(target.getAttribute('data-t')));
+          const wiki = (e.target as Element | null)?.closest?.('.cm-boo-wiki') as HTMLElement | null;
+          if (wiki) hooks.onWikiLinkHover?.(wiki.getAttribute('data-wiki'), wiki);
           return false;
         },
         mouseout: (e) => {
           const from = (e.target as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           const to = (e.relatedTarget as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           if (from && from !== to) hooks.onTimestampHover(null);
+          const wikiFrom = (e.target as Element | null)?.closest?.('.cm-boo-wiki');
+          const wikiTo = (e.relatedTarget as Element | null)?.closest?.('.cm-boo-wiki');
+          if (wikiFrom && wikiFrom !== wikiTo) hooks.onWikiLinkHover?.(null, null);
           return false;
         },
       }),
@@ -545,16 +629,79 @@ export class NotesEditor {
 
   /** Document equivalent of `setPlaybackTime`: highlights the last note about `page` or before. */
   setCurrentPage(page: number | null): void {
+    this.setCurrentAnchor('page', page);
+  }
+
+  /**
+   * Highlights the note line of the anchor being looked at: the last one at or
+   * before `value` (pages, paragraphs), or exactly `value` (pins).
+   */
+  setCurrentAnchor(kind: AnchorKind, value: number | null): void {
     const { state } = this.view;
     let pos: number | null = null;
-    if (page !== null) {
-      let best: { from: number; page: number } | null = null;
-      for (const m of findPageRefs(state.doc.toString())) {
-        if (m.page <= page && (!best || m.page >= best.page)) best = m;
+    if (value !== null) {
+      let best: AnchorMatch | null = null;
+      for (const m of documentAnchors(state.doc.toString(), 0)) {
+        if (m.kind !== kind) continue;
+        const ok = kind === 'pin' ? m.value === value : m.value <= value;
+        if (ok && (!best || m.value >= best.value)) best = m;
       }
       pos = best?.from ?? null;
     }
     if (pos !== state.field(nowLine).pos) this.view.dispatch({ effects: setNowLine.of(pos) });
+  }
+
+  /** Types `[[` at the cursor and opens the list of notes to link. */
+  insertWikiLink(): void {
+    this.view.focus();
+    const at = this.view.state.selection.main.head;
+    this.view.dispatch({ changes: { from: at, insert: '[[' }, selection: { anchor: at + 2 }, userEvent: 'input.type' });
+    startCompletion(this.view);
+  }
+
+  /** Scrolls to (and highlights) the first line with this anchor (or timestamp); false when there is none. */
+  revealAnchor(kind: AnchorKind | 'time', value: number): boolean {
+    const doc = this.view.state.doc.toString();
+    const from =
+      kind === 'time'
+        ? findTimestamps(doc).find((m) => m.seconds === value)?.from
+        : documentAnchors(doc, 0).find((a) => a.kind === kind && a.value === value)?.from;
+    if (from === undefined) return false;
+    this.view.dispatch({ effects: [setNowLine.of(from), EditorView.scrollIntoView(from, { y: 'center' })] });
+    return true;
+  }
+
+  /** Number of notes per anchor value (pages, paragraphs, pins): markers in the viewer. */
+  anchorCounts(kind: AnchorKind): Map<number, number> {
+    const counts = new Map<number, number>();
+    for (const a of documentAnchors(this.view.state.doc.toString(), 0)) {
+      if (a.kind === kind) counts.set(a.value, (counts.get(a.value) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  private wikiCompletions(ctx: CompletionContext): CompletionResult | null {
+    const m = ctx.matchBefore(/\[\[[^[\]\n|]*$/);
+    if (!m) return null;
+    const query = m.text.slice(2);
+    const after = ctx.state.sliceDoc(ctx.pos, ctx.pos + 2);
+    const closing = after === ']]' ? '' : ']]';
+    const apply = (title: string) => (view: EditorView, _c: Completion, from: number, to: number) => {
+      const insert = `${title}${closing}`;
+      view.dispatch({
+        changes: { from, to, insert },
+        selection: { anchor: from + insert.length + (closing ? 0 : 2) },
+        userEvent: 'input.complete',
+      });
+    };
+    const titles = this.hooks.wikiTitles?.() ?? [];
+    const options: Completion[] = titles.map((title) => ({ label: title, apply: apply(title), type: 'text' }));
+    // Offer to create a sheet only when no existing note matches what is typed.
+    const q = normalizeTitle(query);
+    if (q && !titles.some((t) => normalizeTitle(t).includes(q))) {
+      options.push({ label: query.trim(), detail: 'nouvelle fiche', apply: apply(query.trim()) });
+    }
+    return { from: m.from + 2, options, validFor: /^[^[\]\n|]*$/ };
   }
 
   private createState(doc: string): EditorState {

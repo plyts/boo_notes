@@ -15,6 +15,10 @@ export interface ServerOptions {
   app: { name: string; version: string };
   /** `export` request from the extension (`target`: `local` | `notion`); resolves to a user message. */
   onExport(noteId: string, target: string): Promise<string>;
+  /** `[[Titre]]` clicked in the browser: show that note in the app. */
+  onOpen?(title: string): void;
+  /** Messages sent to each extension right after the handshake (e.g. the shared Notion connection). */
+  welcomeExtras?(): Array<Record<string, unknown>>;
   log?(message: string): void;
 }
 
@@ -108,7 +112,12 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
 
   /** Asks the extensions to send every note again (new notes folder…). */
   requestResync(): void {
-    for (const ws of this.authed) send(ws, { type: 'resync' });
+    this.broadcast({ type: 'resync' });
+  }
+
+  /** Sends a message to every paired extension. */
+  broadcast(msg: Record<string, unknown>): void {
+    for (const ws of this.authed) send(ws, msg);
   }
 
   private accept(ws: WebSocket): void {
@@ -163,6 +172,7 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
     }
     send(ws, { type: 'welcome', protocol: PROTOCOL_VERSION, app: this.opts.app });
     this.authed.add(ws);
+    for (const extra of this.opts.welcomeExtras?.() ?? []) send(ws, extra);
     const client = msg.client as { name?: string; version?: string } | undefined;
     this.opts.log?.(`extension connectée (${client?.name ?? '?'} ${client?.version ?? ''})`);
     this.emit('clients', this.authed.size);
@@ -202,6 +212,9 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
       }
       case 'player.active':
         this.setActive((msg.player as ActivePlayer | null) ?? null);
+        return;
+      case 'open':
+        if (typeof msg.title === 'string' && msg.title.trim()) this.opts.onOpen?.(msg.title.trim());
         return;
       case 'export': {
         const requestId = msg.requestId;

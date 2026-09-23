@@ -18,11 +18,10 @@ import {
 } from 'electron';
 import { timestampUrl } from '../../../src/shared/platforms';
 import { ConfigStore, plainBox, type SecretBox } from '../core/config';
-import { kindForFile, Library, OPEN_FILE_FILTERS, positionLabel, progressRatio, studyStatus } from '../core/library';
-import { parseNotionId } from '../core/notion/client';
+import { isDue, kindForFile, Library, OPEN_FILE_FILTERS, positionLabel, progressRatio, studyStatus } from '../core/library';
 import { NotionSync } from '../core/notion/sync';
 import { ExtensionServer } from '../core/server';
-import type { Highlight, LibraryItem, StudyStatus } from '../core/types';
+import type { Highlight, LibraryItem, Pin, ReviewAction, StudyStatus } from '../core/types';
 import { CHANNELS as C, type AddResult, type AppStatus, type ItemView, type SettingsPatch, type SettingsView } from '../ipc';
 import { handleScheme, registerSchemePrivileges } from './protocol';
 
@@ -67,7 +66,35 @@ function secretBox(): SecretBox {
 // --- Views ----------------------------------------------------------------------------------
 
 function view(item: LibraryItem): ItemView {
-  return { ...item, studyStatus: studyStatus(item), ratio: progressRatio(item), positionLabel: positionLabel(item) };
+  return {
+    ...item,
+    studyStatus: studyStatus(item),
+    ratio: progressRatio(item),
+    positionLabel: positionLabel(item),
+    due: isDue(item),
+  };
+}
+
+/** Notion connection sent to the paired extensions (they sync directly while the app is closed). */
+function sharedNotionConfig(): Record<string, unknown> {
+  const cfg = config.get().notion;
+  const token = config.notionToken();
+  const shared =
+    cfg.share && token && cfg.databaseId
+      ? {
+          token,
+          databaseId: cfg.databaseId,
+          databaseUrl: cfg.databaseUrl,
+          parentId: cfg.parentId,
+          workspace: cfg.workspace,
+          ...(process.env.NOTION_API_BASE ? { apiBase: process.env.NOTION_API_BASE } : {}),
+        }
+      : null;
+  return { type: 'notion.config', config: shared };
+}
+
+function shareNotionConfig(): void {
+  server?.broadcast(sharedNotionConfig());
 }
 
 function notionView(): SettingsView['notion'] {
@@ -75,6 +102,7 @@ function notionView(): SettingsView['notion'] {
   const state = notion.state;
   return {
     connected: Boolean(config.notionToken() && cfg.databaseId),
+    share: cfg.share,
     workspace: cfg.workspace,
     databaseUrl: cfg.databaseUrl,
     autoSync: cfg.autoSync,
@@ -315,9 +343,16 @@ app.on('open-file', (e, path) => {
 // --- Settings -------------------------------------------------------------------------------
 
 async function setSettings(patch: SettingsPatch): Promise<SettingsView> {
-  const { notionAutoSync, ...rest } = patch;
+  const { notionAutoSync, notionShare, ...rest } = patch;
   const before = config.get();
-  await config.update({ ...rest, ...(notionAutoSync !== undefined ? { notion: { autoSync: notionAutoSync } } : {}) });
+  await config.update({
+    ...rest,
+    notion: {
+      ...(notionAutoSync !== undefined ? { autoSync: notionAutoSync } : {}),
+      ...(notionShare !== undefined ? { share: notionShare } : {}),
+    },
+  });
+  if (notionShare !== undefined && notionShare !== before.notion.share) shareNotionConfig();
   if (rest.port !== undefined && rest.port !== before.port) {
     const port = Math.round(rest.port);
     if (!(port >= 1024 && port <= 65535)) throw new Error('Port invalide (1024 – 65535)');
@@ -405,21 +440,41 @@ function registerIpc(): void {
     if (/^https?:\/\//.test(url)) await shell.openExternal(url);
   });
 
+  handle(C.libraryCreateNote, async (title: string, body?: string) =>
+    view(await library.createNote(str(title, 'titre'), typeof body === 'string' ? body : '')),
+  );
+  handle(C.libraryFindByTitle, (title: string) => {
+    const item = library.findByTitle(str(title, 'titre'));
+    return item ? view(item) : null;
+  });
+  handle(C.libraryBacklinks, (id: string) => library.backlinks(str(id, 'id')).map(view));
+  handle(C.libraryTitles, () => library.titles());
+  handle(C.libraryReview, async (id: string, action: ReviewAction) => {
+    if (!['start', 'stop', 'again', 'good', 'easy'].includes(action)) throw new Error('Action inconnue');
+    return view(await library.review(str(id, 'id'), action));
+  });
+  handle(C.librarySetPins, async (id: string, pins: Pin[]) => {
+    const clean = (Array.isArray(pins) ? pins : [])
+      .filter((p) => Number.isFinite(p?.n) && Number.isFinite(p?.x) && Number.isFinite(p?.y))
+      .map((p) => ({ n: Math.round(p.n), x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)), createdAt: Number(p.createdAt) || Date.now() }));
+    return view(await library.setPins(str(id, 'id'), clean));
+  });
+  handle(C.libraryReadText, (id: string) => library.readText(str(id, 'id')));
+
   handle(C.notionConnect, async (token: string, target: string) => {
     const res = await notion.connect(str(token, 'jeton'), str(target, 'lien'));
-    const targetId = parseNotionId(target);
-    const isDatabase = targetId?.replace(/-/g, '') === res.databaseId.replace(/-/g, '');
     await config.setNotionToken(token.trim());
     await config.update({
       notion: {
         workspace: res.workspace,
         databaseId: res.databaseId,
         databaseUrl: res.url,
-        // A page: the database lives under it (and is re-created there if deleted).
-        parentId: isDatabase ? null : targetId,
+        // A page: the database is an inline table in it (re-created there if deleted).
+        parentId: res.parentId,
       },
     });
     notion.reset();
+    shareNotionConfig();
     pushStatus();
     if (config.get().notion.autoSync) void notion.syncAll().catch(() => undefined);
     return settingsView();
@@ -429,6 +484,7 @@ function registerIpc(): void {
     await config.update({ notion: { databaseId: null, databaseUrl: null, parentId: null, workspace: null } });
     await library.clearNotion();
     notion.reset();
+    shareNotionConfig();
     pushStatus();
     return settingsView();
   });
@@ -502,6 +558,11 @@ async function boot(): Promise<void> {
     },
     clientOptions: E2E ? { minIntervalMs: 0 } : undefined,
     debounceMs: E2E ? 300 : 6000,
+    // The extension keeps the Notion mapping of its notes, to sync them itself while the app is closed.
+    onSynced: (id) => {
+      const link = library.get(id)?.notion;
+      if (link) server?.broadcast({ type: 'notion.link', noteId: id, link });
+    },
     log: (m) => console.log(`[boo] ${m}`),
   });
   notion.on('state', pushStatus);
@@ -520,6 +581,11 @@ async function boot(): Promise<void> {
       const done = await Promise.race([job.then(() => true), new Promise<false>((r) => setTimeout(() => r(false), 20_000))]);
       return done ? 'Envoyé vers Notion' : 'Envoi vers Notion en cours…';
     },
+    onOpen: (title) => {
+      showWindow();
+      send('open-title', title);
+    },
+    welcomeExtras: () => [sharedNotionConfig()],
     log: (m) => console.log(`[boo] ${m}`),
   });
   server.on('clients', pushStatus);

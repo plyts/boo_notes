@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  findAnchors,
+  findFragmentLinks,
+  findPins,
+  findSectionRefs,
+  findWikiLinks,
+  linkedTitles,
+  normalizeTitle,
+  parseTextFragment,
+  pinToken,
+  quoteLine,
+  sectionToken,
+  textFragmentUrl,
+  wikiLinkToken,
   appendBlock,
   captureLine,
   findAssetRefs,
@@ -90,6 +103,68 @@ describe('page references', () => {
     expect(pageRefToken(7)).toBe('[p. 7]');
     expect(pageRefToken(0)).toBe('[p. 1]');
     expect(pageRefToken(3.8)).toBe('[p. 3]');
+  });
+});
+
+describe('anchors of every kind', () => {
+  it('finds paragraphs and pins', () => {
+    expect(findSectionRefs('Voir [§ 12] puis [§3]')).toEqual([
+      { from: 5, to: 11, kind: 'section', value: 12, labelFrom: 8 },
+      { from: 17, to: 21, kind: 'section', value: 3, labelFrom: 19 },
+    ]);
+    expect(findPins('[pin 3] axe des x ; [PIN 12]').map((p) => p.value)).toEqual([3, 12]);
+    expect(sectionToken(4)).toBe('[§ 4]');
+    expect(pinToken(2.7)).toBe('[pin 2]');
+  });
+
+  it('lists every anchor in document order', () => {
+    const text = '[pin 2] courbe\n[00:05] intro [p. 3] et [§ 4]';
+    expect(findAnchors(text).map((a) => `${a.kind}:${a.value}`)).toEqual(['pin:2', 'time:5', 'page:3', 'section:4']);
+  });
+});
+
+describe('wiki links', () => {
+  it('finds [[Titre]] and [[Titre|texte]]', () => {
+    const text = 'Voir [[Lois de Newton]] et [[Dérivées|la dérivée]].';
+    const links = findWikiLinks(text);
+    expect(links.map((l) => [l.title, l.label])).toEqual([
+      ['Lois de Newton', 'Lois de Newton'],
+      ['Dérivées', 'la dérivée'],
+    ]);
+    expect(text.slice(links[1].labelFrom, links[1].labelTo)).toBe('la dérivée');
+    expect(text.slice(links[0].labelFrom, links[0].labelTo)).toBe('Lois de Newton');
+    expect(findWikiLinks('[[ ]] [[a\nb]]')).toEqual([]);
+  });
+
+  it('dedupes linked titles and compares them loosely', () => {
+    expect(linkedTitles('[[Énergie]] [[energie]] [[Force]]')).toEqual(['Énergie', 'Force']);
+    expect(normalizeTitle('  Énergie   Cinétique ')).toBe('energie cinetique');
+    expect(wikiLinkToken('A [b] | c')).toBe('[[A b c]]');
+  });
+});
+
+describe('text fragments', () => {
+  it('links to a passage, shortening long quotes', () => {
+    expect(textFragmentUrl('https://x.test/cours#intro', 'La loi d’Ohm, U = R-I')).toBe(
+      'https://x.test/cours#:~:text=La%20loi%20d%E2%80%99Ohm%2C%20U%20%3D%20R%2DI',
+    );
+    const long = 'un deux trois quatre cinq six sept huit neuf dix onze douze';
+    expect(textFragmentUrl('https://x.test/a', long)).toBe(
+      'https://x.test/a#:~:text=un%20deux%20trois%20quatre%20cinq,huit%20neuf%20dix%20onze%20douze',
+    );
+    expect(parseTextFragment(textFragmentUrl('https://x.test/a', long))).toEqual({
+      start: 'un deux trois quatre cinq',
+      end: 'huit neuf dix onze douze',
+    });
+    expect(parseTextFragment('https://x.test/a#top')).toBeNull();
+  });
+
+  it('writes and finds quote lines', () => {
+    const line = quoteLine('  La  photosynthèse ', 'https://x.test/bio');
+    expect(line).toBe('> La photosynthèse [↗](https://x.test/bio#:~:text=La%20photosynth%C3%A8se)');
+    const [m] = findFragmentLinks(line, 10);
+    expect(m).toMatchObject({ label: '↗', url: 'https://x.test/bio#:~:text=La%20photosynth%C3%A8se' });
+    expect(m.from).toBe(10 + line.indexOf('[↗]'));
   });
 });
 

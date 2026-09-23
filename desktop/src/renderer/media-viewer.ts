@@ -11,6 +11,8 @@ export interface MediaViewerOptions {
   onTime(seconds: number): void;
   onProgress(position: number, duration: number): void;
   onActivity(): void;
+  /** A note marker of the timeline clicked (its timestamp). */
+  onMarkerClick?(seconds: number): void;
 }
 
 /**
@@ -197,8 +199,12 @@ export class MediaViewer {
       ...this.markers
         .filter((s) => s <= d)
         .map((s) => {
-          const m = h('span', { class: 'scrub-marker' });
+          const m = h('button', { type: 'button', class: 'scrub-marker', title: `Note à ${formatTimecode(s)}`, 'aria-label': `Note à ${formatTimecode(s)}` });
           m.style.left = `${(s / d) * 100}%`;
+          m.addEventListener('click', () => {
+            this.seek(s);
+            this.opts.onMarkerClick?.(s);
+          });
           return m;
         }),
     );

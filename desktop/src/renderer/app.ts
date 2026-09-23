@@ -1,19 +1,28 @@
+import { normalizeTitle } from '../../../src/shared/markdown';
 import type { AppStatus, ItemView } from '../ipc';
 import { ItemScreen } from './item-view';
 import { FILTER_TITLES, LibraryView, type LibraryFilter } from './library-view';
 import { SettingsScreen } from './settings-view';
-import { button, errorMessage, h, icon, toast, type IconName } from './ui';
+import { button, errorMessage, h, icon, promptDialog, toast, type IconName } from './ui';
+import { WikiPreview } from './wiki';
 
 type Route = { name: 'library' } | { name: 'item'; id: string } | { name: 'settings'; section?: string };
 
-const NAV: Array<{ key: string; label: string; icon: IconName; filter: LibraryFilter } | 'separator'> = [
-  { key: 'all', label: FILTER_TITLES.all, icon: 'library', filter: { status: 'all', kind: 'all' } },
-  { key: 'doing', label: FILTER_TITLES.doing, icon: 'clock', filter: { status: 'doing', kind: 'all' } },
-  { key: 'done', label: FILTER_TITLES.done, icon: 'check', filter: { status: 'done', kind: 'all' } },
+type NavEntry = { key: string; label: string; icon: IconName; filter: LibraryFilter; always?: boolean };
+
+const NAV: Array<NavEntry | 'separator'> = [
+  { key: 'all', label: FILTER_TITLES.all, icon: 'library', filter: { status: 'all', kind: 'all' }, always: true },
+  { key: 'due', label: FILTER_TITLES.due, icon: 'cards', filter: { status: 'all', kind: 'all', due: true }, always: true },
+  { key: 'doing', label: FILTER_TITLES.doing, icon: 'clock', filter: { status: 'doing', kind: 'all' }, always: true },
+  { key: 'done', label: FILTER_TITLES.done, icon: 'check', filter: { status: 'done', kind: 'all' }, always: true },
   'separator',
-  { key: 'video', label: FILTER_TITLES.video, icon: 'video', filter: { status: 'all', kind: 'video' } },
+  { key: 'note', label: FILTER_TITLES.note, icon: 'cards', filter: { status: 'all', kind: 'note' }, always: true },
+  { key: 'video', label: FILTER_TITLES.video, icon: 'video', filter: { status: 'all', kind: 'video' }, always: true },
   { key: 'audio', label: FILTER_TITLES.audio, icon: 'headphones', filter: { status: 'all', kind: 'audio' } },
-  { key: 'pdf', label: FILTER_TITLES.pdf, icon: 'file', filter: { status: 'all', kind: 'pdf' } },
+  { key: 'pdf', label: FILTER_TITLES.pdf, icon: 'file', filter: { status: 'all', kind: 'pdf' }, always: true },
+  { key: 'image', label: FILTER_TITLES.image, icon: 'image', filter: { status: 'all', kind: 'image' } },
+  { key: 'text', label: FILTER_TITLES.text, icon: 'text', filter: { status: 'all', kind: 'text' } },
+  { key: 'page', label: FILTER_TITLES.page, icon: 'globe', filter: { status: 'all', kind: 'page' } },
 ];
 
 function filterFor(key: string): LibraryFilter {
@@ -33,11 +42,15 @@ class App {
   private readonly nav: HTMLElement;
   private readonly statusEl: HTMLElement;
   private readonly search: HTMLInputElement;
+  /** Notes opened by following links, before the current one (breadcrumbs, back button). */
+  private history: string[] = [];
+  private readonly preview = new WikiPreview((title) => void this.openTitle(title));
 
   constructor(root: HTMLElement) {
     this.library = new LibraryView({
       open: (id) => void this.go({ name: 'item', id }),
       addFiles: () => void this.addFiles(),
+      newNote: () => void this.newNote(),
       openSettings: (section) => void this.go({ name: 'settings', section }),
       notionConnected: () => this.status?.notion.connected ?? false,
       extensionConnected: () => (this.status?.extension.clients ?? 0) > 0,
@@ -76,6 +89,50 @@ class App {
     window.boo.on('status', (s) => this.setStatus(s));
     window.boo.on('open-item', (id) => void this.refresh().then(() => this.go({ name: 'item', id })));
     window.boo.on('navigate', (view) => void this.go(view === 'settings' ? { name: 'settings' } : { name: 'library' }));
+    window.boo.on('open-title', (title) => void this.openTitle(title, false));
+  }
+
+  /** Opens the note a `[[Titre]]` points to — creating the revision sheet if it does not exist. */
+  async openTitle(title: string, follow = true): Promise<void> {
+    const key = normalizeTitle(title);
+    const matches = this.items.filter((i) => normalizeTitle(i.title) === key);
+    let target = matches.find((i) => i.kind === 'note') ?? matches[0];
+    if (!target) {
+      try {
+        target = await window.boo.library.createNote(title.trim());
+        toast(`Fiche « ${target.title} » créée`, 'success');
+        await this.refresh();
+      } catch (e) {
+        toast(errorMessage(e), 'error');
+        return;
+      }
+    }
+    await this.openLinked(target.id, follow);
+  }
+
+  /** Follows a link: the current note goes to the history (breadcrumbs). */
+  private async openLinked(id: string, follow = true): Promise<void> {
+    const current = this.route.name === 'item' ? this.route.id : null;
+    if (current === id) return;
+    const history = follow && current ? [...this.history, current] : [];
+    await this.go({ name: 'item', id }, history);
+  }
+
+  private async newNote(): Promise<void> {
+    const title = await promptDialog({
+      title: 'Nouvelle fiche',
+      text: 'Une fiche de révision : une idée, une notion, un résumé. Liez-la à d’autres avec [[Titre]].',
+      placeholder: 'Titre de la fiche',
+      confirm: 'Créer',
+    });
+    if (!title) return;
+    try {
+      const item = await window.boo.library.createNote(title);
+      await this.refresh();
+      await this.go({ name: 'item', id: item.id });
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    }
   }
 
   async start(): Promise<void> {
@@ -110,12 +167,13 @@ class App {
     this.item?.onStatus();
   }
 
-  async go(route: Route): Promise<void> {
+  async go(route: Route, history: string[] = []): Promise<void> {
     if (this.item && !(route.name === 'item' && route.id === this.item.id)) {
       const leaving = this.item;
       this.item = null;
       await leaving.dispose();
     }
+    this.history = history;
     this.route = route;
     document.body.dataset.route = route.name;
     if (route.name === 'library') {
@@ -135,9 +193,22 @@ class App {
       }
       if (this.item?.id !== item.id) {
         this.item = new ItemScreen(item, {
-          back: () => void this.go({ name: 'library' }),
+          back: () => {
+            const previous = this.history.at(-1);
+            if (previous) void this.go({ name: 'item', id: previous }, this.history.slice(0, -1));
+            else void this.go({ name: 'library' });
+          },
           openSettings: (section) => void this.go({ name: 'settings', section }),
           status: () => this.status,
+          openTitle: (title) => void this.openTitle(title),
+          openItem: (id) => void this.openLinked(id),
+          titles: () => this.items.map((i) => i.title),
+          preview: this.preview,
+          trail: () => this.history.map((id) => this.items.find((i) => i.id === id)).filter((i): i is ItemView => Boolean(i)),
+          backTo: (index) => {
+            const id = this.history[index];
+            if (id) void this.go({ name: 'item', id }, this.history.slice(0, index));
+          },
         });
         this.main.replaceChildren(this.item.el);
         await this.item.mount();
@@ -150,14 +221,14 @@ class App {
     const counts = this.library.counts();
     const current = this.route.name === 'library' ? this.navKey : this.route.name === 'settings' ? 'settings' : '';
     this.nav.replaceChildren(
-      ...NAV.map((n) => {
+      ...NAV.filter((n) => n === 'separator' || n.always || counts[n.key] > 0).map((n) => {
         if (n === 'separator') return h('div', { class: 'nav-sep', role: 'separator' });
         const b = h(
           'button',
           { type: 'button', class: 'nav-item', 'data-key': n.key, 'aria-current': current === n.key ? 'page' : undefined },
           icon(n.icon, 18),
           h('span', {}, n.label),
-          counts[n.key] ? h('span', { class: 'nav-count' }, String(counts[n.key])) : null,
+          counts[n.key] ? h('span', { class: `nav-count${n.key === 'due' ? ' due' : ''}` }, String(counts[n.key])) : null,
         );
         b.addEventListener('click', () => {
           this.navKey = n.key;
@@ -214,7 +285,13 @@ class App {
     const overlay = h(
       'div',
       { class: 'drop-overlay', hidden: true },
-      h('div', { class: 'drop-card' }, icon('plus', 28), h('strong', {}, 'Déposez pour ajouter à la bibliothèque'), h('small', {}, 'PDF, audio (MP3, M4A, WAV…) ou vidéo (MP4, WebM…)')),
+      h(
+        'div',
+        { class: 'drop-card' },
+        icon('plus', 28),
+        h('strong', {}, 'Déposez pour ajouter à la bibliothèque'),
+        h('small', {}, 'PDF, images (graphes, schémas), textes, audio, vidéo'),
+      ),
     );
     root.append(overlay);
     let depth = 0;
@@ -259,6 +336,9 @@ class App {
     } else if (mod && key === ',') {
       e.preventDefault();
       void this.go({ name: 'settings' });
+    } else if (mod && key === 'n' && !e.shiftKey) {
+      e.preventDefault();
+      void this.newNote();
     } else if (e.key === 'Escape' && this.route.name !== 'library' && !document.querySelector('dialog[open], .menu')) {
       const inEditor = (e.target as Element | null)?.closest?.('.cm-editor, input, textarea');
       if (!inEditor) {
@@ -282,7 +362,7 @@ class App {
     dialog.append(
       h('div', { class: 'welcome-art' }, icon('ghost', 36)),
       h('h2', { id: 'welcome-title' }, 'Bienvenue dans Boo Notes'),
-      h('p', {}, 'Vos cours — vidéos, podcasts, PDF — annotés, suivis, et synchronisés avec Notion.'),
+      h('p', {}, 'Vidéos, podcasts, PDF, images, textes, pages web : prenez vos notes sur tout, reliez-les en fiches de révision, et Notion garde tout.'),
       h(
         'ol',
         { class: 'welcome-steps' },
@@ -293,8 +373,8 @@ class App {
           h('span', {}, 'Réglages de l’extension › App Desktop : adresse ', h('code', {}, `ws://localhost:${port}`), ' et jeton :'),
           h('span', { class: 'token-row' }, h('code', { class: 'token' }, token), copy),
         ),
-        h('li', {}, h('strong', {}, 'Ajoutez un PDF, un audio ou une vidéo'), h('span', {}, 'Glissez-le dans la fenêtre, ou Ctrl+O.')),
-        h('li', {}, h('strong', {}, 'Connectez Notion (facultatif)'), h('span', {}, 'Une page Notion par cours, avec progression et notes horodatées.')),
+        h('li', {}, h('strong', {}, 'Ajoutez un cours ou créez une fiche'), h('span', {}, 'Glissez un fichier dans la fenêtre (Ctrl+O), ou Ctrl+N pour une fiche.')),
+        h('li', {}, h('strong', {}, 'Connectez Notion'), h('span', {}, 'Un tableau de toutes vos notes, une page par note, les liens entre fiches.')),
       ),
       h(
         'div',

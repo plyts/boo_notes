@@ -131,6 +131,11 @@ export class NotionClient {
     return this.request('PATCH', `/v1/databases/${id}`, body);
   }
 
+  /** Pages of a database matching a filter (first page of results). */
+  queryDatabase(id: string, body: Json): Promise<NotionList<NotionPage>> {
+    return this.request('POST', `/v1/databases/${id}/query`, body);
+  }
+
   createPage(body: Json): Promise<NotionPage> {
     return this.request('POST', '/v1/pages', body);
   }

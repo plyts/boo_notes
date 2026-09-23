@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { hashBlock, markdownToBlocks, notionLanguage, parseInline, toNotion } from '../../src/core/notion/blocks';
-import { parseNotionId } from '../../src/core/notion/client';
+import { hashBlock, markdownToBlocks, notionLanguage, parseInline, toNotion } from '../../../src/shared/notion/blocks';
+import { parseNotionId } from '../../../src/shared/notion/client';
 
 describe('parseInline', () => {
   it('turns timestamps into code-styled links and page references into chips', () => {
@@ -27,12 +27,13 @@ describe('parseInline', () => {
     expect(rich).toContainEqual({ type: 'text', text: { content: 'useState' }, annotations: { code: true } });
     expect(rich).toContainEqual({ type: 'text', text: { content: 'non' }, annotations: { strikethrough: true } });
     // Kept as text, never as a link.
-    expect(rich.filter((r) => r.text.link).map((r) => r.text.link!.url)).toEqual(['https://react.dev/', 'https://react.dev/']);
+    const links = rich.flatMap((r) => (r.type === 'text' && r.text.link ? [r.text.link.url] : []));
+    expect(links).toEqual(['https://react.dev/', 'https://react.dev/']);
   });
 
   it('splits texts longer than Notion’s 2000 characters', () => {
     const rich = parseInline('a'.repeat(4500));
-    expect(rich.map((r) => r.text.content.length)).toEqual([2000, 2000, 500]);
+    expect(rich.map((r) => (r.type === 'text' ? r.text.content.length : 0))).toEqual([2000, 2000, 500]);
   });
 });
 

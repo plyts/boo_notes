@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseFrontMatter, serializeFrontMatter } from '../../src/core/frontmatter';
 import {
   countNotes,
+  isDue,
   kindForFile,
   Library,
   positionLabel,
@@ -161,4 +162,63 @@ describe('Library', () => {
     await lib.remove('youtube:abcdefghijk');
     expect(reasons).toEqual(['content', 'progress', 'notion', 'meta', 'removed']);
   });
+
+  it('creates revision sheets, links them and lists backlinks', async () => {
+    const newton = await lib.createNote('Lois de Newton', '# Trois lois\nVoir [[Forces]] et [[énergie|l’énergie]].');
+    expect(newton).toMatchObject({ kind: 'note', platform: 'local', source: '', links: ['Forces', 'énergie'] });
+    expect(await lib.createNote('lois de  newton')).toMatchObject({ id: newton.id });
+    const forces = await lib.createNote('Forces');
+    const energie = await lib.createNote('Énergie');
+    expect(lib.findByTitle('ENERGIE')?.id).toBe(energie.id);
+    expect(lib.backlinks(forces.id).map((i) => i.id)).toEqual([newton.id]);
+    expect(lib.backlinks(energie.id).map((i) => i.id)).toEqual([newton.id]);
+    expect(lib.titles()).toEqual(expect.arrayContaining(['Lois de Newton', 'Forces', 'Énergie']));
+
+    // Renaming a sheet rewrites the links pointing to it (aliases kept).
+    await lib.update(energie.id, { title: 'Énergie mécanique' });
+    expect(await lib.readNote(newton.id)).toBe('# Trois lois\nVoir [[Forces]] et [[Énergie mécanique|l’énergie]].');
+    expect(lib.backlinks(energie.id).map((i) => i.id)).toEqual([newton.id]);
+    const file = await readFile(join(lib.path, newton.noteFile), 'utf8');
+    expect(file).toMatch(/^---\ntitle: "Lois de Newton"\nkind: note\n/);
+  });
+
+  it('schedules reviews with growing intervals', async () => {
+    const sheet = await lib.createNote('Dérivées', 'f′(x) = lim …');
+    const day = 86_400_000;
+    const t0 = new Date(2026, 0, 10, 9).getTime();
+    expect((await lib.review(sheet.id, 'start', t0)).review).toEqual({ next: t0, interval: 0, count: 0 });
+    expect(isDue(lib.get(sheet.id)!, t0)).toBe(true);
+    let r = (await lib.review(sheet.id, 'good', t0)).review!;
+    expect(r).toMatchObject({ next: t0 + day, interval: 1, count: 1 });
+    expect(isDue(lib.get(sheet.id)!, t0)).toBe(false);
+    r = (await lib.review(sheet.id, 'good', t0)).review!;
+    expect(r.interval).toBe(3);
+    r = (await lib.review(sheet.id, 'easy', t0)).review!;
+    expect(r.interval).toBe(14);
+    expect(studyStatus(lib.get(sheet.id)!)).toBe('done');
+    r = (await lib.review(sheet.id, 'again', t0)).review!;
+    expect(r).toMatchObject({ interval: 1, count: 0 });
+    expect((await lib.review(sheet.id, 'stop')).review).toBeUndefined();
+  });
+
+  it('opens images and texts, with pins and paragraphs', async () => {
+    const png = join(dir, 'Courbe de demande.png');
+    await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const txt = join(dir, 'Résumé.md');
+    await writeFile(txt, '# Chapitre 1\n\nPremier paragraphe.\n\nSecond.');
+    const image = await lib.addLocalFile(png);
+    const text = await lib.addLocalFile(txt);
+    expect([image.kind, text.kind]).toEqual(['image', 'text']);
+    expect(await lib.readText(text.id)).toContain('Premier paragraphe.');
+    await expect(lib.readText(image.id)).rejects.toThrow();
+
+    await lib.setPins(image.id, [{ n: 1, x: 0.2, y: 0.3, createdAt: 1 }]);
+    await lib.saveNote(image.id, '[pin 1] Point d’équilibre');
+    expect(positionLabel(lib.get(image.id)!)).toBe('1 repère');
+    expect(lib.get(image.id)?.noteCount).toBe(1);
+
+    await lib.setProgress(text.id, 2, 3);
+    expect(positionLabel(lib.get(text.id)!)).toBe('§ 2 / 3');
+  });
 });
+

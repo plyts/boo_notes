@@ -19,6 +19,8 @@ export interface AppConfig {
     databaseUrl: string | null;
     workspace: string | null;
     autoSync: boolean;
+    /** Send the Notion connection to the paired extensions, so they sync while the app is closed. */
+    share: boolean;
     /** Development / tests only: alternative API endpoint. */
     apiBase?: string;
   };
@@ -50,6 +52,7 @@ export function defaultConfig(vault: string): AppConfig {
       databaseUrl: null,
       workspace: null,
       autoSync: true,
+      share: true,
     },
     openAtLogin: false,
     closeToTray: true,

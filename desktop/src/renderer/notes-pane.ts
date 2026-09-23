@@ -1,7 +1,7 @@
-import { NotesEditor } from '../../../src/panel/editor';
-import { findAssetRefs, findPageRefs, findTimestamps } from '../../../src/shared/markdown';
+import { NotesEditor, type AnchorKind } from '../../../src/panel/editor';
+import { findAnchors, findAssetRefs } from '../../../src/shared/markdown';
 import type { ItemView } from '../ipc';
-import { errorMessage, h, icon, toast } from './ui';
+import { errorMessage, h, icon, KIND_ICON, toast } from './ui';
 
 export interface NotesPaneOptions {
   item: ItemView;
@@ -11,9 +11,16 @@ export interface NotesPaneOptions {
   now(): number | null;
   onTimestampClick(seconds: number): void;
   onTimestampHover?(seconds: number | null): void;
-  onPageRefClick?(page: number): void;
+  /** Page / paragraph / pin chip clicked. */
+  onAnchorClick?(kind: AnchorKind, n: number): void;
+  onWikiLinkClick?(title: string): void;
+  onWikiLinkHover?(title: string | null, el: HTMLElement | null): void;
+  wikiTitles?(): string[];
+  onFragmentClick?(url: string): void;
   onKeystroke?(): void;
   onContentChanged?(markdown: string): void;
+  /** Placeholder of an empty note. */
+  placeholder?: string;
 }
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -25,6 +32,7 @@ export class NotesPane {
   private readonly statsEl: HTMLElement;
   private readonly saveEl: HTMLElement;
   private readonly footer: HTMLElement;
+  private readonly backlinksEl: HTMLElement;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saving: Promise<void> = Promise.resolve();
   private state: SaveState = 'idle';
@@ -34,6 +42,7 @@ export class NotesPane {
     this.saveEl = h('span', { class: 'save-state', role: 'status', 'aria-live': 'polite' });
     const editorHost = h('div', { class: 'notes-editor', 'aria-label': 'Notes (Markdown)' });
     this.footer = h('div', { class: 'notes-footer' });
+    this.backlinksEl = h('div', { class: 'notes-backlinks', hidden: true });
     this.el = h(
       'section',
       { class: 'notes-pane', 'aria-label': 'Notes' },
@@ -46,6 +55,7 @@ export class NotesPane {
         opts.readOnly ? h('span', { class: 'readonly-chip', title: 'Cette note s’écrit dans l’extension du navigateur' }, icon('globe', 13), 'Navigateur') : this.saveEl,
       ),
       editorHost,
+      this.backlinksEl,
       this.footer,
     );
     this.editor = new NotesEditor(editorHost, {
@@ -54,7 +64,12 @@ export class NotesPane {
       stampToken: () => opts.stamp(),
       onTimestampHover: (s) => opts.onTimestampHover?.(s),
       onTimestampClick: (s) => opts.onTimestampClick(s),
-      onPageRefClick: (p) => opts.onPageRefClick?.(p),
+      onAnchorClick: (kind, n) => opts.onAnchorClick?.(kind, n),
+      onWikiLinkClick: (title) => opts.onWikiLinkClick?.(title),
+      onWikiLinkHover: (title, el) => opts.onWikiLinkHover?.(title, el),
+      wikiTitles: opts.wikiTitles ? () => opts.wikiTitles!() : undefined,
+      onFragmentClick: (url) => opts.onFragmentClick?.(url),
+      placeholderText: opts.placeholder,
       onKeystroke: () => opts.onKeystroke?.(),
       onChange: () => this.scheduleSave(),
       onContentChanged: () => this.renderStats(),
@@ -64,6 +79,19 @@ export class NotesPane {
     });
     if (opts.readOnly) this.editor.setEditable(false);
     this.renderSave();
+  }
+
+  /** « Liée depuis » : notes linking to this one (`[[Titre]]`), shown under the editor. */
+  setBacklinks(items: ItemView[], open: (id: string) => void): void {
+    this.backlinksEl.hidden = items.length === 0;
+    this.backlinksEl.replaceChildren(
+      h('span', { class: 'backlinks-label' }, icon('link', 13), `Liée depuis ${items.length} note${items.length > 1 ? 's' : ''}`),
+      ...items.map((i) => {
+        const chip = h('button', { type: 'button', class: 'link-chip', title: `Ouvrir « ${i.title} »` }, icon(KIND_ICON[i.kind], 13), h('span', {}, i.title));
+        chip.addEventListener('click', () => open(i.id));
+        return chip;
+      }),
+    );
   }
 
   /** Buttons shown under the editor (stamp, capture, quote…). */
@@ -148,7 +176,7 @@ export class NotesPane {
 
   private renderStats(): void {
     const md = this.editor.content;
-    const notes = findTimestamps(md).length + findPageRefs(md).length;
+    const notes = findAnchors(md).length;
     const captures = findAssetRefs(md).length;
     const parts = [
       notes ? `${notes} note${notes > 1 ? 's' : ''}` : '',

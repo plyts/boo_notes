@@ -22,6 +22,13 @@ const api: BooApi = {
     saveCapture: (id, dataUrl, seconds) => invoke(C.librarySaveCapture, id, dataUrl, seconds),
     reveal: (id) => invoke(C.libraryReveal, id),
     openSource: (id, seconds) => invoke(C.libraryOpenSource, id, seconds),
+    createNote: (title, body) => invoke(C.libraryCreateNote, title, body),
+    findByTitle: (title) => invoke(C.libraryFindByTitle, title),
+    backlinks: (id) => invoke(C.libraryBacklinks, id),
+    titles: () => invoke(C.libraryTitles),
+    review: (id, action) => invoke(C.libraryReview, id, action),
+    setPins: (id, pins) => invoke(C.librarySetPins, id, pins),
+    readText: (id) => invoke(C.libraryReadText, id),
   },
   notion: {
     connect: (token, target) => invoke(C.notionConnect, token, target),

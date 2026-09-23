@@ -150,6 +150,21 @@ const ICONS = {
   flag: [
     ['path', { d: 'M5 21V4M5 4h11l-2 4 2 4H5' }],
   ],
+  image: [
+    ['rect', { x: '3', y: '4', width: '18', height: '16', rx: '2' }],
+    ['circle', { cx: '9', cy: '10', r: '1.8' }],
+    ['path', { d: 'M21 16l-5-5-9 9' }],
+  ],
+  cards: [
+    ['rect', { x: '7', y: '3', width: '14', height: '14', rx: '2' }],
+    ['path', { d: 'M17 21H5a2 2 0 0 1-2-2V7' }],
+    ['path', { d: 'M11 8h6M11 12h4' }],
+  ],
+  target: [
+    ['circle', { cx: '12', cy: '12', r: '8' }],
+    ['circle', { cx: '12', cy: '12', r: '3', fill: 'currentColor', stroke: 'none' }],
+  ],
+  text: [['path', { d: 'M5 6h14M5 10h14M5 14h10M5 18h7' }]],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

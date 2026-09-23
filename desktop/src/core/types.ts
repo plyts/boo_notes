@@ -5,14 +5,8 @@ export type { MediaKind, Platform };
 /** Where the note is written: in the browser extension, or in this app (local files). */
 export type ItemOrigin = 'extension' | 'desktop';
 
-/** Study status shown in the library and mirrored in Notion. */
-export type StudyStatus = 'todo' | 'doing' | 'done';
-
-export const STATUS_LABELS: Record<StudyStatus, string> = {
-  todo: 'À commencer',
-  doing: 'En cours',
-  done: 'Terminé',
-};
+export { STATUS_LABELS, type StudyStatus } from '../../../src/shared/study';
+import type { StudyStatus } from '../../../src/shared/study';
 
 /**
  * Reading / listening position. Media: seconds. PDF: `position` is the page
@@ -36,25 +30,32 @@ export interface Highlight {
   createdAt: number;
 }
 
-export interface NotionBlockRef {
-  id: string;
-  hash: string;
+/** A numbered pin placed on an image (graph, diagram…). Coordinates are fractions of the image (0..1). */
+export interface Pin {
+  n: number;
+  x: number;
+  y: number;
+  createdAt: number;
 }
 
-/** Mirror of an item in the Notion course database. */
-export interface NotionLink {
-  pageId: string;
-  url?: string;
-  /** Top-level blocks written by Boo Notes, in order (incremental sync). */
-  blocks: NotionBlockRef[];
-  syncedAt: number;
-  /** Library revision of the last successful content sync. */
-  syncedRev: number;
-  error?: string | null;
+/** Spaced repetition of a revision sheet: next review date and current interval. */
+export interface Review {
+  /** Due date (ms). */
+  next: number;
+  /** Current interval (days). */
+  interval: number;
+  /** Successful reviews in a row. */
+  count: number;
+  last?: number;
 }
+
+export type ReviewAction = 'start' | 'stop' | 'again' | 'good' | 'easy';
+
+export type { NotionBlockRef, NotionLink } from '../../../src/shared/notion/engine';
+import type { NotionLink } from '../../../src/shared/notion/engine';
 
 export interface LibraryItem {
-  /** Note id: `youtube:…`, `notion:…`, `web:…` (extension) or `file:…` (local file). */
+  /** Note id: `youtube:…`, `notion:…`, `web:…` (extension), `file:…` (local file) or `note:…` (revision sheet). */
   id: string;
   origin: ItemOrigin;
   kind: MediaKind;
@@ -74,6 +75,12 @@ export interface LibraryItem {
   /** Time spent with the item open in the app (ms). */
   studyMs?: number;
   highlights?: Highlight[];
+  pins?: Pin[];
+  /** Titles linked from the note with `[[Titre]]`. */
+  links?: string[];
+  /** Length of the note (characters), for revision sheets without anchors. */
+  size?: number;
+  review?: Review;
   /** Manual status; derived from the progress when absent. */
   status?: StudyStatus;
   /** Timestamps / page references in the note (library cards, Notion "Notes" column). */
@@ -92,6 +99,8 @@ export interface ExtensionNote {
   createdAt: number;
   updatedAt: number;
   rev: number;
+  /** Notion page written by the extension itself (while the app was closed). */
+  notion?: NotionLink;
 }
 
 export interface ActivePlayer {

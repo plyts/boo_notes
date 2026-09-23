@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Library } from '../../src/core/library';
-import { NotionClient } from '../../src/core/notion/client';
+import { NotionClient } from '../../../src/shared/notion/client';
 import { DATABASE_TITLE, NotionSync, type NotionConfig } from '../../src/core/notion/sync';
 import type { ExtensionNote } from '../../src/core/types';
 import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../tools/mock-notion.mjs';
@@ -227,4 +227,71 @@ describe('NotionSync.syncItem', () => {
     const page = mock.state.pages.get(lib.get(YT)!.notion!.pageId.replace(/-/g, ''))!;
     expect(page.properties.Statut).toEqual({ select: { name: 'Terminé' } });
   });
+
+  it('turns [[links]] between sheets into mentions and a two-way relation', async () => {
+    await connect();
+    const db = [...mock.state.databases.values()][0];
+    expect(db.is_inline).toBe(true);
+    expect(db.properties.Liens.relation).toMatchObject({ type: 'dual_property' });
+    expect(Object.keys(db.properties)).toEqual(expect.arrayContaining(['Liée depuis', 'Boo ID', 'Prochaine révision']));
+
+    const forces = await lib.createNote('Forces', 'Une force se mesure en newtons.');
+    const newton = await lib.createNote('Lois de Newton', 'Deuxième loi : voir [[Forces]] et [[Inconnue]].');
+    await lib.review(newton.id, 'start', Date.UTC(2026, 4, 2, 12));
+    const { pageId } = await sync.syncItem(newton.id);
+
+    const forcesPage = lib.get(forces.id)!.notion!.pageId;
+    expect(forcesPage).toBeTruthy();
+    expect(mock.pageContent(pageId)).toEqual([{ type: 'paragraph', text: 'Deuxième loi : voir @Forces et Inconnue.' }]);
+    const page = mock.state.pages.get(pageId.replace(/-/g, ''))!;
+    expect(page.icon).toEqual({ type: 'emoji', emoji: '🗂️' });
+    expect(page.properties).toMatchObject({
+      Type: { select: { name: 'Fiche' } },
+      Liens: { relation: [{ id: forcesPage }] },
+      'Prochaine révision': { date: { start: '2026-05-02' } },
+      'Boo ID': { rich_text: [{ text: { content: newton.id } }] },
+    });
+    // The linked sheet exists (empty until its own sync), and lists the backlink.
+    const fetched = await new NotionClient({ token: 'secret_test', baseUrl: mock.url, minIntervalMs: 0 }).retrievePage(forcesPage);
+    expect(fetched.properties?.['Liée depuis']).toEqual({ relation: [{ id: pageId }] });
+    expect(mock.pageContent(forcesPage)).toEqual([]);
+    await sync.syncItem(forces.id);
+    expect(mock.pageContent(forcesPage)).toEqual([{ type: 'paragraph', text: 'Une force se mesure en newtons.' }]);
+  });
+
+  it('shows studied images in Notion', async () => {
+    await connect();
+    const png = join(dir, 'Offre et demande.png');
+    await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const item = await lib.addLocalFile(png);
+    await lib.saveNote(item.id, '[pin 1] Équilibre du marché');
+    const { pageId } = await sync.syncItem(item.id);
+    expect(mock.pageContent(pageId)).toEqual([
+      { type: 'image', text: 'Offre et demande.png' },
+      { type: 'paragraph', text: '◉ 1 Équilibre du marché' },
+    ]);
+    expect([...mock.state.uploads.values()][0]).toMatchObject({ filename: 'Offre et demande.png', content_type: 'image/png' });
+  });
+
+  it('adopts the page another device created for the same note (no duplicate)', async () => {
+    await connect();
+    await lib.upsertFromExtension(note(1, '[00:05] Intro'));
+    const first = await sync.syncItem(YT);
+
+    // Another device (the browser extension, another computer…) knows the note but not its page.
+    const other = new Library(join(dir, 'other'));
+    await other.open();
+    await other.upsertFromExtension(note(2, '[00:05] Intro\n[00:09] Suite'));
+    const otherSync = new NotionSync({
+      library: other,
+      getConfig: () => config,
+      saveDatabase: async () => undefined,
+      clientOptions: { minIntervalMs: 0, sleep: async () => undefined },
+    });
+    const second = await otherSync.syncItem(YT);
+    expect(second.pageId).toBe(first.pageId);
+    expect([...mock.state.pages.values()].filter((p) => p.parent?.database_id)).toHaveLength(1);
+    expect(mock.pageContent(first.pageId)!.map((b) => b.text)).toEqual(['', '00:05 Intro', '00:09 Suite']);
+  });
 });
+

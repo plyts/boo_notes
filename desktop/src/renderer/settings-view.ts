@@ -159,20 +159,25 @@ export class SettingsScreen {
             h(
               'span',
               { class: 'set-desc' },
-              n.lastError ?? (n.lastSyncAt ? `Dernière synchronisation ${relativeTime(n.lastSyncAt)}` : 'Base « Boo Notes — Cours » prête'),
+              n.lastError ?? (n.lastSyncAt ? `Dernière synchronisation ${relativeTime(n.lastSyncAt)}` : 'Tableau « Boo Notes — Mes notes » prêt'),
             ),
           ),
-          button('Ouvrir la base', { icon: 'popout', small: true }, () => void window.boo.notion.open()),
+          button('Ouvrir le tableau', { icon: 'popout', small: true }, () => void window.boo.notion.open()),
         ),
         row(
           'Synchronisation automatique',
-          'Chaque note, progression et surlignage est envoyé à Notion quelques secondes après la modification.',
+          'Chaque note, progression, surlignage et lien est envoyé à Notion quelques secondes après la modification.',
           toggle(n.autoSync, 'Synchronisation automatique', (v) => void this.save({ notionAutoSync: v })),
+        ),
+        row(
+          'Synchroniser aussi depuis le navigateur',
+          'L’extension reçoit cette connexion : vos notes en ligne partent vers Notion même quand Boo Notes est fermé.',
+          toggle(n.share, 'Partager la connexion Notion avec l’extension', (v) => void this.save({ notionShare: v })),
         ),
         h(
           'div',
           { class: 'set-row' },
-          h('span', { class: 'set-text' }, h('span', { class: 'set-label' }, 'Tous les cours'), h('span', { class: 'set-desc' }, 'Crée ou met à jour une page par cours.')),
+          h('span', { class: 'set-text' }, h('span', { class: 'set-label' }, 'Toutes les notes'), h('span', { class: 'set-desc' }, 'Crée ou met à jour une page par note, cours ou fiche.')),
           h(
             'span',
             { class: 'row-actions' },
@@ -210,7 +215,7 @@ export class SettingsScreen {
         try {
           this.settings = await window.boo.notion.connect(this.notionDraft.token, this.notionDraft.target);
           this.notionDraft = { token: '', target: '' };
-          toast('Notion est connecté : la base « Boo Notes — Cours » a été créée', 'success');
+          toast('Notion est connecté : le tableau « Boo Notes — Mes notes » a été ajouté à votre page', 'success');
         } catch (e) {
           toast(errorMessage(e), 'error');
         } finally {
@@ -234,7 +239,7 @@ export class SettingsScreen {
               ', « Nouvelle intégration » (type interne), puis copiez son secret.',
             ),
           ),
-          h('li', {}, h('strong', {}, 'Partagez une page'), h('span', {}, 'Dans Notion, ouvrez la page qui accueillera vos cours › ••• › Connexions › ajoutez l’intégration.')),
+          h('li', {}, h('strong', {}, 'Partagez une page'), h('span', {}, 'Dans Notion, créez ou ouvrez la page qui rassemblera vos notes (ex. « Mes études ») › ••• › Connexions › ajoutez l’intégration. Boo Notes y insère un tableau de toutes vos notes.')),
           h(
             'li',
             {},

@@ -16,16 +16,21 @@ import {
   toast,
 } from './ui';
 
-export type LibraryFilter = { status: StudyStatus | 'all'; kind: MediaKind | 'all' };
+export type LibraryFilter = { status: StudyStatus | 'all'; kind: MediaKind | 'all'; due?: boolean };
 
 export const FILTER_TITLES: Record<string, string> = {
   all: 'Bibliothèque',
+  due: 'À réviser',
   doing: 'En cours',
   done: 'Terminés',
   todo: 'À commencer',
+  note: 'Fiches',
   video: 'Vidéos',
   audio: 'Audio',
   pdf: 'PDF',
+  image: 'Images',
+  text: 'Textes',
+  page: 'Pages web',
 };
 
 const STATUS_LABELS: Record<StudyStatus, string> = { todo: 'À commencer', doing: 'En cours', done: 'Terminé' };
@@ -33,6 +38,7 @@ const STATUS_LABELS: Record<StudyStatus, string> = { todo: 'À commencer', doing
 export interface LibraryHost {
   open(id: string): void;
   addFiles(): void;
+  newNote(): void;
   openSettings(section?: string): void;
   notionConnected(): boolean;
   extensionConnected(): boolean;
@@ -65,10 +71,11 @@ export class LibraryView {
   }
 
   counts(): Record<string, number> {
-    const c: Record<string, number> = { all: this.items.length, doing: 0, done: 0, todo: 0, video: 0, audio: 0, pdf: 0 };
+    const c: Record<string, number> = { all: this.items.length, due: 0, doing: 0, done: 0, todo: 0 };
     for (const i of this.items) {
       c[i.studyStatus]++;
-      c[i.kind]++;
+      c[i.kind] = (c[i.kind] ?? 0) + 1;
+      if (i.due) c.due++;
     }
     return c;
   }
@@ -76,6 +83,7 @@ export class LibraryView {
   private visible(): ItemView[] {
     return this.items.filter(
       (i) =>
+        (!this.filter.due || i.due) &&
         (this.filter.status === 'all' || i.studyStatus === this.filter.status) &&
         (this.filter.kind === 'all' || i.kind === this.filter.kind) &&
         (!this.query || `${i.title} ${PLATFORM_LABELS[i.platform]} ${i.source}`.toLowerCase().includes(this.query)),
@@ -83,11 +91,12 @@ export class LibraryView {
   }
 
   private render(): void {
-    const key = this.filter.kind !== 'all' ? this.filter.kind : this.filter.status;
+    const key = this.filter.due ? 'due' : this.filter.kind !== 'all' ? this.filter.kind : this.filter.status;
     const items = this.visible();
-    const add = button('Ajouter un cours', { variant: 'primary', icon: 'plus', title: 'PDF, audio ou vidéo (Ctrl+O)' }, () =>
+    const add = button('Ajouter un cours', { variant: 'primary', icon: 'plus', title: 'PDF, image, texte, audio ou vidéo (Ctrl+O)' }, () =>
       this.host.addFiles(),
     );
+    const sheet = button('Nouvelle fiche', { variant: 'plain', icon: 'cards', title: 'Fiche de révision (Ctrl+N)' }, () => this.host.newNote());
     const head = h(
       'header',
       { class: 'page-head' },
@@ -95,9 +104,10 @@ export class LibraryView {
         'div',
         {},
         h('h1', {}, FILTER_TITLES[key] ?? 'Bibliothèque'),
-        h('p', { class: 'page-sub' }, this.subtitle(items)),
+        h('p', { class: 'page-sub' }, this.filter.due ? this.dueSubtitle(items) : this.subtitle(items)),
       ),
       h('span', { class: 'spacer' }),
+      sheet,
       add,
     );
     if (this.items.length === 0) {
@@ -119,16 +129,28 @@ export class LibraryView {
     sections.push(
       items.length
         ? h('ul', { class: 'rows', role: 'list' }, ...items.map((i) => this.row(i)))
-        : h('p', { class: 'no-result' }, this.query ? `Aucun cours ne correspond à « ${this.query} ».` : 'Rien ici pour l’instant.'),
+        : h(
+            'p',
+            { class: 'no-result' },
+            this.query
+              ? `Aucune note ne correspond à « ${this.query} ».`
+              : this.filter.due
+                ? 'Rien à réviser aujourd’hui. Ajoutez une fiche aux révisions depuis son en-tête.'
+                : 'Rien ici pour l’instant.',
+          ),
     );
     this.el.replaceChildren(...sections);
+  }
+
+  private dueSubtitle(items: ItemView[]): string {
+    return items.length ? `${items.length} note${items.length > 1 ? 's' : ''} à réviser aujourd’hui` : '';
   }
 
   private subtitle(items: ItemView[]): string {
     const n = items.length;
     const done = items.filter((i) => i.studyStatus === 'done').length;
     if (!n) return '';
-    return `${n} cours${done ? ` · ${done} terminé${done > 1 ? 's' : ''}` : ''}`;
+    return `${n} note${n > 1 ? 's' : ''}${done ? ` · ${done} terminée${done > 1 ? 's' : ''}` : ''}`;
   }
 
   private empty(): HTMLElement {
@@ -139,8 +161,15 @@ export class LibraryView {
         'li',
         {},
         h('span', { class: 'step-icon' }, icon('file', 20)),
-        h('strong', {}, 'Un PDF, un audio, une vidéo'),
-        h('small', {}, 'Glissez-le dans cette fenêtre : lecture suivie, notes par page ou horodatées.'),
+        h('strong', {}, 'Tout support de cours'),
+        h('small', {}, 'PDF, image (graphe, schéma), texte, audio, vidéo : chaque note reste liée à sa page, son repère ou son instant.'),
+      ),
+      h(
+        'li',
+        {},
+        h('span', { class: 'step-icon' }, icon('cards', 20)),
+        h('strong', {}, 'Des fiches liées'),
+        h('small', {}, 'Des fiches de révision reliées par [[liens]], à réviser au bon moment.'),
       ),
       h(
         'li',
@@ -159,14 +188,15 @@ export class LibraryView {
         'li',
         {},
         h('span', { class: 'step-icon' }, icon('notion', 20)),
-        h('strong', {}, 'Suivi dans Notion'),
-        h('small', {}, 'Chaque cours devient une page Notion avec sa progression et ses notes.'),
+        h('strong', {}, 'Tout dans Notion'),
+        h('small', {}, 'Un tableau de toutes vos notes, une page par note, les liens entre fiches.'),
       ),
     );
     const actions = h(
       'div',
       { class: 'empty-actions' },
       button('Ajouter un cours…', { variant: 'primary', icon: 'plus' }, () => this.host.addFiles()),
+      button('Nouvelle fiche', { icon: 'cards' }, () => this.host.newNote()),
       this.host.extensionConnected() ? null : button('Appairer l’extension', { icon: 'link' }, () => this.host.openSettings('extension')),
       this.host.notionConnected() ? null : button('Connecter Notion', { icon: 'notion' }, () => this.host.openSettings('notion')),
     );
@@ -175,7 +205,7 @@ export class LibraryView {
       { class: 'empty-library' },
       h('div', { class: 'empty-art' }, icon('ghost', 40)),
       h('h2', {}, 'Votre bibliothèque de cours'),
-      h('p', {}, 'Tout ce que vous étudiez, au même endroit, avec votre progression.'),
+      h('p', {}, 'Tout ce que vous étudiez, sous toutes ses formes, au même endroit.'),
       steps,
       actions,
     );
@@ -195,7 +225,7 @@ export class LibraryView {
   }
 
   private row(i: ItemView): HTMLElement {
-    const notion = i.notion
+    const notion = i.notion && i.notion.syncedRev >= 0
       ? i.notion.error
         ? h('span', { class: 'notion-state error', title: i.notion.error }, icon('alert', 14))
         : h('span', { class: 'notion-state ok', title: `Dans Notion — synchronisé ${relativeTime(i.notion.syncedAt)}` }, icon('notion', 14))
@@ -216,13 +246,20 @@ export class LibraryView {
         h(
           'span',
           { class: 'row-meta' },
-          [PLATFORM_LABELS[i.platform], KIND_LABELS[i.kind], i.noteCount ? `${i.noteCount} note${i.noteCount > 1 ? 's' : ''}` : '']
+          [
+            i.kind === 'note' ? '' : PLATFORM_LABELS[i.platform],
+            KIND_LABELS[i.kind],
+            i.noteCount ? `${i.noteCount} note${i.noteCount > 1 ? 's' : ''}` : '',
+            i.links?.length ? `${i.links.length} lien${i.links.length > 1 ? 's' : ''}` : '',
+          ]
             .filter(Boolean)
             .join(' · '),
         ),
       ),
       h('span', { class: 'row-progress' }, progressBar(i.ratio), h('span', { class: 'row-pos' }, i.positionLabel || '—')),
-      h('span', { class: `status-chip ${i.studyStatus}` }, STATUS_LABELS[i.studyStatus]),
+      i.due
+        ? h('span', { class: 'status-chip due' }, 'À réviser')
+        : h('span', { class: `status-chip ${i.studyStatus}` }, STATUS_LABELS[i.studyStatus]),
       notion,
       h('span', { class: 'row-date' }, relativeTime(i.updatedAt)),
     );
@@ -234,7 +271,7 @@ export class LibraryView {
     showMenu(anchor, [
       { label: 'Ouvrir', icon: 'book', run: () => this.host.open(i.id) },
       {
-        label: i.notion ? 'Synchroniser avec Notion' : 'Envoyer vers Notion',
+        label: i.notion && i.notion.syncedRev >= 0 ? 'Synchroniser avec Notion' : 'Envoyer vers Notion',
         icon: 'notion',
         disabled: !this.host.notionConnected(),
         run: () =>

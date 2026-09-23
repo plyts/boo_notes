@@ -4,7 +4,15 @@ import type { MediaKind } from '../core/types';
 export { h, icon };
 export type { IconName };
 
-export const KIND_ICON: Record<MediaKind, IconName> = { video: 'video', audio: 'headphones', pdf: 'file' };
+export const KIND_ICON: Record<MediaKind, IconName> = {
+  video: 'video',
+  audio: 'headphones',
+  pdf: 'file',
+  text: 'text',
+  image: 'image',
+  page: 'globe',
+  note: 'cards',
+};
 
 export function button(
   label: string,
@@ -184,6 +192,34 @@ export function confirmDialog(opts: {
     });
     document.body.append(dialog);
     dialog.showModal();
+  });
+}
+
+/** Asks for a short text (title of a new sheet…); null when cancelled. */
+export function promptDialog(opts: { title: string; text?: string; placeholder?: string; value?: string; confirm: string }): Promise<string | null> {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'text', class: 'dialog-input', placeholder: opts.placeholder, value: opts.value ?? '', 'aria-label': opts.title });
+    const dialog = h('dialog', { class: 'dialog' }, h('h2', {}, opts.title), opts.text ? h('p', {}, opts.text) : null, input);
+    const done = (value: string | null) => {
+      dialog.close();
+      dialog.remove();
+      resolve(value?.trim() ? value.trim() : null);
+    };
+    const ok = button(opts.confirm, { variant: 'primary' }, () => done(input.value));
+    dialog.append(h('div', { class: 'dialog-actions' }, button('Annuler', { variant: 'plain' }, () => done(null)), ok));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        done(input.value);
+      }
+    });
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(null);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    input.focus();
   });
 }
 
