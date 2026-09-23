@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
-import { findAnchors, linkedTitles, normalizeTitle, toPortableMarkdown } from '../../../src/shared/markdown';
+import { countNotes, linkedTitles, normalizeTitle, toPortableMarkdown } from '../../../src/shared/markdown';
 import { formatTimecode } from '../../../src/shared/time';
 import { parseFrontMatter, serializeFrontMatter } from './frontmatter';
 import type { ExtensionNote, Highlight, LibraryItem, MediaKind, NotionLink, Pin, ReviewAction, StudyStatus } from './types';
@@ -69,10 +69,8 @@ export function safeFileName(name: string): string {
   return out;
 }
 
-/** Number of anchored notes (timestamps, pages, paragraphs, pins): one per written idea. */
-export function countNotes(markdown: string): number {
-  return findAnchors(markdown).length;
-}
+/** Number of anchored notes (timestamps, pages, paragraphs, pins, quoted passages): one per written idea. */
+export { countNotes };
 
 export { positionLabel, progressRatio, studyStatus } from '../../../src/shared/study';
 import { nextInterval } from '../../../src/shared/study';

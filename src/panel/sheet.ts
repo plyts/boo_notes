@@ -12,8 +12,8 @@ export type ShortcutMap = Record<CommandId, ShortcutInfo>;
 
 export const COMMAND_LABELS: Record<CommandId, string> = {
   'toggle-sidebar': 'Ouvrir / réduire les notes',
-  'insert-timestamp': 'Insérer l’horodatage',
-  'capture-screenshot': 'Capturer l’image',
+  'insert-timestamp': 'Horodater · citer le passage sélectionné',
+  'capture-screenshot': 'Capturer l’image (vidéo ou page)',
   'smart-pause': 'Pause & écrire (re-appuyer pour reprendre)',
   replay: 'Revoir les dernières secondes',
 };
@@ -34,6 +34,7 @@ const MARKDOWN_TIPS: Array<[string, string]> = [
   ['Tâche', '- [ ] à faire'],
   ['Gras', '**texte**'],
   ['Code', '`code`'],
+  ['Lien vers une fiche', '[[Titre]]'],
 ];
 
 /** "Raccourcis clavier" dialog, in the spirit of Gmail / Docs `?` sheets. */
@@ -88,7 +89,7 @@ export class ShortcutsSheet {
     });
     const code = (text: string) => h('code', {}, text);
     this.body.replaceChildren(
-      group('Vidéo — partout dans le navigateur', ...commandRows),
+      group('Vidéo, audio ou page — partout dans le navigateur', ...commandRows),
       group('Éditeur', ...EDITOR_TIPS.map(([label, keys]) => row(label, keycaps(keys.replace('Mod', this.mac ? 'Command' : 'Ctrl'), this.mac)))),
       group('Markdown', ...MARKDOWN_TIPS.map(([label, syntax]) => row(label, code(syntax)))),
     );
@@ -128,30 +129,55 @@ export class ShortcutsSheet {
   }
 }
 
+const EMPTY_TEXT = {
+  media: 'Écrivez simplement : chaque nouvelle ligne reçoit l’horodatage de la lecture. [[ relie une fiche.',
+  page: 'Sélectionnez un passage de la page et citez-le : la note garde le lien vers le passage. [[ relie une fiche.',
+};
+
 /** Empty note: tells what to do next and teaches the shortcuts. */
 export class EmptyState {
   readonly el: HTMLDivElement;
   private readonly list: HTMLDivElement;
+  private readonly text: HTMLParagraphElement;
+  private mode: 'media' | 'page' = 'media';
+  private shortcuts: ShortcutMap | null = null;
 
   constructor(private readonly mac: boolean) {
     this.list = h('div', { class: 'empty-keys' });
+    this.text = h('p', { class: 'empty-text' }, EMPTY_TEXT.media);
     this.el = h(
       'div',
       { class: 'empty', 'aria-hidden': 'true' },
       h('div', { class: 'empty-art' }, icon('ghost', 28)),
       h('p', { class: 'empty-title' }, 'Prêt à prendre des notes'),
-      h('p', { class: 'empty-text' }, 'Écrivez simplement : chaque nouvelle ligne reçoit l’horodatage de la lecture.'),
+      this.text,
       this.list,
     );
   }
 
+  /** Media (timestamps) or reading mode (quotes). */
+  setMode(mode: 'media' | 'page'): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.text.textContent = EMPTY_TEXT[mode];
+    if (this.shortcuts) this.render(this.shortcuts);
+  }
+
   render(shortcuts: ShortcutMap): void {
-    const items: Array<[CommandId, string]> = [
-      ['insert-timestamp', 'Horodater'],
-      ['capture-screenshot', 'Capturer'],
-      ['smart-pause', 'Pause & écrire'],
-      ['replay', 'Revoir'],
-    ];
+    this.shortcuts = shortcuts;
+    const items: Array<[CommandId, string]> =
+      this.mode === 'page'
+        ? [
+            ['insert-timestamp', 'Citer la sélection'],
+            ['capture-screenshot', 'Capturer la page'],
+            ['toggle-sidebar', 'Réduire les notes'],
+          ]
+        : [
+            ['insert-timestamp', 'Horodater'],
+            ['capture-screenshot', 'Capturer'],
+            ['smart-pause', 'Pause & écrire'],
+            ['replay', 'Revoir'],
+          ];
     // Two aligned columns: keys (right-aligned) | action.
     this.list.replaceChildren(
       ...items

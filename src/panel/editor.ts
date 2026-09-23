@@ -651,6 +651,14 @@ export class NotesEditor {
     if (pos !== state.field(nowLine).pos) this.view.dispatch({ effects: setNowLine.of(pos) });
   }
 
+  /** Reading mode: highlights the note line quoting the passage being read (`url`: its text fragment link). */
+  setCurrentFragment(url: string | null): void {
+    const { state } = this.view;
+    let pos: number | null = null;
+    if (url !== null) pos = findFragmentLinks(state.doc.toString()).find((f) => f.url === url)?.from ?? null;
+    if (pos !== state.field(nowLine).pos) this.view.dispatch({ effects: setNowLine.of(pos) });
+  }
+
   /** Types `[[` at the cursor and opens the list of notes to link. */
   insertWikiLink(): void {
     this.view.focus();
@@ -694,14 +702,16 @@ export class NotesEditor {
         userEvent: 'input.complete',
       });
     };
-    const titles = this.hooks.wikiTitles?.() ?? [];
-    const options: Completion[] = titles.map((title) => ({ label: title, apply: apply(title), type: 'text' }));
-    // Offer to create a sheet only when no existing note matches what is typed.
+    // Filtered here, ignoring case and accents (« elec » finds « Électricité »): titles starting with the query first.
     const q = normalizeTitle(query);
-    if (q && !titles.some((t) => normalizeTitle(t).includes(q))) {
-      options.push({ label: query.trim(), detail: 'nouvelle fiche', apply: apply(query.trim()) });
-    }
-    return { from: m.from + 2, options, validFor: /^[^[\]\n|]*$/ };
+    const scored = (this.hooks.wikiTitles?.() ?? [])
+      .map((title) => ({ title, at: normalizeTitle(title).indexOf(q) }))
+      .filter((t) => t.at !== -1)
+      .sort((a, b) => Number(a.at !== 0) - Number(b.at !== 0) || a.title.localeCompare(b.title, 'fr'));
+    const options: Completion[] = scored.map(({ title }) => ({ label: title, apply: apply(title), type: 'text' }));
+    // Offer to create a sheet only when no existing note matches what is typed.
+    if (q && !options.length) options.push({ label: query.trim(), detail: 'nouvelle fiche', apply: apply(query.trim()) });
+    return { from: m.from + 2, options, filter: false };
   }
 
   private createState(doc: string): EditorState {

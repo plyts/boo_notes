@@ -144,6 +144,16 @@ export class Drawer {
     this.applyDock();
   }
 
+  /** On-screen box of the open drawer, null when closed. */
+  rect(): DOMRect | null {
+    return this.opened ? this.panel.getBoundingClientRect() : null;
+  }
+
+  /** True for the drawer's own elements (never part of the page's text). */
+  owns(el: Element): boolean {
+    return el === this.host || this.host.contains(el);
+  }
+
   containsPoint(x: number, y: number): boolean {
     if (!this.opened) return false;
     const r = this.panel.getBoundingClientRect();

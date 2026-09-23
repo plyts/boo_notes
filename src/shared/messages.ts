@@ -28,6 +28,21 @@ export interface SyncStatus {
 
 export type ExportTarget = 'desktop' | 'notion' | 'download';
 
+/** Notion as seen by the extension: through the desktop app, or directly (app closed). */
+export interface NotionStatus {
+  /** The extension can write to Notion itself. */
+  configured: boolean;
+  /** Where the connection comes from: shared by the desktop app, or set in the options. */
+  origin: 'desktop' | 'extension' | null;
+  workspace: string | null;
+  databaseUrl: string | null;
+  /** Notes waiting to be written to Notion by the extension. */
+  pending: number;
+  syncing: boolean;
+  lastSyncAt: number | null;
+  lastError: string | null;
+}
+
 export interface CaptureRect {
   x: number;
   y: number;
@@ -75,7 +90,15 @@ export type BackgroundRequest =
   /** Sites where Boo Notes is always active (optional host permission already granted). */
   | { type: 'sites:list' }
   | { type: 'sites:enable'; origin: string }
-  | { type: 'sites:disable'; origin: string };
+  | { type: 'sites:disable'; origin: string }
+  /** Titles of every known note (extension + desktop library), for `[[` completion. */
+  | { type: 'wiki:titles' }
+  /** Opens the note titled `title`: in the desktop app, else its page, else in Notion. */
+  | { type: 'wiki:open'; title: string }
+  | { type: 'notion:status' }
+  | { type: 'notion:connect'; token: string; target: string }
+  | { type: 'notion:disconnect' }
+  | { type: 'notion:sync-all' };
 
 export interface BackgroundResponses {
   hello: { tabId: number };
@@ -100,6 +123,12 @@ export interface BackgroundResponses {
   'sites:list': string[];
   'sites:enable': string[];
   'sites:disable': string[];
+  'wiki:titles': string[];
+  'wiki:open': { message: string };
+  'notion:status': NotionStatus;
+  'notion:connect': NotionStatus;
+  'notion:disconnect': NotionStatus;
+  'notion:sync-all': { ok: number; failed: number };
 }
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -155,11 +184,18 @@ export type ContentToPanel =
   /** `hasVideo`: a media (video or audio) is attached; `kind` tells which. */
   | { type: 'playback'; playback: PlaybackState; hasVideo: boolean; kind: MediaKind }
   | { type: 'insert-timestamp'; seconds: number; focus: boolean }
-  | { type: 'insert-block'; text: string }
+  /** Any anchor token prefixed to the line (`[↗ Section](URL#:~:text=…)` in reading mode). */
+  | { type: 'insert-anchor'; token: string; focus: boolean }
+  | { type: 'insert-block'; text: string; focus?: boolean }
   | { type: 'focus'; where: 'keep' | 'end' }
   | { type: 'pinned'; value: boolean }
   | { type: 'page-theme'; theme: PageTheme }
-  | { type: 'typing-release' };
+  | { type: 'typing-release' }
+  /**
+   * Reading mode (page without media): furthest point read (0..1) and the
+   * quoted passage being read (`[↗](URL#:~:text=…)` of the note), if any.
+   */
+  | { type: 'reading'; ratio: number; passage: string | null };
 
 export type PanelToContent =
   | { type: 'hello'; mode: PanelMode }
@@ -177,4 +213,8 @@ export type PanelToContent =
   | { type: 'dock' }
   | { type: 'toast'; text: string }
   /** In-page fallback shortcut pressed inside the panel. */
-  | { type: 'command'; command: CommandId };
+  | { type: 'command'; command: CommandId }
+  /** Reading mode: quote the page selection (or anchor the section being read). */
+  | { type: 'quote' }
+  /** Reading mode: scroll to a quoted passage and flash it. */
+  | { type: 'reveal'; url: string };

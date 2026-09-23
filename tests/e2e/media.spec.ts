@@ -121,14 +121,14 @@ test.describe('Audio, Notion et autres sites', () => {
     await expect(options.locator('#site-empty')).toBeVisible();
   });
 
-  test('page sans média : le raccourci explique pourquoi rien ne s’ouvre', async ({ page, sw }) => {
+  test('page sans média : les notes s’ouvrent en mode lecture', async ({ page, sw }) => {
     await page.goto('https://blog.example.test/article');
     await page.bringToFront();
     await runCommand(sw, page, 'toggle-sidebar');
-    await expect(page.locator('#boo-notes-overlay .toast')).toHaveText(
-      'Boo Notes : aucune vidéo ni piste audio sur cette page',
-    );
-    await expect(page.locator('#boo-notes-drawer')).toHaveCount(0);
+    await expect(panel(page).locator('.platform')).toHaveText('Web · Lecture');
+    await expect(panel(page).locator('.controls .action').first()).toHaveText('Citer');
+    // Nothing is recorded until something is written.
+    expect(await storedNote(sw, 'web:blog.example.test/article')).toBeUndefined();
   });
 
   test('vidéo déposée dans une page Notion : notes et captures liées à la page', async ({ page, sw }) => {

@@ -347,6 +347,22 @@ label.row {
   background: var(--surface-2);
 }
 
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+a.btn[hidden],
+.rows[hidden] {
+  display: none;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .btn.ghost {
   border-color: transparent;
   background: transparent;

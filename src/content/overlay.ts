@@ -124,8 +124,22 @@ kbd {
   background: #facc15; color: #111; font: 700 11px/1 ${MONO}; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
+/* Reading mode: "Citer" bubble above the page selection */
+.quote-bubble {
+  all: unset; box-sizing: border-box; position: fixed; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px 0 9px; border-radius: 999px; cursor: pointer;
+  background: rgba(18, 18, 22, 0.92); color: #f4f4f5; font: 600 12px/1 ${SANS};
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  opacity: 0; visibility: hidden; translate: 0 4px; pointer-events: none;
+  transition: opacity 0.14s ease, translate 0.2s ${SPRING}, visibility 0s linear 0.14s;
+}
+.quote-bubble.visible { opacity: 1; visibility: visible; translate: 0 0; pointer-events: auto; transition-delay: 0s; }
+.quote-bubble:hover { background: #6d5ef0; }
+.quote-bubble:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 2px; }
+.quote-bubble kbd { background: rgba(255, 255, 255, 0.16); }
+
 @media (prefers-reduced-motion: reduce) {
-  .hud, .tip, .toast, .toast.leave, .marker { transition: none; }
+  .hud, .tip, .toast, .toast.leave, .marker, .quote-bubble { transition: none; }
 }
 `;
 
@@ -155,6 +169,9 @@ export class Overlay {
   private readonly toasts: HTMLDivElement;
   private readonly marker: HTMLDivElement;
   private readonly markerLabel: HTMLDivElement;
+  private readonly quoteBubble: HTMLButtonElement;
+  private readonly quoteKeys: HTMLSpanElement;
+  private onQuote: (() => void) | null = null;
   private hudVisible = false;
   private hudTimer: ReturnType<typeof setTimeout> | null = null;
   private tipTimer: ReturnType<typeof setTimeout> | null = null;
@@ -212,7 +229,23 @@ export class Overlay {
     this.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     this.markerLabel = h('div', { class: 'label' });
     this.marker = h('div', { class: 'marker', 'aria-hidden': 'true' }, h('div', { class: 'line' }), this.markerLabel);
-    root.append(this.flashEl, this.hud, this.tip, this.toasts, this.marker);
+    this.quoteKeys = h('span', { class: 'keys' });
+    this.quoteBubble = h(
+      'button',
+      { type: 'button', class: 'quote-bubble', 'aria-label': 'Citer ce passage dans la note' },
+      icon('quote', 15),
+      h('span', {}, 'Citer'),
+      this.quoteKeys,
+    );
+    this.quoteBubble.inert = true;
+    // Keep the page selection: the button must not take the focus on press.
+    this.quoteBubble.addEventListener('pointerdown', (e) => e.preventDefault());
+    this.quoteBubble.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.onQuote?.();
+    });
+    root.append(this.flashEl, this.hud, this.tip, this.toasts, this.marker, this.quoteBubble);
   }
 
   mount(parent: Element = document.documentElement): void {
@@ -305,9 +338,9 @@ export class Overlay {
     }, ms);
   }
 
-  /** 100 ms white flash over the picture: the capture feedback. */
-  flash(): void {
-    const r = this.geo.contentRect();
+  /** 100 ms white flash over the picture (or `area`): the capture feedback. */
+  flash(area?: DOMRect): void {
+    const r = area ?? this.geo.contentRect();
     if (!r) return;
     Object.assign(this.flashEl.style, {
       transform: `translate(${r.left}px, ${r.top}px)`,
@@ -328,6 +361,24 @@ export class Overlay {
   hideMarker(): void {
     this.markerSeconds = null;
     this.marker.classList.remove('visible');
+  }
+
+  /** Reading mode: "Citer" bubble above the end of the page selection (`rect`). */
+  showQuoteButton(rect: DOMRect, shortcut: string, onQuote: () => void): void {
+    this.onQuote = onQuote;
+    this.quoteKeys.replaceChildren(...shortcutKeys(shortcut, IS_MAC).map((k) => h('kbd', {}, k)));
+    this.quoteBubble.inert = false;
+    this.quoteBubble.classList.add('visible');
+    const w = this.quoteBubble.offsetWidth || 90;
+    const left = Math.max(8, Math.min(innerWidth - w - 8, rect.right - w / 2));
+    const top = rect.top - 40 >= 8 ? rect.top - 40 : rect.bottom + 8;
+    this.quoteBubble.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  }
+
+  hideQuoteButton(): void {
+    this.onQuote = null;
+    this.quoteBubble.inert = true;
+    this.quoteBubble.classList.remove('visible');
   }
 
   private scheduleTip(button: HTMLButtonElement): void {

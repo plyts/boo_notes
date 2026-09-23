@@ -25,6 +25,7 @@
           <a href="#captures" data-icon="camera">Captures</a>
           <a href="#sites" data-icon="globe">Sites</a>
           <a href="#desktop" data-icon="desktop">App Desktop</a>
+          <a href="#notion" data-icon="notion">Notion</a>
           <a href="#donnees" data-icon="download">Données</a>
         </nav>
         <button type="button" class="sidebar-status" id="sidebar-status" data-state="offline">
@@ -244,6 +245,59 @@
                   <input type="password" id="desktopToken" name="desktopToken" spellcheck="false" autocomplete="off" placeholder="Affiché par l’application Desktop" />
                   <button type="button" class="btn ghost" id="toggle-token" aria-pressed="false">Afficher</button>
                 </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="notion" class="group" aria-labelledby="h-notion">
+          <header class="group-head">
+            <h2 id="h-notion">Notion</h2>
+            <p>
+              Toutes vos notes rejoignent un tableau « Boo Notes — Mes notes » dans la page Notion de votre choix, une page
+              par note, reliées entre elles par vos [[liens]]. Quand l’application Desktop est lancée, c’est elle qui écrit
+              dans Notion ; sinon, l’extension s’en charge.
+            </p>
+          </header>
+          <div class="card">
+            <div class="status-card" id="notion-card" data-state="offline">
+              <span class="status-orb" aria-hidden="true"></span>
+              <div class="status-text">
+                <span id="notion-badge" class="status-title">Non connecté</span>
+                <span id="notion-detail" class="row-desc" role="status"></span>
+              </div>
+              <a id="notion-open" class="btn" href="#" target="_blank" rel="noopener" hidden>Ouvrir le tableau</a>
+            </div>
+            <form class="rows inset" id="notion-form">
+              <div class="row stacked">
+                <label class="row-label" for="notion-token">Secret de l’intégration</label>
+                <input type="password" id="notion-token" spellcheck="false" autocomplete="off" placeholder="ntn_… (notion.so/profile/integrations)" required />
+                <span class="row-desc">Créez une intégration interne dans Notion, puis copiez son secret.</span>
+              </div>
+              <div class="row stacked">
+                <label class="row-label" for="notion-page">Page qui accueillera le tableau</label>
+                <input type="url" id="notion-page" spellcheck="false" autocomplete="off" placeholder="https://www.notion.so/Mes-cours-…" required />
+                <span class="row-desc">Ouvrez la page dans Notion › ••• › Connexions › ajoutez l’intégration, puis copiez son lien.</span>
+              </div>
+              <div class="row">
+                <span class="row-text"><span class="row-desc" id="notion-hint">Ou lancez l’app Desktop : elle partage sa connexion Notion avec l’extension.</span></span>
+                <button type="submit" class="btn" id="notion-connect">Connecter Notion</button>
+              </div>
+            </form>
+            <div class="rows inset" id="notion-actions" hidden>
+              <div class="row">
+                <span class="row-text">
+                  <span class="row-label">Tout synchroniser</span>
+                  <span class="row-desc">Écrit maintenant dans Notion toutes les notes de ce navigateur.</span>
+                </span>
+                <button type="button" id="notion-sync-all" class="btn">Synchroniser</button>
+              </div>
+              <div class="row" id="notion-disconnect-row">
+                <span class="row-text">
+                  <span class="row-label">Déconnecter</span>
+                  <span class="row-desc">Les pages déjà créées restent dans Notion.</span>
+                </span>
+                <button type="button" id="notion-disconnect" class="btn danger">Déconnecter</button>
               </div>
             </div>
           </div>

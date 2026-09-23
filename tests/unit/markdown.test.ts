@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countNotes,
   findAnchors,
   findFragmentLinks,
   findPins,
@@ -157,6 +158,18 @@ describe('text fragments', () => {
       end: 'huit neuf dix onze douze',
     });
     expect(parseTextFragment('https://x.test/a#top')).toBeNull();
+  });
+
+  it('keeps URLs with parentheses inside the Markdown link', () => {
+    const url = textFragmentUrl('https://fr.wikipedia.org/wiki/Loi_(physique)', 'la loi (empirique)');
+    expect(url).toBe('https://fr.wikipedia.org/wiki/Loi_%28physique%29#:~:text=la%20loi%20%28empirique%29');
+    const line = quoteLine('la loi (empirique)', 'https://fr.wikipedia.org/wiki/Loi_(physique)');
+    expect(findFragmentLinks(line)).toHaveLength(1);
+    expect(parseTextFragment(url)).toEqual({ start: 'la loi (empirique)', end: null });
+  });
+
+  it('counts anchored lines and quoted passages as notes', () => {
+    expect(countNotes('[00:01] a\n[p. 3] b\n> cité [↗](https://x.test/a#:~:text=cit%C3%A9)\n[[Fiche]] seule')).toBe(3);
   });
 
   it('writes and finds quote lines', () => {

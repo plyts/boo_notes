@@ -116,6 +116,11 @@ export function findAnchors(text: string, offset = 0): AnchorMatch[] {
   return out.sort((a, b) => a.from - b.from);
 }
 
+/** Notes of a text: lines anchored to an instant, a page, a paragraph or a pin, and quoted passages. */
+export function countNotes(markdown: string): number {
+  return findAnchors(markdown).length + findFragmentLinks(markdown).length;
+}
+
 // --- Links between notes: [[Titre]] ----------------------------------------------------------
 
 export interface WikiLinkMatch {
@@ -173,9 +178,14 @@ export function normalizeTitle(title: string): string {
 
 // --- Passages of a web page: text fragments (#:~:text=) ----------------------------------------
 
-/** Percent-encodes a text fragment term (`-`, `,` and `&` are syntax). */
+/** Percent-encodes a text fragment term (`-`, `,` and `&` are syntax; parentheses would end the Markdown link). */
 function encodeTerm(term: string): string {
-  return encodeURIComponent(term).replace(/-/g, '%2D').replace(/,/g, '%2C').replace(/&/g, '%26');
+  return encodeURIComponent(term)
+    .replace(/-/g, '%2D')
+    .replace(/,/g, '%2C')
+    .replace(/&/g, '%26')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
 }
 
 /**
@@ -185,7 +195,8 @@ function encodeTerm(term: string): string {
  */
 export function textFragmentUrl(url: string, quote: string): string {
   const words = quote.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  const base = url.split('#')[0];
+  // `(` `)` (Wikipedia…) would end the Markdown link: encoded, the URL stays the same.
+  const base = url.split('#')[0].replace(/\(/g, '%28').replace(/\)/g, '%29');
   if (words.length === 0) return base;
   const text =
     words.length > 10

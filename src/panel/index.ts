@@ -1,11 +1,12 @@
 import { TypingAutoPause } from '../shared/autopause';
 import { h, icon, type IconName } from '../shared/icons';
-import { toPortableMarkdown } from '../shared/markdown';
+import { findAssetRefs, findFragmentLinks, linkedTitles, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import {
   callBackground,
   PANEL_PORT,
   type ContentToPanel,
   type ExportTarget,
+  type NotionStatus,
   type PageTheme,
   type PanelMode,
   type PanelToContent,
@@ -37,6 +38,12 @@ type SaveState = 'saved' | 'pending' | 'saving' | 'error' | 'idle';
 
 const assetCache = new Map<string, Promise<string>>();
 
+/** Same page, ignoring the fragment and the encoding of `(` `)`. */
+function samePage(a: string, b: string): boolean {
+  const strip = (u: string) => u.split('#')[0].replace(/%28/gi, '(').replace(/%29/gi, ')');
+  return strip(a) === strip(b);
+}
+
 function loadAsset(path: string): Promise<string> {
   let p = assetCache.get(path);
   if (!p) {
@@ -64,6 +71,10 @@ class PanelApp {
   private playback: PlaybackState = { time: 0, playing: false, rate: 1, duration: 0, at: Date.now() };
   private hasVideo = false;
   private kind: MediaKind = 'video';
+  /** Reading mode: furthest point read and the quoted passage being read. */
+  private reading: { ratio: number; passage: string | null } = { ratio: 0, passage: null };
+  private wikiTitles: string[] = [];
+  private notionStatus: NotionStatus | null = null;
   private siteHint!: HTMLDivElement;
   private pinned = false;
   private pageTheme: PageTheme | null = null;
@@ -97,7 +108,8 @@ class PanelApp {
   private banner!: HTMLDivElement;
   private clockEl!: HTMLSpanElement;
   private durationEl!: HTMLSpanElement;
-  private footerButtons: Record<'timestamp' | 'capture' | 'replay' | 'help', HTMLButtonElement> | null = null;
+  private readingBar!: HTMLSpanElement;
+  private footerButtons: Record<'timestamp' | 'capture' | 'replay' | 'help' | 'link', HTMLButtonElement> | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private contentTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly timeline = new Timeline({
@@ -126,13 +138,23 @@ class PanelApp {
       onSaveShortcut: () => void this.flush(),
       onHelp: () => this.sheet.open(),
       loadAsset,
+      wikiTitles: () => {
+        const own = normalizeTitle(this.title || this.note?.title || '');
+        return this.wikiTitles.filter((t) => normalizeTitle(t) !== own);
+      },
+      onWikiLinkClick: (title) => void this.openWiki(title),
+      onFragmentClick: (url) => this.openFragment(url),
+      placeholderText: 'Écrivez ici… ([[ pour lier une fiche)',
     });
     this.editor.setEditable(false);
     this.bindGlobalEvents();
     this.connect();
     void this.loadShortcuts();
-    const status = (await chrome.storage.session.get('sync:status'))['sync:status'] as SyncStatus | undefined;
-    this.renderStatus(status);
+    const session = await chrome.storage.session.get(['sync:status', 'notion:status']);
+    this.renderStatus(session['sync:status'] as SyncStatus | undefined);
+    this.notionStatus = (session['notion:status'] as NotionStatus | undefined) ?? null;
+    callBackground({ type: 'notion:status' }).then((n) => (this.notionStatus = n), () => undefined);
+    void this.loadWikiTitles();
     callBackground({ type: 'sync:status' }).then((s) => this.renderStatus(s), () => undefined);
     setInterval(() => this.tick(), 250);
   }
@@ -195,8 +217,19 @@ class PanelApp {
       case 'insert-timestamp':
         void this.loading.then(() => this.note && this.editor.insertTimestamp(msg.seconds, msg.focus));
         break;
+      case 'insert-anchor':
+        void this.loading.then(() => this.note && this.editor.insertToken(msg.token, msg.focus));
+        break;
       case 'insert-block':
-        void this.loading.then(() => this.note && this.editor.insertBlock(msg.text));
+        void this.loading.then(() => {
+          if (!this.note) return;
+          this.editor.insertBlock(msg.text);
+          if (msg.focus) this.editor.focus();
+        });
+        break;
+      case 'reading':
+        this.reading = { ratio: msg.ratio, passage: msg.passage };
+        void this.loading.then(() => this.editor.setCurrentFragment(msg.passage));
         break;
       case 'focus':
         void this.loading.then(() => this.editor.focus(msg.where));
@@ -224,6 +257,15 @@ class PanelApp {
   }
 
   private tick(): void {
+    if (this.kind === 'page') {
+      const pct = Math.round(this.reading.ratio * 100);
+      this.clockEl.textContent = `${pct} %`;
+      this.clockEl.dataset.playing = 'false';
+      this.durationEl.textContent = 'lu';
+      (this.readingBar.firstElementChild as HTMLElement).style.width = `${pct}%`;
+      this.readingBar.setAttribute('aria-valuenow', String(pct));
+      return;
+    }
     const t = this.hasVideo ? this.now() : null;
     const duration = this.playback.duration;
     this.clockEl.textContent = t === null ? '--:--' : formatTimecode(t);
@@ -242,12 +284,22 @@ class PanelApp {
   private refreshContent(): void {
     const markers = this.editor.markers();
     this.timeline.setMarkers(markers);
-    const notes = markers.filter((m) => m.kind === 'note').length;
-    const captures = markers.length - notes;
     const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
-    this.statsEl.textContent = [notes ? plural(notes, 'note') : '', captures ? plural(captures, 'capture') : '']
-      .filter(Boolean)
-      .join(' · ');
+    let parts: string[];
+    if (this.kind === 'page') {
+      // Reading mode: passages linked to the page, and page captures.
+      const content = this.editor.content;
+      const passages = findFragmentLinks(content).length;
+      const captures = findAssetRefs(content).length;
+      parts = [passages ? plural(passages, 'passage') : '', captures ? plural(captures, 'capture') : ''];
+    } else {
+      const notes = markers.filter((m) => m.kind === 'note').length;
+      const captures = markers.length - notes;
+      parts = [notes ? plural(notes, 'note') : '', captures ? plural(captures, 'capture') : ''];
+    }
+    const links = linkedTitles(this.editor.content).length;
+    if (links) parts.push(plural(links, 'lien'));
+    this.statsEl.textContent = parts.filter(Boolean).join(' · ');
     this.emptyState.el.hidden = !this.note || !this.editor.isEmpty;
   }
 
@@ -259,7 +311,8 @@ class PanelApp {
       platform: this.ctx.platform,
       url: this.ctx.canonicalUrl,
       title: this.title,
-      ...(this.hasVideo ? { kind: this.kind } : {}),
+      // Before the media is detected, the stored kind is kept (a video page is not a "page").
+      ...(this.hasVideo || this.kind === 'page' ? { kind: this.kind } : {}),
     };
   }
 
@@ -282,11 +335,13 @@ class PanelApp {
     this.ctx = ctx;
     this.title = title;
     this.note = null;
+    this.reading = { ratio: 0, passage: null };
     this.renderHeader();
+    void this.loadWikiTitles();
     if (!ctx) {
       this.editor.load('');
       this.editor.setEditable(false);
-      this.showBanner('Aucune vidéo détectée. Ouvrez une vidéo YouTube, un cours Udemy ou Coursera.');
+      this.showBanner('Rien à noter ici. Ouvrez une vidéo, un cours Udemy / Coursera, une page Notion ou un article.');
       return;
     }
     const meta = this.meta() as NoteMeta;
@@ -400,11 +455,18 @@ class PanelApp {
 
     this.clockEl = h('span', { class: 'clock-now', title: 'Position de la vidéo' }, '--:--');
     this.durationEl = h('span', { class: 'clock-duration', title: 'Durée de la vidéo' });
-    const timestamp = actionButton('clock', 'Horodater', () => this.post({ type: 'timestamp' }));
+    this.readingBar = h(
+      'span',
+      { class: 'reading-bar', role: 'progressbar', 'aria-label': 'Lecture de la page', 'aria-valuemin': '0', 'aria-valuemax': '100', hidden: true },
+      h('span', { class: 'reading-fill' }),
+    );
+    // In reading mode the same button quotes the selected passage (see renderKind).
+    const timestamp = actionButton('clock', 'Horodater', () => this.post({ type: this.kind === 'page' ? 'quote' : 'timestamp' }));
     const capture = actionButton('camera', 'Capturer', () => this.post({ type: 'capture' }));
     const replay = iconButton('replay', 'Revoir 5 s', () => this.post({ type: 'replay' }));
     const help = iconButton('keyboard', 'Raccourcis clavier', () => this.sheet.open());
-    this.footerButtons = { timestamp, capture, replay, help };
+    const link = iconButton('link', 'Lier une fiche ([[)', () => this.editor.insertWikiLink());
+    this.footerButtons = { timestamp, capture, replay, help, link };
 
     const editorHost = h('main', { class: 'editor', 'aria-label': 'Éditeur de notes (Markdown)' });
     editorHost.append(this.emptyState.el);
@@ -426,8 +488,8 @@ class PanelApp {
         'footer',
         { class: 'footer' },
         // Media-player scrubber: current time · notes timeline · duration.
-        h('div', { class: 'scrubber' }, this.clockEl, this.timeline.el, this.durationEl),
-        h('div', { class: 'controls' }, timestamp, capture, h('span', { class: 'spacer' }), replay, help),
+        h('div', { class: 'scrubber' }, this.clockEl, this.timeline.el, this.readingBar, this.durationEl),
+        h('div', { class: 'controls' }, timestamp, capture, h('span', { class: 'spacer' }), link, replay, help),
       ),
       this.noticeEl,
       this.sheet.el,
@@ -453,7 +515,7 @@ class PanelApp {
       { class: 'menu', role: 'menu', hidden: true, 'aria-label': 'Exporter' },
       h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Application Desktop'),
       item('desktop', 'desktop', 'Envoyer vers l’app Desktop', 'Dossier de notes local'),
-      item('notion', 'notion', 'Envoyer vers Notion', 'Via l’app Desktop'),
+      item('notion', 'notion', 'Envoyer vers Notion', 'Tableau « Boo Notes — Mes notes »'),
       h('div', { class: 'menu-sep', role: 'separator' }),
       h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Sur cet appareil'),
       item('download', 'download', 'Télécharger', 'Fichier .md + dossier assets/'),
@@ -481,11 +543,22 @@ class PanelApp {
       return;
     }
     const online = this.statusButton.dataset.state === 'connected';
+    const direct = Boolean(this.notionStatus?.configured);
     for (const b of this.menu.querySelectorAll<HTMLButtonElement>('button')) {
-      const needsDesktop = b.dataset.target === 'desktop' || b.dataset.target === 'notion';
-      b.disabled = !this.note || (needsDesktop && !online);
+      const target = b.dataset.target;
       const small = b.querySelector('small');
-      if (small) small.textContent = needsDesktop && !online ? 'Application Desktop hors-ligne' : (b.dataset.hint ?? '');
+      let hint = b.dataset.hint ?? '';
+      let enabled = Boolean(this.note);
+      if (target === 'desktop') {
+        enabled &&= online;
+        if (!online) hint = 'Application Desktop hors-ligne';
+      } else if (target === 'notion') {
+        // Through the app when it runs, else directly from the browser.
+        enabled &&= online || direct;
+        hint = online ? 'Via l’app Desktop' : direct ? 'Directement (app Desktop fermée)' : 'Connectez Notion : app Desktop ou options';
+      }
+      b.disabled = !enabled;
+      if (small) small.textContent = hint;
     }
     this.menu.hidden = false;
     this.exportButton.setAttribute('aria-expanded', 'true');
@@ -510,17 +583,44 @@ class PanelApp {
     void this.renderSiteHint();
   }
 
-  /** Platform chip (+ « Audio ») and the capture button, which only makes sense for a video. */
+  /**
+   * Platform chip (+ « Audio » / « Lecture »), and the footer: timestamp,
+   * capture and replay for a media; quote, page capture and reading progress
+   * for a page without media.
+   */
   private renderKind(): void {
     const audio = this.hasVideo && this.kind === 'audio';
+    const page = this.kind === 'page';
     const platform = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
-    this.platformEl.textContent = audio ? `${platform} · Audio` : platform;
-    const capture = this.footerButtons?.capture;
-    if (capture) {
-      capture.disabled = audio;
-      capture.title = audio ? 'Capture indisponible pour un média audio' : (capture.getAttribute('aria-label') ?? '');
-    }
-    document.documentElement.dataset.kind = audio ? 'audio' : 'video';
+    this.platformEl.textContent = audio ? `${platform} · Audio` : page ? `${platform} · Lecture` : platform;
+    document.documentElement.dataset.kind = page ? 'page' : audio ? 'audio' : 'video';
+    this.emptyState.setMode(page ? 'page' : 'media');
+    if (this.editor) this.scheduleContentRefresh();
+    this.timeline.el.hidden = page;
+    this.readingBar.hidden = !page;
+    this.clockEl.title = page ? 'Lu jusqu’ici' : 'Position de la vidéo';
+    this.durationEl.title = page ? '' : 'Durée de la vidéo';
+    const buttons = this.footerButtons;
+    if (!buttons) return;
+    const withKey = (label: string, key: string | undefined) => (key ? `${label} (${key})` : label);
+    const set = (b: HTMLButtonElement, label: string, iconName?: IconName, text?: string) => {
+      b.title = label;
+      b.setAttribute('aria-label', label);
+      if (iconName && text) b.replaceChildren(icon(iconName), h('span', { class: 'action-label' }, text));
+    };
+    const keys = this.shortcuts;
+    if (page) set(buttons.timestamp, withKey('Citer le passage sélectionné dans la page', keys['insert-timestamp']), 'quote', 'Citer');
+    else set(buttons.timestamp, withKey('Insérer l’horodatage', keys['insert-timestamp']), 'clock', 'Horodater');
+    buttons.capture.disabled = audio;
+    set(
+      buttons.capture,
+      audio
+        ? 'Capture indisponible pour un média audio'
+        : withKey(page ? 'Capturer la partie visible de la page' : 'Capturer l’image', keys['capture-screenshot']),
+    );
+    buttons.replay.hidden = page;
+    set(buttons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, keys.replay));
+    set(buttons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
   }
 
   /** On a site activated for this tab only: offer to keep Boo Notes active there. */
@@ -667,16 +767,6 @@ class PanelApp {
     );
     this.sheet.render(map);
     this.emptyState.render(map);
-    if (!this.footerButtons) return;
-    const withKey = (label: string, key: string | undefined) => (key ? `${label} (${key})` : label);
-    const set = (b: HTMLButtonElement, label: string) => {
-      b.title = label;
-      b.setAttribute('aria-label', label);
-    };
-    set(this.footerButtons.timestamp, withKey('Insérer l’horodatage', this.shortcuts['insert-timestamp']));
-    set(this.footerButtons.capture, withKey('Capturer l’image', this.shortcuts['capture-screenshot']));
-    set(this.footerButtons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, this.shortcuts.replay));
-    set(this.footerButtons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
     this.renderKind();
   }
 
@@ -707,6 +797,31 @@ class PanelApp {
       this.notify(message, 'success');
     } catch (e) {
       this.notify(`Export impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+
+  /** `[[Titre]]` clicked: the desktop app, the note's page, or its Notion page. */
+  private async openWiki(title: string): Promise<void> {
+    await this.flush();
+    try {
+      const { message } = await callBackground({ type: 'wiki:open', title });
+      this.notify(message, 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+
+  /** Passage link clicked: scrolled to in this page, or opened (the browser finds the passage). */
+  private openFragment(url: string): void {
+    if (this.ctx && this.port && samePage(url, this.ctx.canonicalUrl)) this.post({ type: 'reveal', url });
+    else void chrome.tabs.create({ url });
+  }
+
+  private async loadWikiTitles(): Promise<void> {
+    try {
+      this.wikiTitles = await callBackground({ type: 'wiki:titles' });
+    } catch {
+      // Keep the previous list.
     }
   }
 
@@ -764,9 +879,13 @@ class PanelApp {
     });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => this.applyTheme());
 
+    window.addEventListener('focus', () => void this.loadWikiTitles());
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'session' && changes['sync:status']) {
         this.renderStatus(changes['sync:status'].newValue as SyncStatus | undefined);
+      }
+      if (area === 'session' && changes['notion:status']) {
+        this.notionStatus = (changes['notion:status'].newValue as NotionStatus | undefined) ?? null;
       }
       if (area === 'sync' && changes.settings) {
         this.settings = normalizeSettings(changes.settings.newValue);

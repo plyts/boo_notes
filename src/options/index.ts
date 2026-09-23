@@ -1,14 +1,14 @@
 import { h, icon, type IconName } from '../shared/icons';
 import { IS_MAC, keycaps } from '../shared/keycaps';
-import { callBackground, type CommandId, type SyncStatus } from '../shared/messages';
+import { callBackground, type CommandId, type NotionStatus, type SyncStatus } from '../shared/messages';
 import { PLATFORM_LABELS } from '../shared/platforms';
 import { isLoopbackWsUrl, loadSettings, saveSettings, type Settings } from '../shared/settings';
 import { DEFAULT_SHORTCUTS, inPageBindings } from '../shared/shortcuts';
 
 const COMMAND_LABELS: Record<CommandId, string> = {
   'toggle-sidebar': 'Ouvrir / réduire le panneau de notes',
-  'insert-timestamp': 'Insérer l’horodatage au curseur',
-  'capture-screenshot': 'Capturer l’image de la vidéo',
+  'insert-timestamp': 'Horodater · citer le passage sélectionné (page)',
+  'capture-screenshot': 'Capturer l’image de la vidéo ou de la page',
   'smart-pause': 'Pause & écrire (Smart Pause)',
   replay: 'Revoir les dernières secondes',
 };
@@ -33,7 +33,7 @@ function flashSaved(text = 'Enregistré', ok = true): void {
   savedEl.replaceChildren(icon(ok ? 'check' : 'alert', 15), h('span', {}, text));
   savedEl.classList.add('show');
   if (savedTimer) clearTimeout(savedTimer);
-  savedTimer = setTimeout(() => savedEl.classList.remove('show'), 1600);
+  savedTimer = setTimeout(() => savedEl.classList.remove('show'), ok ? 1600 : 5000);
 }
 
 function field<T extends HTMLElement = HTMLInputElement>(name: string): T[] {
@@ -160,6 +160,45 @@ function renderStatus(status: SyncStatus | undefined): void {
   side.dataset.state = state;
   (side.querySelector('.label') as HTMLElement).textContent =
     state === 'connected' ? 'Desktop connecté' : state === 'connecting' ? 'Connexion…' : 'Desktop hors-ligne';
+}
+
+const relative = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
+
+function ago(ts: number): string {
+  const min = Math.round((ts - Date.now()) / 60_000);
+  if (Math.abs(min) < 1) return 'à l’instant';
+  if (Math.abs(min) < 60) return relative.format(min, 'minute');
+  if (Math.abs(min) < 1440) return relative.format(Math.round(min / 60), 'hour');
+  return relative.format(Math.round(min / 1440), 'day');
+}
+
+function renderNotion(status: NotionStatus | undefined): void {
+  const card = document.getElementById('notion-card') as HTMLElement;
+  const configured = Boolean(status?.configured);
+  card.dataset.state = status?.syncing ? 'connecting' : configured ? (status?.lastError ? 'offline' : 'connected') : 'offline';
+  (document.getElementById('notion-badge') as HTMLElement).textContent = !configured
+    ? 'Non connecté'
+    : status?.origin === 'desktop'
+      ? `Connecté via l’app Desktop${status.workspace ? ` · ${status.workspace}` : ''}`
+      : `Connecté${status?.workspace ? ` · ${status.workspace}` : ''}`;
+  const parts: string[] = [];
+  if (configured) {
+    if (status?.syncing) parts.push('Synchronisation…');
+    if (status?.pending) parts.push(`${status.pending} note(s) à écrire`);
+    if (status?.lastError) parts.push(status.lastError);
+    else if (status?.lastSyncAt) parts.push(`Dernière écriture ${ago(status.lastSyncAt)}`);
+    if (!parts.length) parts.push('Vos notes seront écrites dans Notion, même app Desktop fermée.');
+  } else {
+    parts.push('Vos notes restent dans ce navigateur (et l’app Desktop si elle est lancée).');
+  }
+  (document.getElementById('notion-detail') as HTMLElement).textContent = parts.join(' · ');
+  const open = document.getElementById('notion-open') as HTMLAnchorElement;
+  open.hidden = !status?.databaseUrl;
+  if (status?.databaseUrl) open.href = status.databaseUrl;
+  (document.getElementById('notion-form') as HTMLElement).hidden = configured;
+  (document.getElementById('notion-actions') as HTMLElement).hidden = !configured;
+  // A connection shared by the app is managed there.
+  (document.getElementById('notion-disconnect-row') as HTMLElement).hidden = status?.origin === 'desktop';
 }
 
 async function renderData(): Promise<void> {
@@ -290,8 +329,45 @@ async function main(): Promise<void> {
     flashSaved('Notes effacées');
   });
 
+  const notionForm = document.getElementById('notion-form') as HTMLFormElement;
+  notionForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = document.getElementById('notion-connect') as HTMLButtonElement;
+    const token = (document.getElementById('notion-token') as HTMLInputElement).value;
+    const target = (document.getElementById('notion-page') as HTMLInputElement).value;
+    button.disabled = true;
+    button.textContent = 'Connexion…';
+    try {
+      renderNotion(await callBackground({ type: 'notion:connect', token, target }));
+      (document.getElementById('notion-token') as HTMLInputElement).value = '';
+      flashSaved('Notion connecté : tableau créé');
+    } catch (err) {
+      flashSaved(err instanceof Error ? err.message : String(err), false);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Connecter Notion';
+    }
+  });
+  document.getElementById('notion-disconnect')?.addEventListener('click', async () => {
+    renderNotion(await callBackground({ type: 'notion:disconnect' }));
+    flashSaved('Notion déconnecté');
+  });
+  document.getElementById('notion-sync-all')?.addEventListener('click', async (e) => {
+    const button = e.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      const { ok, failed } = await callBackground({ type: 'notion:sync-all' });
+      flashSaved(failed ? `${ok} note(s) synchronisée(s), ${failed} en échec` : `${ok} note(s) synchronisée(s)`, failed === 0);
+    } catch (err) {
+      flashSaved(err instanceof Error ? err.message : String(err), false);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'session' && changes['sync:status']) renderStatus(changes['sync:status'].newValue as SyncStatus);
+    if (area === 'session' && changes['notion:status']) renderNotion(changes['notion:status'].newValue as NotionStatus);
     if (area === 'local' && changes['notes:index']) void renderData();
     if (area === 'local' && changes['sites:enabled']) void renderSites();
   });
@@ -303,6 +379,8 @@ async function main(): Promise<void> {
   const status = (await chrome.storage.session.get('sync:status'))['sync:status'] as SyncStatus | undefined;
   renderStatus(status);
   callBackground({ type: 'sync:status' }).then(renderStatus, () => undefined);
+  renderNotion(undefined);
+  callBackground({ type: 'notion:status' }).then(renderNotion, () => undefined);
   await Promise.all([renderShortcuts(), renderData(), renderSites()]);
 }
 

@@ -225,6 +225,17 @@ export class NoteStore {
     });
   }
 
+  /** Sends a note to the desktop app again (its Notion mapping changed). */
+  requeue(id: string): Promise<void> {
+    return this.exclusive(async () => {
+      const note = await this.getNote(id);
+      if (!note) return;
+      const outbox = await this.getOutbox();
+      outbox[id] = Math.max(outbox[id] ?? 0, note.rev);
+      await this.area.set({ [OUTBOX]: outbox });
+    });
+  }
+
   /** Re-queues every note (e.g. the desktop app asked for a full resync). */
   requeueAll(): Promise<void> {
     return this.exclusive(async () => {

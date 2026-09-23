@@ -1,3 +1,5 @@
+import type { MediaKind } from '../shared/platforms';
+
 /**
  * Ephemeral routing state kept in chrome.storage.session so it survives the
  * service worker being stopped, but not a browser restart.
@@ -7,6 +9,8 @@ export interface PlayerInfo {
   title: string;
   url: string;
   at: number;
+  /** `page`: a page noted in reading mode (no media to drive from another tab). */
+  kind?: MediaKind;
 }
 
 export interface SessionData {

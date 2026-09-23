@@ -3,7 +3,7 @@
   "name": "Boo Notes",
   "short_name": "Boo Notes",
   "version": "0.0.0",
-  "description": "Notes horodatées et captures au clavier sur YouTube, Udemy, Coursera, Notion et tout site vidéo ou audio.",
+  "description": "Notes horodatées, citations liées et captures au clavier sur YouTube, Udemy, Coursera, Notion et toute page (vidéo, audio ou article), synchronisées avec Notion.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",
@@ -36,7 +36,8 @@
     "*://*.udemy.com/*",
     "*://*.coursera.org/*",
     "*://*.notion.so/*",
-    "*://*.notion.site/*"
+    "*://*.notion.site/*",
+    "https://api.notion.com/*"
   ],
   "content_scripts": [
     {
@@ -82,13 +83,13 @@
       "suggested_key": {
         "default": "Alt+Shift+T"
       },
-      "description": "Insérer l’horodatage courant au curseur"
+      "description": "Horodater la note (vidéo) · citer le passage sélectionné (page)"
     },
     "capture-screenshot": {
       "suggested_key": {
         "default": "Alt+Shift+S"
       },
-      "description": "Capturer l’image de la vidéo"
+      "description": "Capturer l’image de la vidéo ou de la page"
     },
     "smart-pause": {
       "suggested_key": {

@@ -31,7 +31,8 @@ async function copyStatic() {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const manifest = JSON.parse(await readFile(join(src, 'manifest.json'), 'utf8'));
   manifest.version = pkg.version;
-  if (e2e) manifest.host_permissions.push('*://*.test/*');
+  // Test pages (*.test) and the local Notion API mock (127.0.0.1).
+  if (e2e) manifest.host_permissions.push('*://*.test/*', 'http://127.0.0.1/*');
   await mkdir(out, { recursive: true });
   await writeFile(join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   for (const rel of ['panel/panel.html', 'panel/panel.css', 'panel/editor.css', 'options/options.html', 'options/options.css', 'tokens.css']) {

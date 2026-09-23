@@ -133,6 +133,45 @@ describe('DesktopSync', () => {
     expect(socket.sent.find((m) => m.type === 'export')).toMatchObject({ noteId: 'n', target: 'notion' });
   });
 
+  it('sends the Notion mapping with the note and applies the app\'s Notion messages', async () => {
+    const store = new NoteStore(new MemoryArea());
+    const link = { pageId: 'p1', url: 'https://notion.so/p1', blocks: [], syncedAt: 5, syncedRev: 1 };
+    const got: unknown[] = [];
+    const sync = new DesktopSync({
+      store,
+      clientVersion: '0.1.0',
+      getConfig: async () => ({ url: 'ws://localhost:43117', token: 'secret' }),
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      notionLink: async (id) => (id === 'n' ? link : undefined),
+      onNotionConfig: (c) => got.push(['config', c]),
+      onNotionLink: (id, l) => got.push(['link', id, l]),
+      onTitles: (t) => got.push(['titles', t]),
+    });
+    await store.saveNote('n', meta, 'x');
+    await sync.connect();
+    const socket = FakeSocket.last();
+    socket.responder = desktop;
+    socket.serverOpen();
+    await vi.waitFor(async () => expect((await sync.status()).pending).toBe(0));
+    expect(socket.sent.find((m) => m.type === 'note.upsert')).toMatchObject({ note: { id: 'n', notion: { pageId: 'p1' } } });
+
+    // An app that does not say (older version) is trusted to write to Notion.
+    expect(sync.appHandlesNotion).toBe(true);
+    socket.receive({ type: 'notion.config', config: null, connected: false });
+    expect(sync.appHandlesNotion).toBe(false);
+    socket.receive({ type: 'notion.config', config: null, connected: true });
+    socket.receive({ type: 'notion.link', noteId: 'n', link });
+    socket.receive({ type: 'library.titles', titles: ['Fiche A', 3, 'Fiche B'] });
+    expect(sync.appHandlesNotion).toBe(true);
+    expect(got).toEqual([['config', null], ['config', null], ['link', 'n', link], ['titles', ['Fiche A', 'Fiche B']]]);
+
+    expect(sync.openInApp('Fiche A')).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({ type: 'open', title: 'Fiche A' });
+    socket.close();
+    expect(sync.appHandlesNotion).toBe(false);
+    expect(sync.openInApp('Fiche A')).toBe(false);
+  });
+
   it('refuses to export while offline', async () => {
     const { sync } = setup();
     await expect(sync.exportNote('n', 'local')).rejects.toThrow(/hors-ligne/);

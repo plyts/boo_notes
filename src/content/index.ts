@@ -1,4 +1,4 @@
-import { captureLine } from '../shared/markdown';
+import { captureLine, findFragmentLinks } from '../shared/markdown';
 import {
   callBackground,
   isCommand,
@@ -10,7 +10,8 @@ import {
   type PanelToContent,
   type TabMessage,
 } from '../shared/messages';
-import { detectVideoContext, readStartTime, timestampUrl, type VideoContext } from '../shared/platforms';
+import { detectVideoContext, readStartTime, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
+import type { Note } from '../shared/store';
 import { loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from '../shared/settings';
 import { findBinding, inPageBindings, type InPageBinding } from '../shared/shortcuts';
 import { formatTimecode } from '../shared/time';
@@ -19,6 +20,7 @@ import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
+import { PageReader } from './reader';
 
 const PINNED_KEY = 'boo-notes:pinned';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
@@ -40,15 +42,18 @@ function errorMessage(e: unknown): string {
 }
 
 /**
- * Content script: attaches to the page's <video>, draws the HUD / toasts,
- * hosts the drawer and executes the keyboard commands routed by the
- * background service worker.
+ * Content script: attaches to the page's <video> (or <audio>), draws the HUD
+ * / toasts, hosts the drawer and executes the keyboard commands routed by
+ * the background service worker. A page without media (article, course
+ * chapter, Notion page) is noted in reading mode: quotes and sections
+ * linked with text fragments, reading progress.
  */
 class ContentApp {
   private readonly abort = new AbortController();
   private readonly player: MediaController;
   private readonly overlay: Overlay;
   private readonly drawer: Drawer;
+  private readonly reader: PageReader;
   private settings: Settings = normalizeSettings(undefined);
   private tabId = -1;
   private ctx: VideoContext | null = null;
@@ -67,11 +72,16 @@ class ContentApp {
   /** Default shortcuts Chrome did not register globally, handled here instead. */
   private pageBindings: InPageBinding[] = inPageBindings([]).filter((b) => b.command === 'replay');
   private readonly seekedFromUrl = new Set<string>();
-  /** Note id announced to the background as a player (Notion / other sites: only once a media exists). */
+  /** Note id announced to the background as a player (Notion / other sites: once a media exists or notes are taken). */
   private registeredNoteId: string | null = null;
+  private registeredKind: MediaKind | null = null;
   private lastProgressAt = 0;
   private stopSettingsWatch: (() => void) | null = null;
   private dead = false;
+  /** Configured shortcut of `insert-timestamp` (shown in the "Citer" bubble). */
+  private quoteShortcut = 'Alt+Shift+T';
+  private bubbleFrame = 0;
+  private lastPassage: string | null = null;
 
   constructor(private readonly adapter: PlatformAdapter) {
     this.player = new MediaController(adapter);
@@ -98,6 +108,27 @@ class ContentApp {
       topInset: () => headerInset(this.adapter),
       onResized: (width) => void saveSettings({ drawerWidth: width }).catch(() => undefined),
     });
+    this.reader = new PageReader({
+      url: () => this.ctx?.canonicalUrl ?? location.href,
+      isOwnUi: (el) => el === this.overlay.host || this.drawer.owns(el),
+      onProgress: (ratio) => this.onReadingProgress(ratio),
+      onPassage: (url) => {
+        this.lastPassage = url;
+        this.postPanels({ type: 'reading', ratio: this.reader.progress, passage: url });
+      },
+    });
+  }
+
+  /**
+   * Reading mode: a generic page (Notion, other sites) without video or audio.
+   * The course platforms are always about their video, even before it loads.
+   */
+  private get reading(): boolean {
+    return Boolean(this.ctx?.requiresMedia) && !this.player.current;
+  }
+
+  private get kind(): MediaKind {
+    return this.reading ? 'page' : this.player.kind;
   }
 
   get alive(): boolean {
@@ -134,6 +165,7 @@ class ContentApp {
     try {
       chrome.runtime.onMessage.removeListener(this.onTabMessage);
       chrome.runtime.onConnect.removeListener(this.onPanelConnect);
+      chrome.storage.onChanged.removeListener(this.onStorageChanged);
     } catch {
       // Extension context already gone.
     }
@@ -141,6 +173,7 @@ class ContentApp {
     this.popoutPort?.disconnect();
     this.overlay.destroy();
     this.drawer.destroy();
+    this.reader.stop();
   };
 
   // --- Wiring -------------------------------------------------------------------
@@ -174,6 +207,10 @@ class ContentApp {
       );
     }
     document.addEventListener('fullscreenchange', this.onFullscreenChange, opts);
+    // Reading mode: "Citer" bubble next to the selected text while the notes are open.
+    document.addEventListener('selectionchange', () => this.scheduleQuoteBubble(), { signal: this.abort.signal });
+    document.addEventListener('scroll', () => this.scheduleQuoteBubble(), { ...opts, passive: true });
+    chrome.storage.onChanged.addListener(this.onStorageChanged);
     window.addEventListener('popstate', () => this.checkUrl(), opts);
     // YouTube is a single-page app and announces its navigations.
     document.addEventListener('yt-navigate-finish', () => this.checkUrl(), opts);
@@ -211,6 +248,9 @@ class ContentApp {
       const list = await this.bg({ type: 'shortcuts:list' });
       this.pageBindings = inPageBindings(list);
       this.overlay.setCaptureShortcut(list.find((c) => c.name === 'capture-screenshot')?.shortcut ?? '');
+      this.quoteShortcut =
+        list.find((c) => c.name === 'insert-timestamp')?.shortcut ||
+        (this.settings.pageShortcuts ? (this.pageBindings.find((b) => b.command === 'insert-timestamp')?.shortcut ?? '') : '');
     } catch {
       // Keep the previous bindings.
     }
@@ -299,12 +339,17 @@ class ContentApp {
 
     this.player.reset();
     this.overlay.hideMarker();
+    this.overlay.hideQuoteButton();
+    this.reader.reset();
+    this.lastPassage = null;
     this.title = ctx ? this.adapter.title() : '';
     this.postPanels({ type: 'context', ctx, title: this.title });
     this.registeredNoteId = null;
     if (ctx) {
       this.watchTitle();
       await this.ensureRegistered();
+      // A page already noted: its quoted passages are highlighted, its reading followed.
+      if (this.reading) await this.loadPassages(ctx.noteId, true);
     } else {
       if (this.drawer.isOpen) this.closeDrawer();
       await this.bg({ type: 'player:gone' }).catch(() => undefined);
@@ -332,16 +377,169 @@ class ContentApp {
 
   /**
    * Announces this tab as a player. Course platforms are identified by URL;
-   * Notion pages and other sites only once they actually contain a media.
+   * Notion pages and other sites once they contain a media, or once the user
+   * takes notes on them (`engaged`: reading mode).
    */
-  private async ensureRegistered(): Promise<void> {
+  private async ensureRegistered(engaged = false): Promise<void> {
     const ctx = this.ctx;
-    if (!ctx || this.registeredNoteId === ctx.noteId || (ctx.requiresMedia && !this.player.current)) return;
+    const kind = this.kind;
+    if (!ctx || (this.registeredNoteId === ctx.noteId && this.registeredKind === kind) || (this.reading && !engaged)) return;
     this.registeredNoteId = ctx.noteId;
+    this.registeredKind = kind;
+    if (this.reading) this.reader.start();
     try {
-      await this.bg({ type: 'player:ready', ctx, title: this.title, kind: this.player.kind });
+      await this.bg({ type: 'player:ready', ctx, title: this.title, kind });
     } catch {
       this.registeredNoteId = null;
+    }
+  }
+
+  // --- Reading mode ---------------------------------------------------------------------------
+
+  /** Quoted passages of the saved note, highlighted in the page. */
+  private async loadPassages(noteId: string, start = false): Promise<void> {
+    let note: Note | undefined;
+    try {
+      note = (await chrome.storage.local.get(`note:${noteId}`))[`note:${noteId}`] as Note | undefined;
+    } catch {
+      return;
+    }
+    if (this.dead || this.ctx?.noteId !== noteId || !note) return;
+    if (start) this.reader.start();
+    this.reader.setPassages(findFragmentLinks(note.markdown).map((f) => f.url));
+  }
+
+  private readonly onStorageChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
+    const id = this.ctx?.noteId;
+    if (area !== 'local' || !id || !changes[`note:${id}`] || !this.reading) return;
+    const note = changes[`note:${id}`].newValue as Note | undefined;
+    this.reader.setPassages(note ? findFragmentLinks(note.markdown).map((f) => f.url) : []);
+  };
+
+  private onReadingProgress(ratio: number): void {
+    this.postPanels({ type: 'reading', ratio, passage: this.lastPassage });
+    const ctx = this.ctx;
+    if (!ctx || !this.reading || this.dead) return;
+    // Percent read (the furthest point of the visit), kept only once the page has a note.
+    void this.bg({ type: 'player:progress', noteId: ctx.noteId, position: Math.round(ratio * 1000) / 10, duration: 100, kind: 'page' }).catch(
+      () => undefined,
+    );
+  }
+
+  private scheduleQuoteBubble(): void {
+    if (this.bubbleFrame) return;
+    this.bubbleFrame = requestAnimationFrame(() => {
+      this.bubbleFrame = 0;
+      this.updateQuoteBubble();
+    });
+  }
+
+  private updateQuoteBubble(): void {
+    // Cheapest checks first: this runs on every scroll / selection change of the page.
+    const open = this.drawer.isOpen || this.popoutPort !== null;
+    const rect = open && this.ctx?.requiresMedia && this.reading && this.reader.selection().length >= 3 ? this.reader.selectionRect() : null;
+    if (!rect || rect.bottom < 0 || rect.top > innerHeight) this.overlay.hideQuoteButton();
+    else this.overlay.showQuoteButton(rect, this.quoteShortcut, () => void this.quote());
+  }
+
+  /** Alt+Shift+T in reading mode: quote the selection, or anchor a new line to the section being read. */
+  private async quote(): Promise<void> {
+    const line = this.reader.quote();
+    const port = await this.inputEditor();
+    if (line) {
+      port.postMessage({ type: 'insert-block', text: line, focus: true } satisfies ContentToPanel);
+      // Quoted: the selection has done its job (and the bubble goes away with it).
+      document.getSelection()?.removeAllRanges();
+      this.overlay.hideQuoteButton();
+      this.overlay.toast('Passage cité dans la note', 'success', 1500, { icon: 'quote' });
+    } else {
+      port.postMessage({ type: 'insert-anchor', token: this.reader.anchor(), focus: true } satisfies ContentToPanel);
+    }
+  }
+
+  /** Alt+Shift+S in reading mode: screenshot of the visible page (the notes drawer excluded). */
+  private async capturePage(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || this.capturing) return;
+    this.capturing = true;
+    const { captureFormat: mime, captureQuality: quality } = this.settings;
+    try {
+      const drawer = this.drawer.rect();
+      const width = drawer && drawer.left > innerWidth * 0.3 ? drawer.left : innerWidth;
+      const area = new DOMRect(0, 0, width, innerHeight);
+      const anchor = this.reader.anchor();
+      const section = this.reader.sectionLabel();
+      this.overlay.setHidden(true);
+      let shot: Shot;
+      try {
+        await nextFrame();
+        await nextFrame();
+        if (document.visibilityState !== 'visible') throw new Error('l’onglet doit être visible');
+        const res = await this.bg({
+          type: 'capture:visible-tab',
+          rect: { x: area.x, y: area.y, width: area.width, height: area.height },
+          viewportWidth: innerWidth,
+          mime,
+          quality,
+        });
+        shot = { ...res, mime };
+      } finally {
+        this.overlay.setHidden(false);
+      }
+      this.overlay.flash(area);
+      const { path } = await this.bg({
+        type: 'asset:save',
+        noteId: ctx.noteId,
+        dataUrl: shot.dataUrl,
+        mime: shot.mime,
+        width: shot.width,
+        height: shot.height,
+        time: 0,
+      });
+      const line = `${anchor} ![Capture${section ? ` — ${section}` : ''}](${path})`;
+      const port = this.popoutPort ?? this.embeddedPort;
+      if (port && this.ctx?.noteId === ctx.noteId) {
+        port.postMessage({ type: 'insert-block', text: line } satisfies ContentToPanel);
+      } else {
+        await this.bg({
+          type: 'note:append',
+          noteId: ctx.noteId,
+          meta: { platform: ctx.platform, url: ctx.canonicalUrl, title: this.title, kind: 'page' },
+          text: line,
+        });
+      }
+      this.overlay.toast('Capture de la page sauvegardée', 'success', 2000, { thumb: shot.dataUrl });
+    } catch (e) {
+      this.overlay.toast(`Capture impossible : ${errorMessage(e)}`, 'error', 3500);
+    } finally {
+      this.capturing = false;
+    }
+  }
+
+  /** Reading mode commands: no media to drive. */
+  private async onReadingCommand(command: CommandId): Promise<void> {
+    switch (command) {
+      case 'toggle-sidebar':
+        if (!this.popoutPort) {
+          if (this.drawer.isOpen) this.closeDrawer();
+          else this.openDrawer('keep');
+        }
+        break;
+      case 'insert-timestamp':
+        await this.quote();
+        break;
+      case 'capture-screenshot':
+        await this.capturePage();
+        break;
+      case 'smart-pause': {
+        // Nothing to pause: "write now".
+        const port = await this.inputEditor();
+        port.postMessage({ type: 'focus', where: 'end' } satisfies ContentToPanel);
+        break;
+      }
+      case 'replay':
+        this.overlay.toast('Aucun média à rembobiner sur cette page', 'error');
+        break;
     }
   }
 
@@ -391,15 +589,16 @@ class ContentApp {
   // --- Commands -------------------------------------------------------------------------
 
   private async onCommand(command: CommandId): Promise<void> {
-    if (!this.ctx || (this.ctx.requiresMedia && !this.player.current)) {
-      const text = this.ctx
-        ? 'Boo Notes : aucune vidéo ni piste audio sur cette page'
-        : 'Boo Notes : aucune vidéo détectée sur cette page';
-      this.overlay.toast(text, 'error');
+    if (!this.ctx) {
+      this.overlay.toast('Boo Notes : rien à noter sur cette page (ouvrez une vidéo, un cours ou un article)', 'error');
       return;
     }
-    void this.ensureRegistered();
+    void this.ensureRegistered(true);
     this.markInteraction();
+    if (this.reading) {
+      await this.onReadingCommand(command);
+      return;
+    }
     switch (command) {
       case 'toggle-sidebar':
         // With a pop-out, the background switches window focus instead.
@@ -425,6 +624,7 @@ class ContentApp {
 
   private openDrawer(focus: 'keep' | 'end' | null): void {
     if (this.popoutPort) return;
+    void this.ensureRegistered(true);
     this.drawer.open();
     this.postPanels({ type: 'page-theme', theme: detectPageTheme(this.adapter) });
     if (focus) {
@@ -436,6 +636,7 @@ class ContentApp {
   private closeDrawer(): void {
     this.drawer.close();
     this.overlay.hideMarker();
+    this.overlay.hideQuoteButton();
     queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
   }
 
@@ -614,7 +815,7 @@ class ContentApp {
       type: 'playback',
       playback: this.player.playback(),
       hasVideo: this.player.current !== null,
-      kind: this.player.kind,
+      kind: this.kind,
     });
   }
 
@@ -635,10 +836,11 @@ class ContentApp {
           title: this.title,
           pinned: this.pinned,
           hasVideo: this.player.current !== null,
-          kind: this.player.kind,
+          kind: this.kind,
           playback: this.player.playback(),
           pageTheme: detectPageTheme(this.adapter),
         } satisfies ContentToPanel);
+        if (this.reading) port.postMessage({ type: 'reading', ratio: this.reader.progress, passage: this.lastPassage } satisfies ContentToPanel);
         return;
       case 'seek':
         this.player.seek(msg.seconds);
@@ -655,13 +857,14 @@ class ContentApp {
         this.player.pause();
         break;
       case 'capture':
-        void this.capture();
+        void (this.reading ? this.capturePage() : this.capture());
         break;
       case 'replay':
         this.replay();
         break;
       case 'timestamp':
-        port.postMessage({ type: 'insert-timestamp', seconds: this.player.time(), focus: true } satisfies ContentToPanel);
+        if (this.reading) void this.quote();
+        else port.postMessage({ type: 'insert-timestamp', seconds: this.player.time(), focus: true } satisfies ContentToPanel);
         break;
       case 'escape':
         if (port === this.popoutPort) return;
@@ -695,6 +898,12 @@ class ContentApp {
         return;
       case 'command':
         if (isCommand(msg.command)) void this.onCommand(msg.command);
+        return;
+      case 'quote':
+        if (this.reading) void this.quote();
+        return;
+      case 'reveal':
+        if (!this.reader.reveal(msg.url)) this.overlay.toast('Passage introuvable dans cette page (modifiée ?)', 'error', 3000);
         return;
     }
     this.markInteraction();

@@ -90,7 +90,22 @@ function sharedNotionConfig(): Record<string, unknown> {
           ...(process.env.NOTION_API_BASE ? { apiBase: process.env.NOTION_API_BASE } : {}),
         }
       : null;
-  return { type: 'notion.config', config: shared };
+  // `connected`: the app writes the extension's notes to Notion itself while it is running.
+  return { type: 'notion.config', config: shared, connected: Boolean(token && cfg.databaseId) };
+}
+
+/** Titles of the library, offered by the extension after `[[`. */
+function libraryTitles(): Record<string, unknown> {
+  return { type: 'library.titles', titles: library.titles() };
+}
+
+let titlesSent = '';
+function shareTitles(): void {
+  const msg = libraryTitles();
+  const key = JSON.stringify(msg.titles);
+  if (key === titlesSent) return;
+  titlesSent = key;
+  server?.broadcast(msg);
 }
 
 function shareNotionConfig(): void {
@@ -156,6 +171,7 @@ function pushLibrary(): void {
   libraryTimer = setTimeout(() => {
     libraryTimer = null;
     send('library');
+    shareTitles();
   }, 80);
 }
 
@@ -585,7 +601,7 @@ async function boot(): Promise<void> {
       showWindow();
       send('open-title', title);
     },
-    welcomeExtras: () => [sharedNotionConfig()],
+    welcomeExtras: () => [sharedNotionConfig(), libraryTitles()],
     log: (m) => console.log(`[boo] ${m}`),
   });
   server.on('clients', pushStatus);

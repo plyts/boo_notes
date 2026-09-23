@@ -3,27 +3,33 @@ import {
   type BackgroundRequest,
   type BackgroundResponses,
   type CommandId,
+  type NotionStatus,
   type Reply,
   type SyncStatus,
   type TabMessage,
 } from '../shared/messages';
-import { findAssetRefs, toPortableMarkdown } from '../shared/markdown';
+import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
 import { NoteStore } from '../shared/store';
 import { asciiFileName, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
+import { ExtensionNotion } from './notion';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
 
 /**
  * Background service worker: owns storage, keyboard commands, the single
- * active player (multi-tab routing) and the link to the desktop app.
+ * active player (multi-tab routing), the link to the desktop app, and the
+ * direct Notion sync used while the app is closed.
  */
 const store = new NoteStore(chrome.storage.local);
 const session = new SessionState();
 const SYNC_ALARM = 'boo-notes-sync-retry';
+const NOTION_ALARM = 'boo-notes-notion';
+/** Titles of the desktop app's library (revision sheets…), for `[[` completion. */
+const DESKTOP_TITLES = 'desktop:titles';
 
-const sync = new DesktopSync({
+const sync: DesktopSync = new DesktopSync({
   store,
   clientVersion: chrome.runtime.getManifest().version,
   getConfig: async () => {
@@ -31,7 +37,30 @@ const sync = new DesktopSync({
     return { url: s.desktopUrl, token: s.desktopToken };
   },
   onStatus: (status) => void publishStatus(status),
+  notionLink: (noteId) => notion.link(noteId),
+  onNotionConfig: (config) => void notion.applyDesktopConfig(config),
+  onNotionLink: (noteId, link) => void notion.applyDesktopLink(noteId, link),
+  onTitles: (titles) => void chrome.storage.local.set({ [DESKTOP_TITLES]: titles }),
 });
+
+const notion: ExtensionNotion = new ExtensionNotion({
+  area: chrome.storage.local,
+  store,
+  desktopHandlesNotion: () => sync.appHandlesNotion,
+  // The app learns the Notion page of the note with its next copy.
+  onLinked: (noteId) => void store.requeue(noteId).then(() => sync.notifyChanged()),
+  onStatus: (status) => void publishNotionStatus(status),
+});
+
+async function publishNotionStatus(status: NotionStatus): Promise<void> {
+  await chrome.storage.session.set({ 'notion:status': status });
+  // The service worker may stop before the delayed write: an alarm picks it up.
+  if (status.pending > 0 && status.configured) {
+    if (!(await chrome.alarms.get(NOTION_ALARM))) await chrome.alarms.create(NOTION_ALARM, { periodInMinutes: 1 });
+  } else {
+    await chrome.alarms.clear(NOTION_ALARM);
+  }
+}
 
 async function publishStatus(status: SyncStatus): Promise<void> {
   // Panels / options read the status from session storage (and get onChanged events).
@@ -149,8 +178,10 @@ async function runCommand(command: CommandId, tab?: chrome.tabs.Tab): Promise<vo
   const fromPopout = tab?.windowId !== undefined ? SessionState.popoutOwner(data, tab.windowId) : null;
   let target: number | null = fromPopout;
   if (target === null && tab?.id !== undefined && data.players[tab.id]) target = tab.id;
-  if (target === null && data.activeTab !== null && data.players[data.activeTab]) {
-    target = (await tabExists(data.activeTab)) ? data.activeTab : null;
+  // Remote control of the last media played (a page read in another tab has nothing to drive).
+  const active = data.activeTab !== null ? data.players[data.activeTab] : undefined;
+  if (target === null && active && active.kind !== 'page') {
+    target = (await tabExists(data.activeTab as number)) ? data.activeTab : null;
   }
   if (target === null) {
     // No known player. On any web page, pressing a shortcut (or the toolbar icon) activates
@@ -205,7 +236,7 @@ const handlers: Handlers = {
   'player:ready': async (msg, sender) => {
     const tabId = requireTab(sender).id;
     await session.update((d) => {
-      d.players[tabId] = { noteId: msg.ctx.noteId, title: msg.title, url: msg.ctx.canonicalUrl, at: Date.now() };
+      d.players[tabId] = { noteId: msg.ctx.noteId, title: msg.title, url: msg.ctx.canonicalUrl, at: Date.now(), kind: msg.kind };
     });
     // Opening a video counts as an interaction: it becomes the active player.
     await setActivePlayer(tabId);
@@ -228,12 +259,14 @@ const handlers: Handlers = {
   'note:save': async (msg) => {
     const note = await store.saveNote(msg.noteId, msg.meta, msg.markdown, msg.writer);
     void sync.notifyChanged();
+    void notion.enqueue(msg.noteId);
     return note;
   },
 
   'note:append': async (msg) => {
     const note = await store.appendToNote(msg.noteId, msg.meta, msg.text, 'background');
     void sync.notifyChanged();
+    void notion.enqueue(msg.noteId);
     return note;
   },
 
@@ -257,6 +290,14 @@ const handlers: Handlers = {
 
   export: async (msg) => {
     if (msg.target === 'download') return { message: await downloadNote(msg.noteId) };
+    if (msg.target === 'notion' && !sync.appHandlesNotion) {
+      // App closed (or without Notion): the extension writes to Notion itself.
+      if (await notion.isConfigured()) {
+        await notion.syncNow(msg.noteId);
+        return { message: 'Envoyé vers Notion' };
+      }
+      if (!sync.connected) throw new Error('Notion n’est pas connecté : ouvrez l’app Desktop ou les options de l’extension');
+    }
     const message = await sync.exportNote(msg.noteId, msg.target === 'notion' ? 'notion' : 'local');
     return { message };
   },
@@ -339,8 +380,18 @@ const handlers: Handlers = {
   },
 
   'player:progress': async (msg) => {
+    let position = msg.position;
+    if (msg.kind === 'page') {
+      // Reading: the furthest point reached counts, not where the page was reopened.
+      const before = await store.getProgress(msg.noteId);
+      if (before && before.position >= position) return;
+      position = Math.max(position, before?.position ?? 0);
+    }
     // Only media that have a note are tracked (watching alone is never recorded).
-    if (await store.saveProgress(msg.noteId, msg.position, msg.duration)) void sync.sendProgress(msg.noteId);
+    if (await store.saveProgress(msg.noteId, position, msg.duration)) {
+      void sync.sendProgress(msg.noteId);
+      void notion.enqueue(msg.noteId, 'progress');
+    }
   },
 
   'sites:list': () => enabledSites(),
@@ -364,6 +415,48 @@ const handlers: Handlers = {
     await syncSiteScripts(sites);
     await chrome.permissions.remove({ origins: [`${origin}/*`] }).catch(noop);
     return sites;
+  },
+
+  'wiki:titles': async () => {
+    const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_TITLES)]);
+    const titles = [...Object.values(index).map((n) => n.title), ...((stored[DESKTOP_TITLES] as string[] | undefined) ?? [])];
+    const seen = new Map<string, string>();
+    for (const t of titles) {
+      const key = normalizeTitle(t);
+      if (key && !seen.has(key)) seen.set(key, t.trim());
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, 'fr'));
+  },
+
+  'wiki:open': async (msg) => {
+    const title = msg.title.trim();
+    // 1. The desktop app knows every note (revision sheets, PDF…) and creates missing sheets.
+    if (sync.openInApp(title)) return { message: `« ${title} » ouvert dans Boo Notes Desktop` };
+    // 2. A note of the extension: its video / page.
+    const id = await notion.findByTitle(title);
+    const note = id ? await store.getNote(id) : null;
+    if (note && /^https?:\/\//.test(note.url)) {
+      await chrome.tabs.create({ url: note.url });
+      return { message: `« ${note.title} » ouvert dans un nouvel onglet` };
+    }
+    // 3. Its page in the Notion notes table.
+    const url = await notion.pageUrlByTitle(title).catch(() => null);
+    if (url) {
+      await chrome.tabs.create({ url });
+      return { message: `« ${title} » ouvert dans Notion` };
+    }
+    throw new Error(`« ${title} » n’existe pas encore : ouvrez l’app Desktop pour créer cette fiche`);
+  },
+
+  'notion:status': () => notion.status(),
+
+  'notion:connect': (msg) => notion.connect(msg.token, msg.target),
+
+  'notion:disconnect': () => notion.disconnect(),
+
+  'notion:sync-all': () => {
+    if (sync.appHandlesNotion) throw new Error('L’app Desktop synchronise déjà vos notes avec Notion');
+    return notion.syncAll();
   },
 };
 
@@ -484,6 +577,7 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) void sync.connect();
+  if (alarm.name === NOTION_ALARM) void notion.flush();
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -496,6 +590,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 void sync.connect();
+void notion.status().then(publishNotionStatus);
 
 // Debug / end-to-end test hook (service worker console: `booNotes.runCommand('capture-screenshot')`).
 Object.assign(globalThis, {
@@ -510,5 +605,6 @@ Object.assign(globalThis, {
     store,
     sync,
     session,
+    notion,
   },
 });

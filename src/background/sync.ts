@@ -1,6 +1,8 @@
 import { findAssetRefs, toPortableMarkdown } from '../shared/markdown';
 import type { SyncState, SyncStatus } from '../shared/messages';
+import type { NotionLink } from '../shared/notion/engine';
 import type { NoteStore } from '../shared/store';
+import type { SharedNotionConfig } from './notion';
 
 /**
  * Link to the desktop app over a loopback WebSocket (see docs/PROTOCOL.md).
@@ -18,6 +20,15 @@ export type DesktopMessage =
   | { type: 'asset.request'; path: string }
   | { type: 'resync' }
   | { type: 'export.result'; requestId: string; ok: boolean; message?: string }
+  /**
+   * Notion connection of the app: shared (`config`) so the extension can write
+   * to Notion while the app is closed; `connected`: the app writes to Notion itself.
+   */
+  | { type: 'notion.config'; config: SharedNotionConfig | null; connected?: boolean }
+  /** Notion page of a note of the extension, synced by the app. */
+  | { type: 'notion.link'; noteId: string; link: NotionLink }
+  /** Titles of the app's library (revision sheets, PDF…), for `[[` completion. */
+  | { type: 'library.titles'; titles: string[] }
   | { type: 'pong' };
 
 interface Waiter {
@@ -35,6 +46,11 @@ export interface DesktopSyncOptions {
   WebSocketImpl?: typeof WebSocket;
   /** Requests without an answer after this delay fail and drop the socket. */
   requestTimeoutMs?: number;
+  /** Notion mapping of a note, sent along with it (the extension may have synced it itself). */
+  notionLink?(noteId: string): Promise<NotionLink | undefined>;
+  onNotionConfig?(config: SharedNotionConfig | null): void;
+  onNotionLink?(noteId: string, link: NotionLink): void;
+  onTitles?(titles: string[]): void;
 }
 
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000];
@@ -57,6 +73,8 @@ export class DesktopSync {
   private requestSeq = 0;
   private readonly WS: typeof WebSocket;
   private readonly timeoutMs: number;
+  /** The connected app writes to Notion itself (null: it did not say — older apps always do). */
+  private appNotion: boolean | null = null;
 
   constructor(private readonly opts: DesktopSyncOptions) {
     this.WS = opts.WebSocketImpl ?? WebSocket;
@@ -65,6 +83,18 @@ export class DesktopSync {
 
   get connected(): boolean {
     return this.state === 'connected';
+  }
+
+  /** True while the app is connected and syncs the notes with Notion. */
+  get appHandlesNotion(): boolean {
+    return this.connected && this.appNotion !== false;
+  }
+
+  /** Asks the app to show the note titled `title` (and to bring its window to the front). */
+  openInApp(title: string): boolean {
+    if (!this.connected) return false;
+    this.send({ type: 'open', title });
+    return true;
   }
 
   async status(): Promise<SyncStatus> {
@@ -200,8 +230,9 @@ export class DesktopSync {
           for (const path of findAssetRefs(note.markdown)) {
             if (!(await this.opts.store.isAssetSynced(path))) await this.sendAsset(path);
           }
+          const notion = await this.opts.notionLink?.(noteId);
           await this.request(
-            { type: 'note.upsert', note, portableMarkdown: toPortableMarkdown(note) },
+            { type: 'note.upsert', note: notion ? { ...note, notion } : note, portableMarkdown: toPortableMarkdown(note) },
             (m) => m.type === 'ack' && m.noteId === noteId && m.rev >= note.rev,
           );
           await this.opts.store.markSynced(noteId, note.rev);
@@ -275,6 +306,16 @@ export class DesktopSync {
       case 'resync':
         void this.opts.store.requeueAll().then(() => this.flush());
         break;
+      case 'notion.config':
+        this.appNotion = msg.connected ?? msg.config !== null;
+        this.opts.onNotionConfig?.(msg.config ?? null);
+        break;
+      case 'notion.link':
+        if (typeof msg.noteId === 'string' && msg.link) this.opts.onNotionLink?.(msg.noteId, msg.link);
+        break;
+      case 'library.titles':
+        if (Array.isArray(msg.titles)) this.opts.onTitles?.(msg.titles.filter((t) => typeof t === 'string'));
+        break;
       default:
         break;
     }
@@ -290,6 +331,7 @@ export class DesktopSync {
   private handleClose(gen: number): void {
     if (gen !== this.generation) return;
     this.ws = null;
+    this.appNotion = null;
     this.stopKeepalive();
     this.rejectWaiters(new Error('Connexion à l’application Desktop perdue'));
     this.setState('offline');

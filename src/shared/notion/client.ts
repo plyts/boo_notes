@@ -105,7 +105,8 @@ export class NotionClient {
 
   constructor(private readonly opts: NotionClientOptions) {
     this.baseUrl = (opts.baseUrl ?? NOTION_API).replace(/\/+$/, '');
-    this.fetchImpl = opts.fetch ?? fetch;
+    // Unbound, `fetch` throws "Illegal invocation" in browsers (extension service worker).
+    this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
     this.minInterval = opts.minIntervalMs ?? 350;
     this.maxRetries = opts.maxRetries ?? 4;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
