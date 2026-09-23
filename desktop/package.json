@@ -1,0 +1,37 @@
+{
+  "name": "boo-notes-desktop",
+  "productName": "Boo Notes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boo Notes Desktop — bibliothèque de cours, lecteur PDF / audio / vidéo annoté et synchronisation Notion.",
+  "author": "Boo Notes",
+  "license": "UNLICENSED",
+  "main": "dist/main.cjs",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "test:ui": "npm run build && playwright test",
+    "mock:notion": "node tools/mock-notion.mjs",
+    "icons": "node scripts/make-ico.mjs",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^26.6.2",
+    "@types/ws": "^8.18.1",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "pdfjs-dist": "^6.3.289",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
