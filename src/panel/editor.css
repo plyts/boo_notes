@@ -158,6 +158,31 @@
   content: '◉ ';
 }
 
+/*
+ * Notes linked to several resources: a small numbered badge tells which
+ * video / PDF / image an anchor belongs to (hue per resource).
+ */
+.cm-boo-res::before,
+.cm-boo-page.cm-boo-res::before,
+.cm-boo-pin.cm-boo-res::before {
+  content: attr(data-badge);
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  margin: 0 0.35em 0 -0.2em;
+  padding: 0 0.25em;
+  border-radius: 999px;
+  background: hsl(var(--res-hue, 262) 72% 52%);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 1;
+  vertical-align: 0.08em;
+}
+
 /* Link to a passage of a web page ([↗](URL#:~:text=…)). */
 .cm-boo-frag {
   padding: 1px 5px;

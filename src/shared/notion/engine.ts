@@ -41,6 +41,17 @@ export interface SyncHighlight {
   createdAt: number;
 }
 
+/** A resource of a note, shown at the top of its Notion page. */
+export interface SyncSource {
+  id: string;
+  kind: MediaKind;
+  title: string;
+  /** URL or local path. */
+  source: string;
+  /** Local image uploaded to Notion, read with `readAsset('source:<id>')`. */
+  upload?: boolean;
+}
+
 /** A note as the engine needs it. */
 export interface SyncItem {
   id: string;
@@ -64,6 +75,11 @@ export interface SyncItem {
   links: string[];
   /** Local file to show in Notion (images), read with `readAsset('source:<id>')`. */
   uploadSource?: boolean;
+  /** Every resource of the note (videos, audios, PDF, images…); `source` alone when absent. */
+  sources?: SyncSource[];
+  /** Course and chapter the note is filed in (undefined: not managed by this device). */
+  course?: string | null;
+  chapter?: string | null;
 }
 
 /** Where notes and their Notion mapping live (desktop library, extension storage). */
@@ -125,6 +141,9 @@ const HIGHLIGHT_COLORS = {
 } as const;
 
 export const LINKS_PROPERTY = 'Liens';
+export const COURSE_PROPERTY = 'Cours';
+export const CHAPTER_PROPERTY = 'Chapitre';
+export const SOURCES_PROPERTY = 'Supports';
 export const BACKLINKS_PROPERTY = 'Liée depuis';
 export const ID_PROPERTY = 'Boo ID';
 
@@ -155,6 +174,9 @@ export const DATABASE_PROPERTIES: Json = {
       ],
     },
   },
+  [COURSE_PROPERTY]: { select: { options: [] } },
+  [CHAPTER_PROPERTY]: { rich_text: {} },
+  [SOURCES_PROPERTY]: { rich_text: {} },
   Progression: { number: { format: 'percent' } },
   Position: { rich_text: {} },
   Notes: { number: { format: 'number' } },
@@ -212,6 +234,15 @@ export function pageProperties(item: SyncItem, links?: string[]): Json {
     [ID_PROPERTY]: { rich_text: plainRichText(item.id) },
   };
   if (links) props[LINKS_PROPERTY] = { relation: links.map((id) => ({ id })) };
+  if (item.course !== undefined) {
+    // Notion refuses commas in select options.
+    const name = item.course?.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    props[COURSE_PROPERTY] = { select: name ? { name } : null };
+    props[CHAPTER_PROPERTY] = { rich_text: plainRichText(item.chapter ?? '') };
+  }
+  if (item.sources) {
+    props[SOURCES_PROPERTY] = { rich_text: plainRichText(item.sources.map((s) => `${KIND_LABELS[s.kind]} · ${s.title}`).join('\n')) };
+  }
   return props;
 }
 
@@ -336,19 +367,22 @@ export class NotionEngine {
     if (Object.keys(missing).length) await client.updateDatabase(id, { properties: missing });
   }
 
-  /** Blocks of the Notion page: source, note, then highlighted passages. */
+  /** Blocks of the Notion page: resources, note, then highlighted passages. */
   buildBlocks(item: SyncItem, wiki: (title: string) => string | null = () => null): BlockSpec[] {
     const blocks: BlockSpec[] = [];
-    if (isYouTube(item.source)) blocks.push({ type: 'video', url: item.source });
-    else if (isHttp(item.source)) blocks.push({ type: 'bookmark', url: item.source });
-    else if (item.source) {
-      if (item.uploadSource) blocks.push({ type: 'image', asset: `source:${item.id}`, caption: plainRichText(baseName(item.source)) });
-      else {
+    const sources: SyncSource[] =
+      item.sources ?? (item.source ? [{ id: item.id, kind: item.kind, title: item.title, source: item.source, upload: item.uploadSource }] : []);
+    const many = sources.length > 1;
+    for (const src of sources) {
+      if (isYouTube(src.source)) blocks.push({ type: 'video', url: src.source });
+      else if (isHttp(src.source)) blocks.push({ type: 'bookmark', url: src.source });
+      else if (src.upload) blocks.push({ type: 'image', asset: `source:${src.id}`, caption: plainRichText(many ? src.title : baseName(src.source)) });
+      else if (src.source) {
         blocks.push({
           type: 'callout',
-          emoji: KIND_EMOJI[item.kind],
+          emoji: KIND_EMOJI[src.kind],
           color: 'gray_background',
-          rich: plainRichText(`Fichier local : ${baseName(item.source)}`),
+          rich: plainRichText(`${KIND_LABELS[src.kind]} — fichier local : ${baseName(src.source)}`),
         });
       }
     }
@@ -521,7 +555,8 @@ export class NotionEngine {
       const upload = async (asset: string): Promise<string | null> => {
         const data = files.get(asset) ?? null;
         if (!data) return null;
-        const name = asset.startsWith('source:') ? baseName(item.source) : baseName(asset);
+        const src = asset.startsWith('source:') ? (item.sources?.find((s) => `source:${s.id}` === asset)?.source ?? item.source) : '';
+        const name = src ? baseName(src) : baseName(asset);
         return client.uploadFile(name, mimeOf(name), data);
       };
       for (let i = prefix; i < specs.length; i += 100) {

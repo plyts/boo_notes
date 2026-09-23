@@ -1,4 +1,4 @@
-import { h, icon, iconButton } from './ui';
+import { h, icon, iconButton } from './dom';
 
 export interface TextViewerOptions {
   text: string;

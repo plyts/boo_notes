@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  anchoredResources,
   countNotes,
   findAnchors,
   findFragmentLinks,
@@ -95,8 +96,8 @@ describe('page references', () => {
   it('finds [p. N] references but not images', () => {
     const text = 'Voir [p. 12] et [p.3], pas ![p. 4](x.png).';
     expect(findPageRefs(text, 100)).toEqual([
-      { from: 105, to: 112, page: 12 },
-      { from: 116, to: 121, page: 3 },
+      { from: 105, to: 112, bracketTo: 112, page: 12, resource: null },
+      { from: 116, to: 121, bracketTo: 121, page: 3, resource: null },
     ]);
   });
 
@@ -110,12 +111,32 @@ describe('page references', () => {
 describe('anchors of every kind', () => {
   it('finds paragraphs and pins', () => {
     expect(findSectionRefs('Voir [§ 12] puis [§3]')).toEqual([
-      { from: 5, to: 11, kind: 'section', value: 12, labelFrom: 8 },
-      { from: 17, to: 21, kind: 'section', value: 3, labelFrom: 19 },
+      { from: 5, to: 11, bracketTo: 11, kind: 'section', value: 12, labelFrom: 8, resource: null },
+      { from: 17, to: 21, bracketTo: 21, kind: 'section', value: 3, labelFrom: 19, resource: null },
     ]);
     expect(findPins('[pin 3] axe des x ; [PIN 12]').map((p) => p.value)).toEqual([3, 12]);
     expect(sectionToken(4)).toBe('[§ 4]');
     expect(pinToken(2.7)).toBe('[pin 2]');
+  });
+
+  it('names the resource of an anchor in a note linked to several resources', () => {
+    const text = '[04:15](res:file:a1) cours [p. 12](res:file:b2) puis [§ 4] et [pin 3](res:url:c3)';
+    const anchors = findAnchors(text);
+    expect(anchors.map((a) => [a.kind, a.value, a.resource])).toEqual([
+      ['time', 255, 'file:a1'],
+      ['page', 12, 'file:b2'],
+      ['section', 4, null],
+      ['pin', 3, 'url:c3'],
+    ]);
+    const page = anchors[1];
+    expect(text.slice(page.from, page.bracketTo)).toBe('[p. 12]');
+    expect(text.slice(page.from, page.to)).toBe('[p. 12](res:file:b2)');
+    expect(anchors[3].labelFrom).toBe(text.indexOf('3](res:url:c3)'));
+    expect(timestampToken(255, 'file:a1')).toBe('[04:15](res:file:a1)');
+    expect(pageRefToken(12, 'file:b2')).toBe('[p. 12](res:file:b2)');
+    expect(sectionToken(4, null)).toBe('[§ 4]');
+    expect(pinToken(3, 'url:c3')).toBe('[pin 3](res:url:c3)');
+    expect(anchoredResources(text)).toEqual(['file:a1', 'file:b2', 'url:c3']);
   });
 
   it('lists every anchor in document order', () => {

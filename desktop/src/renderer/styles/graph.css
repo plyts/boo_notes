@@ -1,0 +1,784 @@
+/* Carte mentale / réseau (React Flow). Nodes are glass capsules and dots; clusters are soft tinted bubbles. */
+
+.page-graph .page-toolbar::before {
+  background: linear-gradient(color-mix(in srgb, var(--content) 80%, transparent), transparent);
+}
+
+.graph {
+  --graph-mask: color-mix(in srgb, var(--canvas) 55%, transparent);
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+
+.graph-search {
+  width: 200px;
+}
+
+.graph .react-flow {
+  --xy-background-color: transparent;
+  --xy-node-border-radius: 0;
+  --xy-edge-stroke: color-mix(in srgb, var(--text) 26%, transparent);
+  --xy-controls-button-background-color: transparent;
+  --xy-controls-button-background-color-hover: var(--glass-control-hover);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-border-color: transparent;
+  --xy-minimap-background-color: transparent;
+  background: transparent;
+}
+
+.graph-bg {
+  --xy-background-pattern-color: color-mix(in srgb, var(--text) 13%, transparent);
+}
+
+/* Clusters live behind edges and nodes. */
+.graph .react-flow__viewport-portal {
+  z-index: -1;
+}
+
+.graph .react-flow__node {
+  cursor: pointer;
+}
+
+.graph .react-flow__node:focus-visible {
+  outline: none;
+}
+
+.graph .react-flow__node:focus-visible .gn,
+.graph .react-flow__node:focus-visible .gn-dot {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.gn-handle {
+  top: 50% !important;
+  left: 50% !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  transition:
+    opacity var(--dur) ease,
+    filter var(--dur) ease,
+    transform var(--dur) var(--spring-bouncy);
+}
+
+.gn.is-dim {
+  opacity: 0.18;
+  filter: saturate(0.3);
+}
+
+.gn.is-match .gn-dot,
+.gn.is-match.gn-course,
+.gn.is-match.gn-chapter,
+.gn.is-match.gn-mindmap {
+  box-shadow:
+    0 0 0 3px var(--c-yellow),
+    var(--glass-shadow);
+}
+
+.graph .react-flow__node.selected .gn,
+.graph .react-flow__node.dragging .gn {
+  transform: scale(1.04);
+}
+
+/* Root, courses, chapters, buckets: capsules. */
+
+.gn-root,
+.gn-course,
+.gn-chapter,
+.gn-bucket,
+.gn-mindmap.gn-note,
+.gn-mindmap.gn-resource {
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  background: var(--glass-thick);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1px var(--glass-rim),
+    var(--glass-shadow);
+}
+
+.gn-title {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gn-root {
+  gap: 10px;
+  padding: 12px 20px 12px 12px;
+  font: 700 var(--text-l) var(--font-display);
+  letter-spacing: var(--tracking-l);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 30%, var(--glass-thick)), var(--glass-thick));
+}
+
+.gn-root-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.gn-course {
+  gap: 10px;
+  padding: 10px 18px 10px 10px;
+  font: 650 15px var(--font-display);
+  letter-spacing: var(--tracking-l);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--hue) 34%, transparent), transparent 70%),
+    var(--glass-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1.5px color-mix(in srgb, var(--hue) 60%, transparent),
+    var(--glass-shadow);
+}
+
+.gn-course .gn-title {
+  max-width: 240px;
+}
+
+.gn-emoji {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--hue) 22%, transparent);
+  font-size: 19px;
+}
+
+.gn-progress {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--hue) var(--p), transparent var(--p));
+  opacity: 0.8;
+}
+
+.gn-chapter {
+  gap: 7px;
+  padding: 6px 12px 6px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1px color-mix(in srgb, var(--hue) 40%, transparent),
+    var(--glass-shadow);
+}
+
+.gn-index {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--hue) 22%, transparent);
+  color: var(--hue);
+  font: 700 11px var(--font-rounded);
+}
+
+.gn-bucket {
+  gap: 6px;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.gn.is-collapsed {
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1.5px color-mix(in srgb, var(--hue, var(--accent)) 60%, transparent),
+    4px 4px 0 -1px var(--glass),
+    4px 4px 0 0 var(--hairline),
+    var(--glass-shadow);
+}
+
+/* Notes and resources in the network: dots with a label below. */
+
+.gn-network.gn-note,
+.gn-network.gn-resource {
+  display: grid;
+  place-items: center;
+}
+
+.gn-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--kind) 55%, #fff) 0%, var(--kind) 70%);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.45),
+    0 0 0 2px color-mix(in srgb, var(--hue, var(--kind)) 55%, transparent),
+    0 4px 12px color-mix(in srgb, var(--kind) 35%, transparent);
+}
+
+.gn-resource .gn-dot {
+  border-radius: 30%;
+  background: color-mix(in srgb, var(--kind) 20%, var(--glass-thick));
+  color: var(--kind);
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--kind) 70%, transparent),
+    0 3px 10px rgba(0, 0, 0, 0.15);
+}
+
+.gn.is-due .gn-dot::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--content);
+}
+
+.gn.is-outside .gn-dot {
+  opacity: 0.75;
+  outline: 1.5px dashed var(--faint);
+  outline-offset: 3px;
+}
+
+.gn-arc {
+  position: absolute;
+  inset: -5px;
+  width: calc(100% + 10px);
+  height: calc(100% + 10px);
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.gn-arc circle {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.gn-label {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--content) 72%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 560;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  transition: opacity var(--dur);
+}
+
+.gn-resource .gn-label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Zoomed out: only what matters keeps its label. */
+.graph[data-zoom='far'] .gn-network .gn-label,
+.graph[data-zoom='mid'] .gn-network.gn-resource .gn-label {
+  opacity: 0;
+}
+
+.graph[data-zoom] .gn-network.is-focus .gn-label,
+.graph[data-zoom] .gn-network.is-match .gn-label,
+.graph .react-flow__node.selected .gn-label {
+  opacity: 1;
+}
+
+.gn-pin {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--content);
+}
+
+/* Mind map: notes and resources as compact capsules. */
+
+.gn-mindmap.gn-note,
+.gn-mindmap.gn-resource {
+  gap: 7px;
+  padding: 5px 12px 5px 5px;
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+.gn-mindmap.gn-resource {
+  background: var(--glass);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.gn-chip {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kind) 22%, transparent);
+  color: var(--kind);
+}
+
+.gn-mindmap.gn-resource .gn-chip {
+  border-radius: 7px;
+}
+
+.gn-mindmap.gn-note.is-due {
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1.5px var(--warn),
+    var(--glass-shadow);
+}
+
+/* Fold / unfold button, on the outer side of a branch. */
+
+.gn-toggle {
+  position: absolute;
+  top: 50%;
+  right: -12px;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--glass-thick);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    0 2px 6px rgba(0, 0, 0, 0.2);
+  color: var(--muted);
+  font: 700 10.5px var(--font-rounded);
+  cursor: pointer;
+  transform: translate(50%, -50%);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast),
+    background var(--dur-fast);
+}
+
+.gn-toggle-left {
+  right: auto;
+  left: -12px;
+  transform: translate(-50%, -50%);
+}
+
+.gn-network .gn-toggle,
+.gn-root .gn-toggle,
+.gn-course.gn-network .gn-toggle,
+.gn-chapter.gn-network .gn-toggle {
+  top: auto;
+  bottom: -8px;
+  right: 50%;
+  transform: translateX(50%);
+}
+
+.gn:hover .gn-toggle,
+.gn-toggle:focus-visible,
+.gn.is-collapsed .gn-toggle,
+.graph .react-flow__node.selected .gn-toggle {
+  opacity: 1;
+}
+
+.gn.is-collapsed .gn-toggle {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.gn-toggle:hover {
+  background: var(--glass-control-active);
+  color: var(--text);
+}
+
+/* Edges */
+
+.graph .react-flow__edge-path.ge {
+  fill: none;
+  stroke: var(--xy-edge-stroke);
+  stroke-linecap: round;
+  transition:
+    opacity var(--dur),
+    stroke var(--dur);
+}
+
+.graph .ge-tree.ge-network {
+  stroke-dasharray: none;
+}
+
+.graph .ge-ref {
+  stroke: color-mix(in srgb, var(--accent) 65%, transparent);
+  stroke-dasharray: 5 5;
+}
+
+.graph .ge.is-dim {
+  opacity: 0.08;
+}
+
+.graph .ge.is-focus {
+  opacity: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+
+.graph .ge-ref.is-focus {
+  stroke: var(--accent);
+}
+
+/* Clusters */
+
+.hull {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 48px;
+  background: radial-gradient(120% 120% at 20% 0%, color-mix(in srgb, var(--tint) 14%, transparent), color-mix(in srgb, var(--tint) 5%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 26%, transparent);
+  pointer-events: none;
+  transition: opacity var(--dur);
+}
+
+.hull.is-dim {
+  opacity: 0.3;
+}
+
+.hull-head {
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 36px);
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1px color-mix(in srgb, var(--tint) 40%, transparent);
+  color: var(--text);
+  font: 650 13px var(--font-display);
+  white-space: nowrap;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.hull-head:active {
+  cursor: grabbing;
+}
+
+.hull-head svg {
+  color: var(--tint);
+}
+
+.hull-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hull-count {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tint) 22%, transparent);
+  color: var(--text);
+  font: 700 11px / 18px var(--font-rounded);
+  text-align: center;
+}
+
+.hull-fold {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--glass-control);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hull-fold:hover {
+  background: var(--glass-control-active);
+  color: var(--text);
+}
+
+/* Panels */
+
+.graph .react-flow__panel {
+  margin: 14px;
+}
+
+.graph-caption {
+  top: var(--titlebar-h) !important;
+  pointer-events: none;
+}
+
+.graph-caption .large-title {
+  margin: 0;
+}
+
+.graph-caption .large-title h1 {
+  font-size: var(--text-3xl);
+}
+
+.graph-caption .large-subtitle {
+  font-size: var(--text-m);
+}
+
+.graph-controls {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1px var(--glass-rim),
+    var(--glass-shadow) !important;
+}
+
+.graph-controls .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  padding: 7px;
+  border: 0;
+  border-radius: 50%;
+}
+
+.graph-controls .react-flow__controls-button svg {
+  fill: currentColor;
+  max-width: 13px;
+  max-height: 13px;
+}
+
+.graph-minimap {
+  bottom: 52px !important;
+  overflow: hidden;
+  border-radius: var(--radius-l);
+}
+
+.graph-minimap .react-flow__minimap-svg {
+  display: block;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
+  max-width: min(760px, calc(100% - 520px));
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--kind);
+}
+
+.legend-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--hairline);
+}
+
+.legend-line {
+  width: 18px;
+  height: 0;
+  border-top: 2px solid color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+.legend-line.ref {
+  border-top: 2px dashed var(--accent);
+}
+
+@media (max-width: 1200px) {
+  .graph-legend {
+    display: none;
+  }
+}
+
+.graph-card-panel {
+  max-width: min(380px, calc(100% - 28px));
+}
+
+.graph-card {
+  display: grid;
+  gap: 12px;
+  width: 360px;
+  max-width: 100%;
+  padding: 14px;
+  border-radius: var(--radius-2xl);
+}
+
+.graph-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.graph-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tint, var(--accent)) 20%, transparent);
+  color: var(--tint, var(--accent));
+  font-size: 20px;
+}
+
+.graph-card-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.graph-card-text small {
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.graph-card-text strong {
+  overflow: hidden;
+  font: 650 var(--text-l) var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-card-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.graph-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--glass-control);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.graph-link-chip span {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-link-chip small {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.graph-link-chip.link-ref {
+  background: var(--accent-soft);
+}
+
+.graph-link-chip[data-hovered] {
+  background: var(--glass-control-active);
+}
+
+.graph-card-more,
+.graph-card-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--text-s);
+  align-self: center;
+}
+
+.graph-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.graph-empty .welcome {
+  pointer-events: auto;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gn,
+  .ge,
+  .hull {
+    transition: none;
+  }
+}

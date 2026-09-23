@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { release } from 'node:os';
 import {
   app,
   BrowserWindow,
@@ -10,6 +11,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  net,
   Notification,
   safeStorage,
   shell,
@@ -18,11 +20,13 @@ import {
 } from 'electron';
 import { timestampUrl } from '../../../src/shared/platforms';
 import { ConfigStore, plainBox, type SecretBox } from '../core/config';
-import { isDue, kindForFile, Library, OPEN_FILE_FILTERS, positionLabel, progressRatio, studyStatus } from '../core/library';
+import { writeExport, type ExportFormat, type ExportOptions } from '../core/export';
+import { kindForFile, Library, OPEN_FILE_FILTERS } from '../core/library';
 import { NotionSync } from '../core/notion/sync';
 import { ExtensionServer } from '../core/server';
-import type { Highlight, LibraryItem, Pin, ReviewAction, StudyStatus } from '../core/types';
-import { CHANNELS as C, type AddResult, type AppStatus, type ItemView, type SettingsPatch, type SettingsView } from '../ipc';
+import type { Highlight, Pin, Placement, ResourceKind, ReviewAction, StudyStatus } from '../core/types';
+import { noteView, resourceView, snapshot } from '../core/views';
+import { CHANNELS as C, type AppStatus, type ImportResult, type NoteInput, type SettingsPatch, type SettingsView } from '../ipc';
 import { handleScheme, registerSchemePrivileges } from './protocol';
 
 // --- Environment ----------------------------------------------------------------------------
@@ -65,16 +69,6 @@ function secretBox(): SecretBox {
 
 // --- Views ----------------------------------------------------------------------------------
 
-function view(item: LibraryItem): ItemView {
-  return {
-    ...item,
-    studyStatus: studyStatus(item),
-    ratio: progressRatio(item),
-    positionLabel: positionLabel(item),
-    due: isDue(item),
-  };
-}
-
 /** Notion connection sent to the paired extensions (they sync directly while the app is closed). */
 function sharedNotionConfig(): Record<string, unknown> {
   const cfg = config.get().notion;
@@ -99,12 +93,20 @@ function libraryTitles(): Record<string, unknown> {
   return { type: 'library.titles', titles: library.titles() };
 }
 
-let titlesSent = '';
-function shareTitles(): void {
-  const msg = libraryTitles();
-  const key = JSON.stringify(msg.titles);
-  if (key === titlesSent) return;
-  titlesSent = key;
+/** Courses and chapters, offered by the extension to file a note. */
+function libraryCourses(): Record<string, unknown> {
+  return {
+    type: 'library.courses',
+    courses: library.listCourses().map((c) => ({ title: c.title, emoji: c.emoji, chapters: c.chapters.map((ch) => ch.title) })),
+  };
+}
+
+const sent = new Map<string, string>();
+/** Sends a library message to the extensions when it changed. */
+function share(msg: Record<string, unknown>): void {
+  const key = JSON.stringify(msg);
+  if (sent.get(String(msg.type)) === key) return;
+  sent.set(String(msg.type), key);
   server?.broadcast(msg);
 }
 
@@ -171,7 +173,8 @@ function pushLibrary(): void {
   libraryTimer = setTimeout(() => {
     libraryTimer = null;
     send('library');
-    shareTitles();
+    share(libraryTitles());
+    share(libraryCourses());
   }, 80);
 }
 
@@ -188,18 +191,26 @@ function applyTheme(): void {
   nativeTheme.themeSource = theme === 'auto' ? 'system' : theme;
   if (!win || win.isDestroyed()) return;
   const { bg, fg } = palette();
-  win.setBackgroundColor(bg);
+  const material = hasMica() || process.platform === 'darwin';
+  win.setBackgroundColor(material ? '#00000000' : bg);
   if (process.platform !== 'darwin') {
     try {
-      win.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 44 });
+      win.setTitleBarOverlay({ color: material ? '#00000000' : bg, symbolColor: fg, height: 44 });
     } catch {
       // No overlay on this platform.
     }
   }
 }
 
+/** Windows 11 (build 22621+): the Mica material shows the desktop through the window, like macOS vibrancy. */
+function hasMica(): boolean {
+  return process.platform === 'win32' && Number(release().split('.')[2] ?? 0) >= 22621;
+}
+
 function createWindow(show: boolean): void {
   const { bg, fg } = palette();
+  // A translucent system material under the UI: Liquid Glass surfaces refract it.
+  const material = hasMica() || process.platform === 'darwin';
   win = new BrowserWindow({
     width: 1320,
     height: 860,
@@ -208,11 +219,14 @@ function createWindow(show: boolean): void {
     show: false,
     title: 'Boo Notes',
     icon: existsSync(ICON) ? ICON : undefined,
-    backgroundColor: bg,
+    backgroundColor: material ? '#00000000' : bg,
+    ...(hasMica() ? { backgroundMaterial: 'mica' as const } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window' as const, visualEffectState: 'followWindow' as const } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
-    titleBarOverlay: process.platform === 'darwin' ? undefined : { color: bg, symbolColor: fg, height: 44 },
+    titleBarOverlay: process.platform === 'darwin' ? undefined : { color: material ? '#00000000' : bg, symbolColor: fg, height: 44 },
     webPreferences: {
       preload: join(DIST, 'preload.cjs'),
+      additionalArguments: material ? ['--boo-material'] : [],
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -321,17 +335,9 @@ function filesFromArgv(argv: string[]): string[] {
   return argv.slice(1).filter((a) => !a.startsWith('-') && kindForFile(a) !== null && existsSync(a));
 }
 
-async function addFiles(paths: string[]): Promise<AddResult> {
-  const added: ItemView[] = [];
-  const errors: string[] = [];
-  for (const p of paths) {
-    try {
-      added.push(view(await library.addLocalFile(p)));
-    } catch (e) {
-      errors.push(e instanceof Error ? e.message : String(e));
-    }
-  }
-  return { added, errors };
+async function importFiles(paths: string[], placement?: Placement): Promise<ImportResult> {
+  const { notes, errors } = await library.importFiles(paths, placement);
+  return { notes: notes.map((n) => noteView(library, n)), errors };
 }
 
 async function openFilesFromShell(paths: string[]): Promise<void> {
@@ -339,10 +345,10 @@ async function openFilesFromShell(paths: string[]): Promise<void> {
     pendingOpen.push(...paths);
     return;
   }
-  const { added } = await addFiles(paths);
+  const { notes } = await importFiles(paths);
   showWindow();
-  const last = added.at(-1);
-  if (last) send('open-item', last.id);
+  const last = notes.at(-1);
+  if (last) send('open-note', last.id);
 }
 
 app.on('second-instance', (_e, argv) => {
@@ -404,78 +410,202 @@ const str = (v: unknown, name: string): string => {
 };
 
 function registerIpc(): void {
-  handle(C.libraryList, () => library.list().map(view));
-  handle(C.libraryGet, (id: string) => {
-    const item = library.get(str(id, 'id'));
-    return item ? view(item) : null;
+  const placement = (v: unknown): (Placement & { index?: number }) | undefined => {
+    if (!v || typeof v !== 'object') return undefined;
+    const p = v as Record<string, unknown>;
+    return {
+      courseId: str(p.courseId, 'cours'),
+      chapterId: str(p.chapterId, 'chapitre'),
+      ...(typeof p.index === 'number' ? { index: p.index } : {}),
+    };
+  };
+  const status = (v: unknown): StudyStatus | null | undefined =>
+    v === null ? null : v === 'todo' || v === 'doing' || v === 'done' ? v : undefined;
+
+  handle(C.snapshot, () => snapshot(library));
+
+  // Notes
+  handle(C.readNote, (id: string) => library.readNote(str(id, 'id')));
+  handle(C.saveNote, async (id: string, markdown: string) => {
+    await library.saveNote(str(id, 'id'), str(markdown, 'note'));
   });
-  handle(C.libraryOpenFiles, async () => {
+  handle(C.createNote, async (input: NoteInput) => {
+    const note = await library.createNote({
+      title: str(input?.title ?? '', 'titre'),
+      body: typeof input?.body === 'string' ? input.body : '',
+      resources: Array.isArray(input?.resources) ? input.resources.map((r) => str(r, 'support')) : [],
+      placement: placement(input?.placement),
+    });
+    return noteView(library, note);
+  });
+  handle(C.ensureNote, async (title: string) => noteView(library, await library.ensureNote(str(title, 'titre'))));
+  handle(C.updateNote, async (id: string, patch: { title?: string; status?: StudyStatus | null }) => {
+    await library.updateNote(str(id, 'id'), { title: typeof patch?.title === 'string' ? patch.title : undefined, status: status(patch?.status) });
+  });
+  handle(C.removeNote, (id: string, deleteFile: boolean) => library.removeNote(str(id, 'id'), { deleteFile: Boolean(deleteFile) }));
+  handle(C.linkResource, async (noteId: string, resourceId: string, index?: number) => {
+    await library.linkResource(str(noteId, 'note'), str(resourceId, 'support'), typeof index === 'number' ? index : undefined);
+  });
+  handle(C.unlinkResource, async (noteId: string, resourceId: string) => {
+    await library.unlinkResource(str(noteId, 'note'), str(resourceId, 'support'));
+  });
+  handle(C.setPrimaryResource, async (noteId: string, resourceId: string) => {
+    await library.setPrimaryResource(str(noteId, 'note'), str(resourceId, 'support'));
+  });
+  handle(C.review, async (id: string, action: ReviewAction) => {
+    if (!['start', 'stop', 'again', 'good', 'easy'].includes(action)) throw new Error('Action inconnue');
+    await library.review(str(id, 'id'), action);
+  });
+  handle(C.placeNote, (id: string, dest: unknown) => library.placeNote(str(id, 'id'), dest === null ? null : (placement(dest) ?? null)));
+  handle(C.revealNote, (id: string) => {
+    shell.showItemInFolder(library.noteFilePath(library.requireNote(str(id, 'id'))));
+  });
+
+  // Resources
+  handle(C.openFiles, async (where?: Placement) => {
     const res = await dialog.showOpenDialog(win!, {
-      title: 'Ajouter des cours',
+      title: 'Ajouter des supports de cours',
       buttonLabel: 'Ajouter',
       properties: ['openFile', 'multiSelections'],
       filters: OPEN_FILE_FILTERS,
     });
-    return res.canceled ? { added: [], errors: [] } : addFiles(res.filePaths);
+    return res.canceled ? { notes: [], errors: [] } : importFiles(res.filePaths, placement(where));
   });
-  handle(C.libraryAddFiles, (paths: string[]) => addFiles((Array.isArray(paths) ? paths : []).map((p) => str(p, 'chemin'))));
-  handle(C.libraryReadNote, (id: string) => library.readNote(str(id, 'id')));
-  handle(C.librarySaveNote, async (id: string, markdown: string) => view(await library.saveNote(str(id, 'id'), str(markdown, 'note'))));
-  handle(C.librarySetProgress, async (id: string, position: number, duration: number) => {
+  handle(C.importFiles, (paths: string[], where?: Placement) =>
+    importFiles((Array.isArray(paths) ? paths : []).map((p) => str(p, 'chemin')), placement(where)),
+  );
+  handle(C.pickResources, async () => {
+    const res = await dialog.showOpenDialog(win!, {
+      title: 'Lier des supports à la note',
+      buttonLabel: 'Lier',
+      properties: ['openFile', 'multiSelections'],
+      filters: OPEN_FILE_FILTERS,
+    });
+    const resources = [];
+    const errors: string[] = [];
+    if (!res.canceled) {
+      for (const p of res.filePaths) {
+        try {
+          resources.push(resourceView(library, await library.addFile(p)));
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    return { resources, errors };
+  });
+  handle(C.addUrl, async (url: string, opts?: { title?: string; kind?: ResourceKind }) => {
+    const kinds: ResourceKind[] = ['video', 'audio', 'pdf', 'text', 'image', 'page'];
+    const kind = opts?.kind && kinds.includes(opts.kind) ? opts.kind : undefined;
+    return resourceView(library, await library.addUrl(str(url, 'adresse'), { title: typeof opts?.title === 'string' ? opts.title : undefined, kind }));
+  });
+  handle(C.updateResource, async (id: string, patch: { title?: string; status?: StudyStatus | null }) => {
+    await library.updateResource(str(id, 'id'), { title: typeof patch?.title === 'string' ? patch.title : undefined, status: status(patch?.status) });
+  });
+  handle(C.removeResource, (id: string) => library.removeResource(str(id, 'id')));
+  handle(C.readFile, async (id: string) => {
+    const res = library.requireResource(str(id, 'id'));
+    if (res.origin === 'file') return new Uint8Array(await readFile(res.source));
+    if (res.origin === 'url') {
+      const r = await net.fetch(res.source);
+      if (!r.ok) throw new Error(`Téléchargement impossible (${r.status})`);
+      return new Uint8Array(await r.arrayBuffer());
+    }
+    throw new Error('Ce support s’ouvre dans le navigateur');
+  });
+  handle(C.readText, (id: string) => library.readText(str(id, 'id')));
+  handle(C.setProgress, async (id: string, position: number, duration: number) => {
     await library.setProgress(str(id, 'id'), Number(position), Number(duration));
   });
-  handle(C.libraryAddStudyTime, (id: string, ms: number) => library.addStudyTime(str(id, 'id'), Number(ms)));
-  handle(C.librarySetHighlights, async (id: string, highlights: Highlight[]) =>
-    view(await library.setHighlights(str(id, 'id'), Array.isArray(highlights) ? highlights : [])),
-  );
-  handle(C.libraryUpdate, async (id: string, patch: { title?: string; status?: StudyStatus | null }) =>
-    view(await library.update(str(id, 'id'), patch ?? {})),
-  );
-  handle(C.libraryRemove, (id: string, deleteNote: boolean) => library.remove(str(id, 'id'), { deleteNote: Boolean(deleteNote) }));
-  handle(C.libraryReadFile, async (id: string) => {
-    const item = library.require(str(id, 'id'));
-    if (item.origin !== 'desktop') throw new Error('Aucun fichier local');
-    return new Uint8Array(await readFile(item.source));
+  handle(C.addStudyTime, (id: string, ms: number) => library.addStudyTime(str(id, 'id'), Number(ms)));
+  handle(C.setHighlights, async (id: string, highlights: Highlight[]) => {
+    await library.setHighlights(str(id, 'id'), Array.isArray(highlights) ? highlights : []);
   });
-  handle(C.librarySaveCapture, async (id: string, dataUrl: string, seconds: number) => {
+  handle(C.setPins, async (id: string, pins: Pin[]) => {
+    const clean = (Array.isArray(pins) ? pins : [])
+      .filter((p) => Number.isFinite(p?.n) && Number.isFinite(p?.x) && Number.isFinite(p?.y))
+      .map((p) => ({ n: Math.round(p.n), x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)), createdAt: Number(p.createdAt) || Date.now() }));
+    await library.setPins(str(id, 'id'), clean);
+  });
+  handle(C.saveCapture, async (id: string, dataUrl: string, seconds: number) => {
     const m = /^data:image\/(jpeg|png|webp);base64,(.+)$/.exec(str(dataUrl, 'image'));
     if (!m) throw new Error('Image invalide');
     const ext = m[1] === 'jpeg' ? 'jpg' : (m[1] as 'png' | 'webp');
     return library.saveCapture(str(id, 'id'), Buffer.from(m[2], 'base64'), Number(seconds) || 0, ext);
   });
-  handle(C.libraryReveal, (id: string) => {
-    shell.showItemInFolder(library.noteFilePath(library.require(str(id, 'id'))));
-  });
-  handle(C.libraryOpenSource, async (id: string, seconds?: number) => {
-    const item = library.require(str(id, 'id'));
-    if (item.origin === 'desktop') {
-      shell.showItemInFolder(item.source);
+  handle(C.openSource, async (id: string, seconds?: number) => {
+    const res = library.requireResource(str(id, 'id'));
+    if (res.origin === 'file') {
+      shell.showItemInFolder(res.source);
       return;
     }
-    const url = typeof seconds === 'number' ? timestampUrl(item.source, seconds) : item.source;
+    const url = typeof seconds === 'number' && res.origin === 'extension' ? timestampUrl(res.source, seconds) : res.source;
     if (/^https?:\/\//.test(url)) await shell.openExternal(url);
   });
 
-  handle(C.libraryCreateNote, async (title: string, body?: string) =>
-    view(await library.createNote(str(title, 'titre'), typeof body === 'string' ? body : '')),
+  // Courses and chapters
+  handle(C.createCourse, (input: { title: string; emoji?: string; hue?: number; description?: string }) =>
+    library.createCourse({
+      title: str(input?.title ?? '', 'titre'),
+      emoji: typeof input?.emoji === 'string' ? input.emoji : undefined,
+      hue: typeof input?.hue === 'number' ? input.hue : undefined,
+      description: typeof input?.description === 'string' ? input.description : undefined,
+    }),
   );
-  handle(C.libraryFindByTitle, (title: string) => {
-    const item = library.findByTitle(str(title, 'titre'));
-    return item ? view(item) : null;
+  handle(C.updateCourse, async (id: string, patch: { title?: string; emoji?: string; hue?: number; description?: string }) => {
+    await library.updateCourse(str(id, 'id'), {
+      title: typeof patch?.title === 'string' ? patch.title : undefined,
+      emoji: typeof patch?.emoji === 'string' ? patch.emoji : undefined,
+      hue: typeof patch?.hue === 'number' ? patch.hue : undefined,
+      description: typeof patch?.description === 'string' ? patch.description : undefined,
+    });
   });
-  handle(C.libraryBacklinks, (id: string) => library.backlinks(str(id, 'id')).map(view));
-  handle(C.libraryTitles, () => library.titles());
-  handle(C.libraryReview, async (id: string, action: ReviewAction) => {
-    if (!['start', 'stop', 'again', 'good', 'easy'].includes(action)) throw new Error('Action inconnue');
-    return view(await library.review(str(id, 'id'), action));
+  handle(C.removeCourse, (id: string) => library.removeCourse(str(id, 'id')));
+  handle(C.moveCourse, (id: string, index: number) => library.moveCourse(str(id, 'id'), Number(index) || 0));
+  handle(C.addChapter, (courseId: string, title?: string, index?: number) =>
+    library.addChapter(str(courseId, 'cours'), typeof title === 'string' ? title : undefined, typeof index === 'number' ? index : undefined),
+  );
+  handle(C.updateChapter, async (courseId: string, chapterId: string, patch: { title?: string }) => {
+    await library.updateChapter(str(courseId, 'cours'), str(chapterId, 'chapitre'), { title: typeof patch?.title === 'string' ? patch.title : undefined });
   });
-  handle(C.librarySetPins, async (id: string, pins: Pin[]) => {
-    const clean = (Array.isArray(pins) ? pins : [])
-      .filter((p) => Number.isFinite(p?.n) && Number.isFinite(p?.x) && Number.isFinite(p?.y))
-      .map((p) => ({ n: Math.round(p.n), x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)), createdAt: Number(p.createdAt) || Date.now() }));
-    return view(await library.setPins(str(id, 'id'), clean));
+  handle(C.removeChapter, (courseId: string, chapterId: string) => library.removeChapter(str(courseId, 'cours'), str(chapterId, 'chapitre')));
+  handle(C.moveChapter, (courseId: string, chapterId: string, index: number) =>
+    library.moveChapter(str(courseId, 'cours'), str(chapterId, 'chapitre'), Number(index) || 0),
+  );
+
+  // Export
+  handle(C.exportRun, async (opts: ExportOptions) => {
+    const formats = (Array.isArray(opts?.formats) ? opts.formats : []).filter((f): f is ExportFormat =>
+      ['markdown', 'sheets', 'cards', 'json'].includes(f),
+    );
+    if (!formats.length) throw new Error('Choisissez au moins un format');
+    const target = process.env.BOO_EXPORT_DIR
+      ? process.env.BOO_EXPORT_DIR
+      : (
+          await dialog.showOpenDialog(win!, {
+            title: 'Exporter mes cours',
+            buttonLabel: 'Exporter ici',
+            properties: ['openDirectory', 'createDirectory'],
+          })
+        ).filePaths[0];
+    if (!target) return null;
+    const folder = join(target, `Boo Notes — export ${new Date().toISOString().slice(0, 10)}`);
+    const result = await writeExport(library, folder, {
+      formats,
+      courses: Array.isArray(opts?.courses) ? opts.courses.map((c) => str(c, 'cours')) : undefined,
+      includeUnfiled: opts?.includeUnfiled,
+    });
+    if (result.sheetsHtml) {
+      try {
+        result.files.push(await printToPdf(result.sheetsHtml, join(folder, 'Fiches de révision.pdf')));
+      } catch (e) {
+        result.warnings.push(`PDF des fiches impossible : ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (!process.env.BOO_EXPORT_DIR) void shell.openPath(folder);
+    const { sheetsHtml: _sheets, ...rest } = result;
+    return rest;
   });
-  handle(C.libraryReadText, (id: string) => library.readText(str(id, 'id')));
 
   handle(C.notionConnect, async (token: string, target: string) => {
     const res = await notion.connect(str(token, 'jeton'), str(target, 'lien'));
@@ -507,7 +637,7 @@ function registerIpc(): void {
   handle(C.notionSyncItem, (id: string) => notion.syncItem(str(id, 'id')));
   handle(C.notionSyncAll, () => notion.syncAll());
   handle(C.notionOpen, async (id?: string) => {
-    const url = id ? library.get(id)?.notion?.url : config.get().notion.databaseUrl;
+    const url = id ? library.getNote(id)?.notion?.url : config.get().notion.databaseUrl;
     if (url && /^https:\/\//.test(url)) await shell.openExternal(url);
   });
 
@@ -540,6 +670,29 @@ function registerIpc(): void {
     if (/^https:\/\//.test(str(url, 'url'))) await shell.openExternal(url);
   });
   handle(C.status, () => appStatus());
+}
+
+/** Revision sheets as a PDF (A4), rendered by an offscreen window. */
+async function printToPdf(htmlPath: string, pdfPath: string): Promise<string> {
+  const { writeFile } = await import('node:fs/promises');
+  const { pathToFileURL } = await import('node:url');
+  const pdfWin = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  try {
+    await pdfWin.loadURL(pathToFileURL(htmlPath).href);
+    const data = await pdfWin.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      margins: { top: 0.6, bottom: 0.6, left: 0.5, right: 0.5 },
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate:
+        '<div style="width:100%;font:9px -apple-system,Segoe UI,sans-serif;color:#888;text-align:center"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+    });
+    await writeFile(pdfPath, data);
+    return 'Fiches de révision.pdf';
+  } finally {
+    pdfWin.destroy();
+  }
 }
 
 // --- Boot -----------------------------------------------------------------------------------
@@ -576,7 +729,7 @@ async function boot(): Promise<void> {
     debounceMs: E2E ? 300 : 6000,
     // The extension keeps the Notion mapping of its notes, to sync them itself while the app is closed.
     onSynced: (id) => {
-      const link = library.get(id)?.notion;
+      const link = library.getNote(id)?.notion;
       if (link) server?.broadcast({ type: 'notion.link', noteId: id, link });
     },
     log: (m) => console.log(`[boo] ${m}`),
@@ -601,7 +754,7 @@ async function boot(): Promise<void> {
       showWindow();
       send('open-title', title);
     },
-    welcomeExtras: () => [sharedNotionConfig(), libraryTitles()],
+    welcomeExtras: () => [sharedNotionConfig(), libraryTitles(), libraryCourses()],
     log: (m) => console.log(`[boo] ${m}`),
   });
   server.on('clients', pushStatus);
@@ -623,10 +776,10 @@ async function boot(): Promise<void> {
 
   const files = [...filesFromArgv(process.argv), ...pendingOpen.splice(0)];
   if (files.length) {
-    const { added } = await addFiles(files);
+    const { notes } = await importFiles(files);
     win?.webContents.once('did-finish-load', () => {
-      const last = added.at(-1);
-      if (last) send('open-item', last.id);
+      const last = notes.at(-1);
+      if (last) send('open-note', last.id);
     });
   }
 }

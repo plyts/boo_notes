@@ -29,6 +29,12 @@ export type RichText =
 /** Resolves `[[Titre]]` to the Notion page of that note (id), when it has one. */
 export interface InlineContext {
   wiki?(title: string): string | null;
+  /**
+   * An anchor (`[04:15]`, `[p. 12]`, `[§ 4]`, `[pin 3]`) and the resource it
+   * names (null: the note's main one): text shown before it (the resource of a
+   * multi-resource note) and the link it opens.
+   */
+  anchor?(kind: 'time' | 'page' | 'section' | 'pin', value: number, resource: string | null): { prefix?: string; url?: string | null } | null;
 }
 
 /** Link to a Notion page from its id. */
@@ -65,9 +71,9 @@ const INLINE = new RegExp(
     '\\[\\[(?<wiki>[^\\[\\]\\n|]{1,200}?)(?:\\|(?<wikiAlias>[^\\[\\]\\n]{1,200}?))?\\]\\]',
     '(?<code>`+)(?<codeText>.+?)\\k<code>',
     '(?<!!)\\[(?<ts>(?:\\d+:)?\\d{1,3}:\\d{2})\\](?:\\((?<tsUrl>[^()\\s]*)\\))?',
-    '(?<!!)\\[p\\.\\s?(?<page>\\d{1,5})\\]',
-    '(?<!!)\\[§\\s?(?<section>\\d{1,5})\\]',
-    '(?<!!)\\[pin\\s?(?<pin>\\d{1,4})\\]',
+    '(?<!!)\\[p\\.\\s?(?<page>\\d{1,5})\\](?:\\(res:(?<pageRes>[^()\\s]+)\\))?',
+    '(?<!!)\\[§\\s?(?<section>\\d{1,5})\\](?:\\(res:(?<sectionRes>[^()\\s]+)\\))?',
+    '(?<!!)\\[pin\\s?(?<pin>\\d{1,4})\\](?:\\(res:(?<pinRes>[^()\\s]+)\\))?',
     '(?<!!)\\[(?<linkText>[^\\]\\n]+)\\]\\((?<linkUrl>[^()\\s]+)\\)',
     '<(?<auto>https?:\\/\\/[^>\\s]+)>',
     '\\*\\*(?<bold>.+?)\\*\\*',
@@ -133,10 +139,18 @@ export function parseInline(
       if (pageId && !alias && !link) out.push({ type: 'mention', mention: { type: 'page', page: { id: pageId } }, annotations: cleanAnnotations(annotations) });
       else out.push(...text(alias || title, { ...annotations, bold: true }, pageId ? notionPageUrl(pageId) : link));
     } else if (g.codeText !== undefined) out.push(...text(g.codeText.trim(), { ...annotations, code: true }, link));
-    else if (g.ts !== undefined) out.push(...text(g.ts, { ...annotations, code: true }, safeUrl(g.tsUrl) ?? link));
-    else if (g.page !== undefined) out.push(...text(`p. ${g.page}`, { ...annotations, code: true }, link));
-    else if (g.section !== undefined) out.push(...text(`§ ${g.section}`, { ...annotations, code: true }, link));
-    else if (g.pin !== undefined) out.push(...text(`◉ ${g.pin}`, { ...annotations, code: true }, link));
+    else if (g.ts !== undefined) {
+      const res = g.tsUrl?.startsWith('res:') ? g.tsUrl.slice(4) : null;
+      const a = ctx.anchor?.('time', timecodeSeconds(g.ts), res) ?? null;
+      const url = res ? (a?.url ?? null) : (safeUrl(g.tsUrl) ?? a?.url ?? null);
+      out.push(...text(`${a?.prefix ?? ''}${g.ts}`, { ...annotations, code: true }, safeUrl(url) ?? link));
+    } else if (g.page !== undefined || g.section !== undefined || g.pin !== undefined) {
+      const kind = g.page !== undefined ? 'page' : g.section !== undefined ? 'section' : 'pin';
+      const value = Number(g.page ?? g.section ?? g.pin);
+      const a = ctx.anchor?.(kind, value, g.pageRes ?? g.sectionRes ?? g.pinRes ?? null) ?? null;
+      const label = kind === 'page' ? `p. ${value}` : kind === 'section' ? `§ ${value}` : `◉ ${value}`;
+      out.push(...text(`${a?.prefix ?? ''}${label}`, { ...annotations, code: true }, safeUrl(a?.url) ?? link));
+    }
     else if (g.linkText !== undefined) out.push(...inner(g.linkText, annotations, safeUrl(g.linkUrl) ?? link));
     else if (g.auto !== undefined) out.push(...text(g.auto, annotations, safeUrl(g.auto)));
     else if (g.bold !== undefined || g.bold2 !== undefined)
@@ -181,6 +195,10 @@ const DIVIDER = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const LIST = /^(\s*)([-*+]|\d{1,9}[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
 const parseInlineCtx = (t: string, a: Annotations, l: string | null, ctx: InlineContext) => parseInline(t, a, l, ctx);
+
+function timecodeSeconds(tc: string): number {
+  return tc.split(':').reduce((acc, part) => acc * 60 + Number(part), 0);
+}
 
 const IMAGE_LINE =
   /^\s*(?:\[((?:\d+:)?\d{1,3}:\d{2})\](?:\(([^()\s]*)\))?\s+)?!\[([^\]\n]*)\]\(([^()\s]+)\)\s*$/;

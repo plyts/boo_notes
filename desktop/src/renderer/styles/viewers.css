@@ -1,0 +1,784 @@
+/* Study viewers (imperative islands inside the React app): PDF, media, image, text. */
+/* --- PDF reader ---------------------------------------------------------------------------- */
+
+.pdf-viewer {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--pdf-bg);
+}
+
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+}
+
+.page-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-input {
+  width: 52px;
+  height: 28px !important;
+  padding: 0 6px !important;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 8px;
+  background: var(--hairline);
+}
+
+.zoom-label {
+  min-width: 58px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.zoom-label:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pdf-scroller {
+  position: relative; /* offsetTop of pages = scroll coordinates */
+  overflow: auto;
+  outline: none;
+}
+
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px 64px;
+}
+
+.pdf-page {
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  position: relative;
+  flex: none;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.pdf-page.flash {
+  animation: page-flash 900ms var(--ease-out);
+}
+
+@keyframes page-flash {
+  0% {
+    box-shadow: 0 0 0 4px var(--accent), 0 8px 24px rgba(0, 0, 0, 0.18);
+  }
+}
+
+.pdf-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.pdf-page-num {
+  position: absolute;
+  bottom: -18px;
+  right: 2px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.pdf-mark {
+  position: absolute;
+  border-radius: 2px;
+}
+
+.pdf-mark.yellow {
+  background: var(--mark-yellow);
+}
+
+.pdf-mark.green {
+  background: var(--mark-green);
+}
+
+.pdf-mark.blue {
+  background: var(--mark-blue);
+}
+
+.pdf-mark.pink {
+  background: var(--mark-pink);
+}
+
+/* pdf.js text layer (selectable, transparent text over the canvas). */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.textLayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.textLayer .markedContent {
+  display: contents;
+}
+
+.textLayer ::selection {
+  background: rgba(10, 132, 255, 0.28);
+  color: transparent;
+}
+
+.textLayer br::selection {
+  background: transparent;
+}
+
+.textLayer .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  display: block;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+.pdf-popover {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgba(28, 28, 32, 0.94);
+  color: #fff;
+  box-shadow: var(--shadow-l);
+  backdrop-filter: blur(12px);
+  animation: pop-in var(--dur) var(--ease-spring);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+}
+
+.swatches {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--dur-fast) ease;
+}
+
+.swatch:hover {
+  transform: scale(1.15);
+}
+
+.swatch.yellow {
+  background: #ffcc00;
+}
+
+.swatch.green {
+  background: #34c759;
+}
+
+.swatch.blue {
+  background: #0a84ff;
+}
+
+.swatch.pink {
+  background: #ff375f;
+}
+
+.pop-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.pop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pop-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pop-btn.danger {
+  color: #ff8a80;
+}
+
+/* --- Media player -------------------------------------------------------------------------- */
+
+.media-viewer {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.media-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.media-stage.video {
+  background: var(--stage-bg);
+}
+
+.media-stage.flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  animation: flash 100ms ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes flash {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.media-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
+}
+
+.media-stage.audio {
+  align-content: center;
+  gap: 18px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(155, 140, 255, 0.28), transparent 55%),
+    radial-gradient(circle at 70% 80%, rgba(255, 159, 10, 0.18), transparent 50%),
+    var(--surface);
+}
+
+.audio-art {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+
+.audio-disc {
+  display: grid;
+  place-items: center;
+  width: 148px;
+  height: 148px;
+  border-radius: 36px;
+  background: linear-gradient(160deg, #8b7cf6, #ff9f0a);
+  color: #fff;
+  box-shadow: 0 24px 56px rgba(109, 94, 240, 0.35);
+}
+
+.audio-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 56px;
+}
+
+.audio-wave i {
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.5;
+  transform-origin: center;
+}
+
+.media-viewer.playing .audio-wave i {
+  animation: wave 900ms ease-in-out infinite alternate;
+}
+
+@keyframes wave {
+  to {
+    transform: scaleY(0.35);
+  }
+}
+
+.audio-title {
+  max-width: 520px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--hairline);
+  background: var(--bg);
+}
+
+.play-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+.play-btn:hover {
+  background: color-mix(in srgb, var(--accent-strong) 88%, white);
+  color: var(--on-accent);
+}
+
+.scrub {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+.scrubber-input {
+  --fill: 0%;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--surface-2) var(--fill));
+  cursor: pointer;
+}
+
+.scrubber-input::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), var(--shadow-s);
+}
+
+.scrub-markers {
+  position: absolute;
+  inset: 0 7px;
+  pointer-events: none;
+}
+
+.scrub-marker {
+  position: absolute;
+  top: 4px;
+  width: 2px;
+  height: 6px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--now-border);
+}
+
+.media-time {
+  min-width: 108px;
+  color: var(--muted);
+  font: 500 12px / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.speed-btn {
+  min-width: 44px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* --- Image viewer ----------------------------------------------------------------------------- */
+
+.image-viewer,
+.text-viewer {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.image-viewer {
+  background: var(--pdf-bg);
+}
+
+.pin-toggle[aria-pressed='true'] {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+.iv-stage {
+  position: relative;
+  overflow: hidden;
+  outline: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.iv-stage.panning {
+  cursor: grabbing;
+}
+
+.iv-stage.placing {
+  cursor: crosshair;
+}
+
+.iv-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  --inv-scale: 1;
+}
+
+.iv-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  user-select: none;
+}
+
+.iv-pins {
+  position: absolute;
+  inset: 0;
+}
+
+.iv-pin {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 4px;
+  background: rgba(40, 40, 48, 0.85);
+  color: #fff;
+  font: 700 12px / 1 var(--font-sans);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%) scale(var(--inv-scale)) rotate(0deg);
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+
+.iv-pin.has-notes {
+  background: var(--accent-strong);
+}
+
+.iv-pin.active {
+  outline: 3px solid var(--now-border);
+  outline-offset: 1px;
+}
+
+.iv-pin.pulse {
+  animation: pin-pulse 900ms var(--ease-out);
+}
+
+@keyframes pin-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(250, 204, 21, 0);
+  }
+}
+
+/* --- Text reader ------------------------------------------------------------------------------ */
+
+.text-viewer {
+  background: var(--surface);
+}
+
+.tx-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tx-scroller {
+  overflow: auto;
+  outline: none;
+}
+
+.tx-article {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 56px 96px 72px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.tx-block {
+  position: relative;
+  margin: 0 0 0.9em;
+  border-radius: 6px;
+}
+
+.tx-block.flash {
+  animation: tx-flash 1.2s var(--ease-out);
+}
+
+@keyframes tx-flash {
+  0% {
+    background: var(--now-bg);
+    box-shadow: -10px 0 0 var(--now-bg), 10px 0 0 var(--now-bg);
+  }
+}
+
+.tx-block > :is(p, h1, h2, h3, blockquote, pre) {
+  margin: 0;
+  user-select: text;
+}
+
+.tx-h1 {
+  font-size: 1.6em;
+  line-height: 1.25;
+}
+
+.tx-h2 {
+  font-size: 1.3em;
+}
+
+.tx-h3 {
+  font-size: 1.1em;
+}
+
+.tx-li {
+  padding-left: 1.2em;
+}
+
+.tx-li > p::before {
+  content: '•';
+  position: absolute;
+  margin-left: -1em;
+  color: var(--faint);
+}
+
+.tx-block blockquote {
+  padding-left: 14px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.tx-block pre {
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--bg);
+  font: 13px / 1.5 var(--font-mono);
+}
+
+.tx-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.tx-gutter {
+  position: absolute;
+  top: 0.2em;
+  left: -64px;
+  width: 48px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font: 500 11px / 1.6 var(--font-mono);
+  text-align: right;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.tx-block:hover .tx-gutter,
+.tx-block.has-notes .tx-gutter {
+  opacity: 1;
+}
+
+.tx-gutter:hover {
+  background: var(--ts-bg);
+  color: var(--ts-text);
+}
+
+.tx-marker {
+  position: absolute;
+  top: 0.25em;
+  right: -40px;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  font: 700 11px / 20px var(--font-sans);
+  cursor: pointer;
+}
+
+.tx-empty {
+  color: var(--faint);
+  font-style: italic;
+}
+
+/* --- PDF note badges, clickable timeline markers --------------------------------------------- */
+
+.pdf-note-badge {
+  position: absolute;
+  top: 10px;
+  left: -14px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  font: 700 11.5px / 1 var(--font-sans);
+  box-shadow: var(--shadow-s);
+  cursor: pointer;
+}
+
+.pdf-note-badge:hover {
+  transform: scale(1.06);
+}
+
+.scrub-markers .scrub-marker {
+  top: 0;
+  width: 8px;
+  height: 12px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.scrub-markers .scrub-marker::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--now-border);
+}
+
+.scrub-markers .scrub-marker:hover::after {
+  top: 0;
+  height: 12px;
+}
+
+.scrub-markers {
+  z-index: 1;
+}

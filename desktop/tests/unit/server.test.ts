@@ -103,12 +103,13 @@ describe('ExtensionServer', () => {
     };
     send({ type: 'note.upsert', note, portableMarkdown: '---\ntitle: "Épisode 1"\n---\n\ncorps' });
     expect(await next()).toEqual({ type: 'ack', noteId: note.id, rev: 3 });
-    expect(lib.get(note.id)).toMatchObject({ kind: 'audio', title: 'Épisode 1', rev: 3 });
+    expect(lib.getNote(note.id)).toMatchObject({ title: 'Épisode 1', rev: 3, resources: [note.id] });
+    expect(lib.getResource(note.id)).toMatchObject({ kind: 'audio', origin: 'extension' });
 
     send({ type: 'media.progress', noteId: note.id, position: 30, duration: 60, updatedAt: 10 });
     send({ type: 'export', requestId: 'r1', noteId: note.id, target: 'local' });
     expect(await next()).toEqual({ type: 'export.result', requestId: 'r1', ok: true, message: 'Enregistré' });
-    expect(lib.get(note.id)?.progress).toEqual({ position: 30, duration: 60, updatedAt: 10 });
+    expect(lib.getResource(note.id)?.progress).toEqual({ position: 30, duration: 60, updatedAt: 10 });
     send({ type: 'export', requestId: 'r2', noteId: note.id, target: 'notion' });
     expect(await next()).toEqual({ type: 'export.result', requestId: 'r2', ok: false, message: 'Notion n’est pas connecté' });
 
@@ -146,9 +147,9 @@ describe('ExtensionServer', () => {
     });
     await sync.connect();
     await vi.waitFor(async () => expect((await sync.status()).pending).toBe(0));
-    await vi.waitFor(() => expect(lib.get('youtube:abcdefghijk')?.progress?.position).toBe(42));
+    await vi.waitFor(() => expect(lib.getResource('youtube:abcdefghijk')?.progress?.position).toBe(42));
 
-    const item = lib.get('youtube:abcdefghijk')!;
+    const item = lib.getNote('youtube:abcdefghijk')!;
     expect(item).toMatchObject({ title: 'Vidéo', rev: 1, noteCount: 1 });
     expect(await readFile(join(lib.path, asset.path))).toEqual(Buffer.from('iVBORw0KGgo=', 'base64'));
     expect(await readFile(join(lib.path, item.noteFile), 'utf8')).toContain(

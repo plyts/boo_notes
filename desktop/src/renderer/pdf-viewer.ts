@@ -1,7 +1,7 @@
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { Highlight, HighlightColor } from '../core/types';
-import { h, icon, iconButton } from './ui';
+import { h, icon, iconButton } from './dom';
 
 pdfjs.GlobalWorkerOptions.workerSrc = 'boo://app/pdfjs/pdf.worker.mjs';
 

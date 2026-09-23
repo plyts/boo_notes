@@ -1,8 +1,8 @@
-import type { ItemView, Pin } from '../ipc';
-import { h, icon, iconButton, showMenu } from './ui';
+import type { Pin, ResourceView } from '../ipc';
+import { h, icon, iconButton, showMenu } from './dom';
 
 export interface ImageViewerOptions {
-  item: ItemView;
+  item: Pick<ResourceView, 'id' | 'title'>;
   pins: Pin[];
   onPinsChange(pins: Pin[]): void;
   /** A pin was just placed: a note line starts with it. */

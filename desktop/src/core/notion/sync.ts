@@ -10,8 +10,9 @@ import {
   type SyncItem,
 } from '../../../../src/shared/notion/engine';
 import type { NotionClientOptions } from '../../../../src/shared/notion/client';
-import { positionLabel, progressRatio, studyStatus, type Library } from '../library';
-import type { LibraryItem } from '../types';
+import type { Library } from '../library';
+import type { Note } from '../types';
+import { filing, noteView } from '../views';
 
 export { DATABASE_PROPERTIES, DATABASE_TITLE, pageProperties };
 
@@ -44,42 +45,47 @@ export interface NotionSyncOptions {
   log?(message: string): void;
 }
 
-/** A library item as the Notion engine sees it. */
-export async function toSyncItem(library: Library, item: LibraryItem): Promise<SyncItem> {
+/** A note as the Notion engine sees it: its resources, filing, progress and review. */
+export async function toSyncItem(library: Library, note: Note): Promise<SyncItem> {
+  const view = noteView(library, note);
+  const resources = library.resourcesOf(note);
+  const where = filing(library, note.id);
   return {
-    id: item.id,
-    kind: item.kind,
-    platform: item.platform,
-    title: item.title,
-    source: item.source,
-    rev: item.rev,
-    updatedAt: item.updatedAt,
-    status: studyStatus(item),
-    ratio: progressRatio(item),
-    position: positionLabel(item),
-    noteCount: item.noteCount ?? 0,
-    nextReview: item.review?.next ?? null,
-    body: await library.readNote(item.id),
-    highlights: item.highlights,
-    links: item.links ?? [],
-    uploadSource: item.origin === 'desktop' && item.kind === 'image',
+    id: note.id,
+    kind: view.kind,
+    platform: view.platform,
+    title: note.title,
+    source: view.source,
+    rev: note.rev,
+    updatedAt: Math.max(note.updatedAt, ...resources.map((r) => r.updatedAt)),
+    status: view.studyStatus,
+    ratio: view.ratio,
+    position: view.positionLabel,
+    noteCount: note.noteCount ?? 0,
+    nextReview: note.review?.next ?? null,
+    body: await library.readNote(note.id),
+    highlights: resources.flatMap((r) => r.highlights ?? []),
+    links: note.links ?? [],
+    sources: resources.map((r) => ({ id: r.id, kind: r.kind, title: r.title, source: r.source, upload: r.origin === 'file' && r.kind === 'image' })),
+    course: where?.course.title ?? null,
+    chapter: where?.chapter.title ?? null,
   };
 }
 
 function librarySource(library: Library): NotionSource {
   return {
     item: async (id) => {
-      const item = library.get(id);
-      return item ? toSyncItem(library, item) : null;
+      const note = library.getNote(id);
+      return note?.noteFile ? toSyncItem(library, note) : null;
     },
-    getLink: async (id) => library.get(id)?.notion,
+    getLink: async (id) => library.getNote(id)?.notion,
     setLink: (id, link) => library.setNotion(id, link),
     resolveTitle: async (title) => library.findByTitle(title)?.id ?? null,
     readAsset: async (path) => {
       try {
         if (path.startsWith('source:')) {
-          const item = library.get(path.slice(7));
-          return item?.origin === 'desktop' ? await readFile(item.source) : null;
+          const res = library.getResource(path.slice(7));
+          return res?.origin === 'file' ? await readFile(res.source) : null;
         }
         return await readFile(library.assetPath(path));
       } catch {
@@ -115,9 +121,10 @@ export class NotionSync extends EventEmitter<{ state: [NotionState] }> {
     });
     opts.library.on('changed', (id, reason) => {
       if (!id || !this.autoSyncEnabled()) return;
-      const item = opts.library.get(id);
+      const note = opts.library.getNote(id);
+      if (!note?.noteFile) return;
       if (reason === 'content' || reason === 'meta') this.schedule(id, 'content');
-      else if (reason === 'progress' && item?.notion) this.schedule(id, 'progress');
+      else if (reason === 'progress' && note.notion) this.schedule(id, 'progress');
     });
   }
 
@@ -154,7 +161,7 @@ export class NotionSync extends EventEmitter<{ state: [NotionState] }> {
       this.timers.delete(id);
     }
     return this.track(() => this.engine.syncItem(id)).then((res) => {
-      if (this.opts.library.get(id)?.origin === 'extension') this.opts.onSynced?.(id);
+      if (this.opts.library.getNote(id)?.origin === 'extension') this.opts.onSynced?.(id);
       return res;
     });
   }
@@ -167,9 +174,9 @@ export class NotionSync extends EventEmitter<{ state: [NotionState] }> {
   async syncAll(): Promise<{ ok: number; failed: number }> {
     let ok = 0;
     let failed = 0;
-    for (const item of this.opts.library.list()) {
+    for (const note of this.opts.library.listNotes()) {
       try {
-        await this.syncItem(item.id);
+        await this.syncItem(note.id);
         ok++;
       } catch {
         failed++;

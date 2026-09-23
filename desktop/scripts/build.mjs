@@ -36,16 +36,20 @@ const entries = [
     external: ['electron'],
   },
   {
-    entryPoints: { app: join(src, 'renderer/app.ts') },
+    entryPoints: { app: join(src, 'renderer/main.tsx') },
     outdir: join(out, 'renderer'),
     platform: 'browser',
     format: 'esm',
     target: 'chrome140',
+    jsx: 'automatic',
+    define: { 'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production') },
   },
   {
-    entryPoints: { app: join(src, 'renderer/styles.css') },
+    entryPoints: { app: join(src, 'renderer/styles/app.css') },
     outdir: join(out, 'renderer'),
     target: 'chrome140',
+    // Fonts are copied next to the stylesheet (dist/renderer/fonts).
+    external: ['fonts/*'],
   },
 ];
 
@@ -53,6 +57,12 @@ async function copyStatic() {
   await mkdir(join(out, 'renderer', 'pdfjs'), { recursive: true });
   await cp(join(src, 'renderer/index.html'), join(out, 'renderer/index.html'));
   await cp(join(src, 'assets/icons'), join(out, 'icons'), { recursive: true });
+  // Inter (OFL) with its optical-size axis: the UI font where SF Pro is not the system font.
+  const inter = join(root, 'node_modules', '@fontsource-variable', 'inter', 'files');
+  await mkdir(join(out, 'renderer', 'fonts'), { recursive: true });
+  for (const f of ['inter-latin-opsz-normal.woff2', 'inter-latin-ext-opsz-normal.woff2', 'inter-latin-opsz-italic.woff2']) {
+    await cp(join(inter, f), join(out, 'renderer', 'fonts', f));
+  }
   await cp(join(pdfjs, 'build/pdf.worker.min.mjs'), join(out, 'renderer/pdfjs/pdf.worker.mjs'));
   for (const dir of ['cmaps', 'standard_fonts', 'wasm']) {
     await cp(join(pdfjs, dir), join(out, 'renderer/pdfjs', dir), { recursive: true });

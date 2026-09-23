@@ -124,8 +124,8 @@ describe('NotionSync.syncItem', () => {
     ]);
     const upload = [...mock.state.uploads.values()][0];
     expect(upload).toMatchObject({ filename: 'cap-00-12-abcd.jpg', content_type: 'image/jpeg', status: 'uploaded' });
-    expect(lib.get(YT)?.notion).toMatchObject({ pageId, syncedRev: 1, error: null });
-    expect(lib.get(YT)?.notion?.blocks).toHaveLength(4);
+    expect(lib.getNote(YT)?.notion).toMatchObject({ pageId, syncedRev: 1, error: null });
+    expect(lib.getNote(YT)?.notion?.blocks).toHaveLength(4);
   });
 
   it('only sends what changed', async () => {
@@ -180,16 +180,16 @@ describe('NotionSync.syncItem', () => {
     await connect();
     const pdf = join(dir, 'Cours.pdf');
     await writeFile(pdf, '%PDF-1.4');
-    const item = await lib.addLocalFile(pdf);
+    const item = (await lib.importFiles([pdf])).notes[0];
     const lines = Array.from({ length: 150 }, (_, i) => `[p. ${i + 1}] Idée ${i + 1}`);
     await lib.saveNote(item.id, lines.join('\n'));
-    await lib.setProgress(item.id, 10, 40);
-    await lib.setHighlights(item.id, [
+    await lib.setProgress(item.resources[0], 10, 40);
+    await lib.setHighlights(item.resources[0], [
       { id: 'h1', page: 3, rects: [[0.1, 0.1, 0.5, 0.02]], text: 'Un passage important', color: 'yellow', createdAt: 1 },
     ]);
     const { pageId } = await sync.syncItem(item.id);
     const content = mock.pageContent(pageId)!;
-    expect(content[0]).toEqual({ type: 'callout', text: 'Fichier local : Cours.pdf' });
+    expect(content[0]).toEqual({ type: 'callout', text: 'PDF — fichier local : Cours.pdf' });
     expect(content).toHaveLength(1 + 150 + 2);
     expect(content.at(-1)).toEqual({ type: 'quote', text: 'Un passage important p. 3' });
     expect(calls('PATCH', /children/)).toBe(2);
@@ -211,7 +211,7 @@ describe('NotionSync.syncItem', () => {
     config = { ...config, token: 'revoked' };
     await lib.upsertFromExtension(note(2, '[00:05] Intro\nplus'));
     await expect(sync.syncItem(YT)).rejects.toThrow(/Jeton Notion refusé/);
-    expect(lib.get(YT)?.notion?.error).toMatch(/Jeton Notion refusé/);
+    expect(lib.getNote(YT)?.notion?.error).toMatch(/Jeton Notion refusé/);
     expect(sync.state.lastError).toMatch(/Jeton Notion refusé/);
   });
 
@@ -219,12 +219,12 @@ describe('NotionSync.syncItem', () => {
     await connect();
     config = { ...config, autoSync: true };
     await lib.upsertFromExtension(note(1, '[00:05] Intro'));
-    await vi.waitFor(() => expect(lib.get(YT)?.notion?.pageId).toBeTruthy(), { timeout: 3000 });
+    await vi.waitFor(() => expect(lib.getNote(YT)?.notion?.pageId).toBeTruthy(), { timeout: 3000 });
     mock.state.requests.length = 0;
     await lib.setProgress(YT, 590, 600);
     await vi.waitFor(() => expect(calls('PATCH', /pages/)).toBe(1), { timeout: 3000 });
     expect(calls('PATCH', /children/)).toBe(0);
-    const page = mock.state.pages.get(lib.get(YT)!.notion!.pageId.replace(/-/g, ''))!;
+    const page = mock.state.pages.get(lib.getNote(YT)!.notion!.pageId.replace(/-/g, ''))!;
     expect(page.properties.Statut).toEqual({ select: { name: 'Terminé' } });
   });
 
@@ -235,12 +235,12 @@ describe('NotionSync.syncItem', () => {
     expect(db.properties.Liens.relation).toMatchObject({ type: 'dual_property' });
     expect(Object.keys(db.properties)).toEqual(expect.arrayContaining(['Liée depuis', 'Boo ID', 'Prochaine révision']));
 
-    const forces = await lib.createNote('Forces', 'Une force se mesure en newtons.');
-    const newton = await lib.createNote('Lois de Newton', 'Deuxième loi : voir [[Forces]] et [[Inconnue]].');
+    const forces = await lib.createNote({ title: 'Forces', body: 'Une force se mesure en newtons.' });
+    const newton = await lib.createNote({ title: 'Lois de Newton', body: 'Deuxième loi : voir [[Forces]] et [[Inconnue]].' });
     await lib.review(newton.id, 'start', Date.UTC(2026, 4, 2, 12));
     const { pageId } = await sync.syncItem(newton.id);
 
-    const forcesPage = lib.get(forces.id)!.notion!.pageId;
+    const forcesPage = lib.getNote(forces.id)!.notion!.pageId;
     expect(forcesPage).toBeTruthy();
     expect(mock.pageContent(pageId)).toEqual([{ type: 'paragraph', text: 'Deuxième loi : voir @Forces et Inconnue.' }]);
     const page = mock.state.pages.get(pageId.replace(/-/g, ''))!;
@@ -263,7 +263,7 @@ describe('NotionSync.syncItem', () => {
     await connect();
     const png = join(dir, 'Offre et demande.png');
     await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    const item = await lib.addLocalFile(png);
+    const item = (await lib.importFiles([png])).notes[0];
     await lib.saveNote(item.id, '[pin 1] Équilibre du marché');
     const { pageId } = await sync.syncItem(item.id);
     expect(mock.pageContent(pageId)).toEqual([
@@ -271,6 +271,36 @@ describe('NotionSync.syncItem', () => {
       { type: 'paragraph', text: '◉ 1 Équilibre du marché' },
     ]);
     expect([...mock.state.uploads.values()][0]).toMatchObject({ filename: 'Offre et demande.png', content_type: 'image/png' });
+  });
+
+  it('writes the course, the chapter and every resource of a note', async () => {
+    await connect();
+    const course = await lib.createCourse({ title: 'Économie, niveau 1' });
+    await lib.updateChapter(course.id, course.chapters[0].id, { title: 'Marchés' });
+    const png = join(dir, 'Offre.png');
+    await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const image = await lib.addFile(png);
+    const video = await lib.addUrl('https://www.youtube.com/watch?v=abcdefghijk', { title: 'Cours filmé' });
+    const n = await lib.createNote({
+      title: 'Équilibre',
+      body: `[pin 1] prix d’équilibre\n[04:15](res:${video.id}) explication`,
+      resources: [image.id, video.id],
+      placement: { courseId: course.id, chapterId: course.chapters[0].id },
+    });
+    const { pageId } = await sync.syncItem(n.id);
+    expect(mock.pageContent(pageId)).toEqual([
+      { type: 'image', text: 'Offre' },
+      { type: 'video', text: '' },
+      { type: 'paragraph', text: '◉ 1 prix d’équilibre' },
+      { type: 'paragraph', text: '04:15 explication' },
+    ]);
+    const page = mock.state.pages.get(pageId.replace(/-/g, ''))!;
+    expect(page.properties).toMatchObject({
+      Type: { select: { name: 'Image' } },
+      Cours: { select: { name: 'Économie niveau 1' } },
+      Chapitre: { rich_text: [{ text: { content: 'Marchés' } }] },
+      Supports: { rich_text: [{ text: { content: 'Image · Offre\nVidéo · Cours filmé' } }] },
+    });
   });
 
   it('adopts the page another device created for the same note (no duplicate)', async () => {

@@ -56,7 +56,8 @@ export interface EditorHooks {
   autoTimestamp(): boolean;
   /** Hovering a timestamp previews it on the player's progress bar. */
   onTimestampHover(seconds: number | null): void;
-  onTimestampClick(seconds: number): void;
+  /** `resource`: the resource named by the timestamp (`[04:15](res:<id>)`), null for the main one. */
+  onTimestampClick(seconds: number, resource?: string | null): void;
   /** Any typed character / deletion (drives auto-pause). */
   onKeystroke(): void;
   onChange(): void;
@@ -71,8 +72,13 @@ export interface EditorHooks {
    * documents return their own anchor (`[p. 12]`, `[§ 4]`…).
    */
   stampToken?(): string | null;
-  /** Click on a page (`[p. 12]`), paragraph (`[§ 4]`) or pin (`[pin 3]`) chip. */
-  onAnchorClick?(kind: AnchorKind, n: number): void;
+  /** Click on a page (`[p. 12]`), paragraph (`[§ 4]`) or pin (`[pin 3]`) chip, and the resource it names. */
+  onAnchorClick?(kind: AnchorKind, n: number, resource: string | null): void;
+  /**
+   * Badge drawn before an anchor chip, telling which resource it points to
+   * (notes linked to several videos / PDF / images). `resource`: null for the main one.
+   */
+  resourceBadge?(resource: string | null): { text: string; title: string; hue?: number } | null;
   /** Click on a `[[Titre]]` link to another note. */
   onWikiLinkClick?(title: string): void;
   /** Hovering a `[[Titre]]` link (preview), `null` when leaving it. */
@@ -96,10 +102,26 @@ const ANCHOR_TITLES: Record<AnchorKind, (n: number) => string> = {
 /** Page, paragraph and pin anchors of a line. */
 function documentAnchors(text: string, offset: number): AnchorMatch[] {
   return [
-    ...findPageRefs(text, offset).map((m) => ({ from: m.from, to: m.to, kind: 'page' as const, value: m.page, labelFrom: m.from + 1 })),
+    ...findPageRefs(text, offset).map((m) => ({
+      from: m.from,
+      to: m.to,
+      bracketTo: m.bracketTo,
+      kind: 'page' as const,
+      value: m.page,
+      labelFrom: m.from + 1,
+      resource: m.resource,
+    })),
     ...findSectionRefs(text, offset),
     ...findPins(text, offset),
   ].sort((a, b) => a.from - b.from);
+}
+
+type BadgeFn = EditorHooks['resourceBadge'];
+
+function badgeAttrs(badge: BadgeFn, resource: string | null): Record<string, string> {
+  const b = badge?.(resource);
+  if (!b) return {};
+  return { 'data-badge': b.text, 'data-res-title': b.title, style: `--res-hue: ${b.hue ?? 262}` };
 }
 
 export interface NoteMarker {
@@ -180,7 +202,7 @@ class ImageWidget extends WidgetType {
 
 const hide = Decoration.replace({});
 
-function buildPreview(view: EditorView, load: (path: string) => Promise<string>): DecorationSet {
+function buildPreview(view: EditorView, load: (path: string) => Promise<string>, badge: BadgeFn): DecorationSet {
   const { state } = view;
   const tree = syntaxTree(state);
   const active = new Set<number>();
@@ -266,15 +288,22 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
       for (const a of anchors) {
         if (inCode(tree, a.from)) continue;
         const kind = a.kind as AnchorKind;
+        const badged = badgeAttrs(badge, a.resource);
+        const where = badged['data-res-title'] ? ` — ${badged['data-res-title']}` : '';
         out.push(
           Decoration.mark({
-            class: `cm-boo-ts cm-boo-${kind}`,
-            attributes: { 'data-anchor': `${kind}:${a.value}`, title: `${ANCHOR_TITLES[kind](a.value)} (Alt+clic pour éditer)` },
+            class: `cm-boo-ts cm-boo-${kind}${badged['data-badge'] ? ' cm-boo-res' : ''}`,
+            attributes: {
+              ...badged,
+              'data-anchor': `${kind}:${a.value}`,
+              ...(a.resource ? { 'data-res': a.resource } : {}),
+              title: `${ANCHOR_TITLES[kind](a.value)}${where} (Alt+clic pour éditer)`,
+            },
           }).range(a.from, a.to),
         );
         if (!touches(a.from, a.to)) {
-          // `[pin 3]` shows as « ◉ 3 » (prefix drawn in CSS), `[p. 3]` as « p. 3 », `[§ 3]` as « § 3 ».
-          out.push(hide.range(a.from, kind === 'pin' ? a.labelFrom : a.from + 1), hide.range(a.to - 1, a.to));
+          // `[pin 3]` shows as « ◉ 3 » (prefix drawn in CSS), `[p. 3]` as « p. 3 », `[§ 3]` as « § 3 »; the target is hidden.
+          out.push(hide.range(a.from, kind === 'pin' ? a.labelFrom : a.from + 1), hide.range(a.bracketTo - 1, a.to));
         }
       }
       for (const w of findWikiLinks(line.text, line.from)) {
@@ -304,10 +333,17 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
       }
       for (const m of stamps) {
         if (inCode(tree, m.from)) continue;
+        const badged = badgeAttrs(badge, m.resource);
+        const where = badged['data-res-title'] ? ` — ${badged['data-res-title']}` : '';
         out.push(
           Decoration.mark({
-            class: 'cm-boo-ts',
-            attributes: { 'data-t': String(m.seconds), title: `Aller à ${m.label} (Alt+clic pour éditer)` },
+            class: `cm-boo-ts${badged['data-badge'] ? ' cm-boo-res' : ''}`,
+            attributes: {
+              ...badged,
+              'data-t': String(m.seconds),
+              ...(m.resource ? { 'data-res': m.resource } : {}),
+              title: `Aller à ${m.label}${where} (Alt+clic pour éditer)`,
+            },
           }).range(m.from, m.labelTo),
         );
         // Reveal the raw `[MM:SS](url)` only when the cursor touches it (Typora-style),
@@ -324,12 +360,15 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
   return Decoration.set(out, true);
 }
 
-function livePreview(load: (path: string) => Promise<string>): Extension {
+/** Asks the live preview to redraw (the resource badges changed). */
+const refreshPreview = StateEffect.define<null>();
+
+function livePreview(load: (path: string) => Promise<string>, badge: BadgeFn): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildPreview(view, load);
+        this.decorations = buildPreview(view, load, badge);
       }
       update(u: ViewUpdate) {
         if (
@@ -337,9 +376,10 @@ function livePreview(load: (path: string) => Promise<string>): Extension {
           u.viewportChanged ||
           u.selectionSet ||
           u.focusChanged ||
-          syntaxTree(u.startState) !== syntaxTree(u.state)
+          syntaxTree(u.startState) !== syntaxTree(u.state) ||
+          u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshPreview)))
         ) {
-          this.decorations = buildPreview(u.view, load);
+          this.decorations = buildPreview(u.view, load, badge);
         }
       }
     },
@@ -407,6 +447,8 @@ export class NotesEditor {
   private readonly editable = new Compartment();
   private readonly extensions: Extension[];
   private tsCache: { doc: EditorState['doc']; matches: TimestampMatch[] } | null = null;
+  /** Main resource of the note: what anchors without a target refer to. */
+  private primary: string | null = null;
 
   constructor(parent: HTMLElement, private readonly hooks: EditorHooks) {
     this.extensions = [
@@ -416,7 +458,7 @@ export class NotesEditor {
       markdown({ base: markdownLanguage, addKeymap: false }),
       syntaxHighlighting(highlight),
       theme,
-      livePreview(hooks.loadAsset),
+      livePreview(hooks.loadAsset, hooks.resourceBadge),
       nowLine,
       this.editable.of(EditorView.editable.of(true)),
       placeholder(hooks.placeholderText ?? 'Écrivez ici…'),
@@ -450,12 +492,13 @@ export class NotesEditor {
           const anchor = target.getAttribute('data-anchor');
           const wiki = target.getAttribute('data-wiki');
           const frag = target.getAttribute('data-frag');
+          const res = target.getAttribute('data-res');
           if (anchor !== null) {
             const [kind, n] = anchor.split(':');
-            hooks.onAnchorClick?.(kind as AnchorKind, Number(n));
+            hooks.onAnchorClick?.(kind as AnchorKind, Number(n), res);
           } else if (wiki !== null) hooks.onWikiLinkClick?.(wiki);
           else if (frag !== null) hooks.onFragmentClick?.(frag);
-          else hooks.onTimestampClick(Number(target.getAttribute('data-t')));
+          else hooks.onTimestampClick(Number(target.getAttribute('data-t')), res);
           return true;
         },
         mouseover: (e) => {
@@ -614,8 +657,24 @@ export class NotesEditor {
     });
   }
 
-  /** Highlights the note line whose timestamp was most recently reached by the video. */
-  setPlaybackTime(seconds: number | null): void {
+  /** Main resource of the note (anchors without a target point to it). */
+  setPrimaryResource(id: string | null): void {
+    this.primary = id;
+  }
+
+  /** Redraws the chips (resource badges changed: a resource was linked, removed or reordered). */
+  refreshBadges(): void {
+    this.view.dispatch({ effects: refreshPreview.of(null) });
+  }
+
+  /** True when an anchor targets `resource` (undefined: any resource). */
+  private targets(anchorResource: string | null, resource: string | null | undefined): boolean {
+    if (resource === undefined) return true;
+    return (anchorResource ?? this.primary) === resource;
+  }
+
+  /** Highlights the note line whose timestamp was most recently reached by the video (of `resource`). */
+  setPlaybackTime(seconds: number | null, resource?: string | null): void {
     const { state } = this.view;
     let pos: number | null = null;
     if (seconds !== null) {
@@ -624,6 +683,7 @@ export class NotesEditor {
       }
       let best: TimestampMatch | null = null;
       for (const m of this.tsCache.matches) {
+        if (!this.targets(m.resource, resource)) continue;
         if (m.seconds <= seconds + 0.25 && (!best || m.seconds >= best.seconds)) best = m;
       }
       pos = best?.from ?? null;
@@ -640,13 +700,13 @@ export class NotesEditor {
    * Highlights the note line of the anchor being looked at: the last one at or
    * before `value` (pages, paragraphs), or exactly `value` (pins).
    */
-  setCurrentAnchor(kind: AnchorKind, value: number | null): void {
+  setCurrentAnchor(kind: AnchorKind, value: number | null, resource?: string | null): void {
     const { state } = this.view;
     let pos: number | null = null;
     if (value !== null) {
       let best: AnchorMatch | null = null;
       for (const m of documentAnchors(state.doc.toString(), 0)) {
-        if (m.kind !== kind) continue;
+        if (m.kind !== kind || !this.targets(m.resource, resource)) continue;
         const ok = kind === 'pin' ? m.value === value : m.value <= value;
         if (ok && (!best || m.value >= best.value)) best = m;
       }
@@ -672,24 +732,31 @@ export class NotesEditor {
   }
 
   /** Scrolls to (and highlights) the first line with this anchor (or timestamp); false when there is none. */
-  revealAnchor(kind: AnchorKind | 'time', value: number): boolean {
+  revealAnchor(kind: AnchorKind | 'time', value: number, resource?: string | null): boolean {
     const doc = this.view.state.doc.toString();
     const from =
       kind === 'time'
-        ? findTimestamps(doc).find((m) => m.seconds === value)?.from
-        : documentAnchors(doc, 0).find((a) => a.kind === kind && a.value === value)?.from;
+        ? findTimestamps(doc).find((m) => m.seconds === value && this.targets(m.resource, resource))?.from
+        : documentAnchors(doc, 0).find((a) => a.kind === kind && a.value === value && this.targets(a.resource, resource))?.from;
     if (from === undefined) return false;
     this.view.dispatch({ effects: [setNowLine.of(from), EditorView.scrollIntoView(from, { y: 'center' })] });
     return true;
   }
 
-  /** Number of notes per anchor value (pages, paragraphs, pins): markers in the viewer. */
-  anchorCounts(kind: AnchorKind): Map<number, number> {
+  /** Number of notes per anchor value (pages, paragraphs, pins) of `resource`: markers in the viewer. */
+  anchorCounts(kind: AnchorKind, resource?: string | null): Map<number, number> {
     const counts = new Map<number, number>();
     for (const a of documentAnchors(this.view.state.doc.toString(), 0)) {
-      if (a.kind === kind) counts.set(a.value, (counts.get(a.value) ?? 0) + 1);
+      if (a.kind === kind && this.targets(a.resource, resource)) counts.set(a.value, (counts.get(a.value) ?? 0) + 1);
     }
     return counts;
+  }
+
+  /** Instants noted on `resource` (seconds): markers on a media timeline. */
+  timesOf(resource?: string | null): number[] {
+    return findTimestamps(this.view.state.doc.toString())
+      .filter((m) => this.targets(m.resource, resource))
+      .map((m) => m.seconds);
   }
 
   private wikiCompletions(ctx: CompletionContext): CompletionResult | null {

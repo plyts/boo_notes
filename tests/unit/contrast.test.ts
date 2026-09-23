@@ -69,6 +69,15 @@ const PAIRS: Array<[string, string[], number]> = [
   ['now-border', ['bg'], 3],
   ['ok', ['bg'], 3],
   ['warn', ['bg'], 3],
+  // Liquid Glass: text stays legible on each material, over the app canvas and over plain content.
+  ['text', ['canvas', 'glass'], 4.5],
+  ['muted', ['canvas', 'glass'], 4.5],
+  ['text', ['bg', 'glass'], 4.5],
+  ['muted', ['bg', 'glass'], 4.5],
+  ['text', ['canvas', 'glass-thick'], 4.5],
+  ['muted', ['canvas', 'glass-thick'], 4.5],
+  ['accent', ['canvas', 'glass'], 4.5],
+  ['text', ['canvas', 'glass-clear'], 4.5],
 ];
 
 describe.each([

@@ -202,7 +202,7 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
       case 'media.progress': {
         const noteId = String(msg.noteId ?? '');
         if (!noteId) return;
-        await library.setProgress(
+        await library.setExtensionProgress(
           noteId,
           Number(msg.position),
           Number(msg.duration),

@@ -11,6 +11,23 @@ export interface TimestampMatch {
   label: string;
   seconds: number;
   url: string | null;
+  /** Resource the instant belongs to (`[04:15](res:<id>)`); null: the note's main resource. */
+  resource: string | null;
+}
+
+/**
+ * A note may be linked to several resources (videos, audios, PDF, images…).
+ * An anchor without target refers to the note's main (first) resource; one
+ * about another resource names it: `[04:15](res:<id>)`, `[p. 12](res:<id>)`.
+ */
+export const RESOURCE_SCHEME = 'res:';
+
+function resourceOf(url: string | undefined | null): string | null {
+  return url && url.startsWith(RESOURCE_SCHEME) ? url.slice(RESOURCE_SCHEME.length) || null : null;
+}
+
+function target(resource?: string | null): string {
+  return resource ? `(${RESOURCE_SCHEME}${resource})` : '';
 }
 
 /** `[04:15]` or `[04:15](https://…#t=255)`, but not the alt text of an image (`![04:15](…)`). */
@@ -30,6 +47,7 @@ export function findTimestamps(text: string, offset = 0): TimestampMatch[] {
       label: m[1],
       seconds,
       url: m[2] ?? null,
+      resource: resourceOf(m[2]),
     });
   }
   return out;
@@ -38,47 +56,68 @@ export function findTimestamps(text: string, offset = 0): TimestampMatch[] {
 export interface PageRefMatch {
   from: number;
   to: number;
+  /** End of the `[p. 12]` part. */
+  bracketTo: number;
   page: number;
+  resource: string | null;
 }
 
+/** Optional target of an anchor: `(res:<id>)`. */
+const TARGET = String.raw`(?:\(res:([^()\s]+)\))?`;
+
 /** `[p. 12]`: a reference to a page of a PDF (the document equivalent of a timestamp). */
-const PAGE_REF_RE = /(?<!!)\[p\.\s?(\d{1,5})\]/g;
+const PAGE_REF_RE = new RegExp(String.raw`(?<!!)\[p\.\s?(\d{1,5})\]` + TARGET, 'g');
 
 export function findPageRefs(text: string, offset = 0): PageRefMatch[] {
   const out: PageRefMatch[] = [];
   for (const m of text.matchAll(PAGE_REF_RE)) {
     const from = offset + (m.index ?? 0);
-    out.push({ from, to: from + m[0].length, page: Number(m[1]) });
+    const bracket = m[0].length - (m[2] ? m[2].length + 6 : 0);
+    out.push({ from, to: from + m[0].length, bracketTo: from + bracket, page: Number(m[1]), resource: m[2] ?? null });
   }
   return out;
 }
 
-export function pageRefToken(page: number): string {
-  return `[p. ${Math.max(1, Math.floor(page))}]`;
+export function pageRefToken(page: number, resource?: string | null): string {
+  return `[p. ${Math.max(1, Math.floor(page))}]${target(resource)}`;
 }
 
 // --- Other anchors: paragraphs of a text, pins on an image ---------------------------------
 
 export interface AnchorMatch {
   from: number;
+  /** End of the whole token, target included. */
   to: number;
+  /** End of the bracketed part (`]` included). */
+  bracketTo: number;
   kind: 'time' | 'page' | 'section' | 'pin';
   /** Seconds, page, paragraph or pin number. */
   value: number;
   /** Start of the number inside the token (what stays visible in the chip, besides a prefix). */
   labelFrom: number;
+  /** Resource named by the anchor; null: the note's main resource. */
+  resource: string | null;
 }
 
 /** `[§ 12]`: paragraph 12 of a text document. */
-const SECTION_RE = /(?<!!)\[§\s?(\d{1,5})\]/g;
+const SECTION_RE = new RegExp(String.raw`(?<!!)\[§\s?(\d{1,5})\]` + TARGET, 'g');
 /** `[pin 3]`: pin number 3 placed on an image. */
-const PIN_RE = /(?<!!)\[pin\s?(\d{1,4})\]/gi;
+const PIN_RE = new RegExp(String.raw`(?<!!)\[pin\s?(\d{1,4})\]` + TARGET, 'gi');
 
 function numbered(re: RegExp, kind: AnchorMatch['kind'], text: string, offset: number): AnchorMatch[] {
   const out: AnchorMatch[] = [];
   for (const m of text.matchAll(re)) {
     const from = offset + (m.index ?? 0);
-    out.push({ from, to: from + m[0].length, kind, value: Number(m[1]), labelFrom: from + m[0].length - 1 - m[1].length });
+    const bracket = m[0].length - (m[2] ? m[2].length + 6 : 0);
+    out.push({
+      from,
+      to: from + m[0].length,
+      bracketTo: from + bracket,
+      kind,
+      value: Number(m[1]),
+      labelFrom: from + bracket - 1 - m[1].length,
+      resource: m[2] ?? null,
+    });
   }
   return out;
 }
@@ -91,12 +130,12 @@ export function findPins(text: string, offset = 0): AnchorMatch[] {
   return numbered(PIN_RE, 'pin', text, offset);
 }
 
-export function sectionToken(n: number): string {
-  return `[§ ${Math.max(1, Math.floor(n))}]`;
+export function sectionToken(n: number, resource?: string | null): string {
+  return `[§ ${Math.max(1, Math.floor(n))}]${target(resource)}`;
 }
 
-export function pinToken(n: number): string {
-  return `[pin ${Math.max(1, Math.floor(n))}]`;
+export function pinToken(n: number, resource?: string | null): string {
+  return `[pin ${Math.max(1, Math.floor(n))}]${target(resource)}`;
 }
 
 /** Every anchor of a text (time, page, paragraph, pin), in document order. */
@@ -105,11 +144,21 @@ export function findAnchors(text: string, offset = 0): AnchorMatch[] {
     ...findTimestamps(text, offset).map((m) => ({
       from: m.from,
       to: m.to,
+      bracketTo: m.labelTo,
       kind: 'time' as const,
       value: m.seconds,
       labelFrom: m.from + 1,
+      resource: m.resource,
     })),
-    ...findPageRefs(text, offset).map((m) => ({ from: m.from, to: m.to, kind: 'page' as const, value: m.page, labelFrom: m.from + 1 })),
+    ...findPageRefs(text, offset).map((m) => ({
+      from: m.from,
+      to: m.to,
+      bracketTo: m.bracketTo,
+      kind: 'page' as const,
+      value: m.page,
+      labelFrom: m.from + 1,
+      resource: m.resource,
+    })),
     ...findSectionRefs(text, offset),
     ...findPins(text, offset),
   ];
@@ -247,8 +296,13 @@ export function quoteLine(quote: string, url: string): string {
   return `> ${clean} [↗](${textFragmentUrl(url, clean)})`;
 }
 
-export function timestampToken(seconds: number): string {
-  return `[${formatTimecode(seconds)}]`;
+export function timestampToken(seconds: number, resource?: string | null): string {
+  return `[${formatTimecode(seconds)}]${target(resource)}`;
+}
+
+/** Resources a note refers to through its anchors (targets named explicitly). */
+export function anchoredResources(markdown: string): string[] {
+  return [...new Set(findAnchors(markdown).flatMap((a) => (a.resource ? [a.resource] : [])))];
 }
 
 /** The note line written for a screenshot: timestamp + thumbnail. */

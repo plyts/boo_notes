@@ -2,12 +2,13 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
-import { protocol } from 'electron';
+import { net, protocol } from 'electron';
 import type { Library } from '../core/library';
 
 /**
- * `boo://app/` serves the UI, the local media being studied
- * (`boo://app/__media/<item id>`, with Range support for seeking) and the
+ * `boo://app/` serves the UI, the media being studied
+ * (`boo://app/__media/<resource id>`: local files, and streams added by
+ * address, with Range support for seeking) and the
  * vault captures (`boo://app/__vault/assets/…`). A dedicated scheme gives the
  * UI a real origin (CSP, ES module workers) without exposing the file system.
  */
@@ -98,6 +99,18 @@ export async function fileResponse(path: string, range: string | null, extraHead
   });
 }
 
+/** A remote media relayed to the UI, honouring Range requests (seeking). */
+async function remoteResponse(url: string, range: string | null): Promise<Response> {
+  if (!/^https?:\/\//i.test(url)) return notFound();
+  const upstream = await net.fetch(url, { headers: range ? { Range: range } : {} });
+  const headers = new Headers();
+  for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+    const v = upstream.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers });
+}
+
 export function handleScheme(rendererDir: string, getLibrary: () => Library): void {
   const root = normalize(rendererDir);
   protocol.handle(SCHEME, async (request) => {
@@ -109,9 +122,13 @@ export function handleScheme(rendererDir: string, getLibrary: () => Library): vo
         case 'app': {
           // Media and captures share the UI origin: frames of a video can be captured (untainted canvas).
           if (path.startsWith('__media/')) {
-            const item = getLibrary().get(path.slice('__media/'.length));
-            if (!item || item.origin !== 'desktop') return notFound();
-            return fileResponse(item.source, range);
+            const res = getLibrary().getResource(path.slice('__media/'.length));
+            if (!res) return notFound();
+            if (res.origin === 'file') return fileResponse(res.source, range);
+            // A stream / remote file added by address: relayed (Range included) under the UI origin,
+            // so frames can be captured. Only addresses stored in the library are relayed.
+            if (res.origin === 'url') return remoteResponse(res.source, range);
+            return notFound();
           }
           if (path.startsWith('__vault/')) return fileResponse(getLibrary().assetPath(path.slice('__vault/'.length)), range);
           const file = normalize(join(root, path || 'index.html'));

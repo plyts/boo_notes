@@ -2,7 +2,7 @@ import type { MediaKind, Platform } from '../../../src/shared/platforms';
 
 export type { MediaKind, Platform };
 
-/** Where the note is written: in the browser extension, or in this app (local files). */
+/** Where a note is written: in the browser extension, or in this app (local files). */
 export type ItemOrigin = 'extension' | 'desktop';
 
 export { STATUS_LABELS, type StudyStatus } from '../../../src/shared/study';
@@ -10,7 +10,7 @@ import type { StudyStatus } from '../../../src/shared/study';
 
 /**
  * Reading / listening position. Media: seconds. PDF: `position` is the page
- * being read and `duration` the page count.
+ * being read and `duration` the page count. Text: paragraph. Web page: % read.
  */
 export interface Progress {
   position: number;
@@ -38,7 +38,7 @@ export interface Pin {
   createdAt: number;
 }
 
-/** Spaced repetition of a revision sheet: next review date and current interval. */
+/** Spaced repetition of a note: next review date and current interval. */
 export interface Review {
   /** Due date (ms). */
   next: number;
@@ -54,38 +54,97 @@ export type ReviewAction = 'start' | 'stop' | 'again' | 'good' | 'easy';
 export type { NotionBlockRef, NotionLink } from '../../../src/shared/notion/engine';
 import type { NotionLink } from '../../../src/shared/notion/engine';
 
-export interface LibraryItem {
-  /** Note id: `youtube:…`, `notion:…`, `web:…` (extension), `file:…` (local file) or `note:…` (revision sheet). */
+// --- The study model: courses › chapters › notes ↔ resources ---------------------------------
+
+/** What is studied: everything but a revision sheet. */
+export type ResourceKind = Exclude<MediaKind, 'note'>;
+
+/** `file`: a local file; `url`: a stream or document opened by address; `extension`: a media noted in the browser. */
+export type ResourceOrigin = 'file' | 'url' | 'extension';
+
+/**
+ * A study resource: a video or audio (file, stream, online course), a PDF, a
+ * text, an image, a web page. Progress, highlights and pins belong to it; any
+ * number of notes can refer to it.
+ */
+export interface Resource {
+  /** `file:<hash>`, `url:<hash>`, or the extension's media id (`youtube:…`, `web:…`, `notion:…`). */
   id: string;
-  origin: ItemOrigin;
-  kind: MediaKind;
+  kind: ResourceKind;
   platform: Platform;
   title: string;
-  /** Page URL, or absolute path of the local file. */
+  /** Absolute path of the file, or URL. */
   source: string;
-  /** Markdown file, relative to the vault. */
-  noteFile: string;
-  /** Extension revision, or local save counter. */
-  rev: number;
+  origin: ResourceOrigin;
   createdAt: number;
   updatedAt: number;
   progress?: Progress;
-  /** Furthest point reached (seconds, or page for a PDF): the course coverage. */
+  /** Furthest point reached (same unit as `progress.position`). */
   furthest?: number;
-  /** Time spent with the item open in the app (ms). */
+  /** Time spent with the resource open in the app (ms). */
   studyMs?: number;
   highlights?: Highlight[];
   pins?: Pin[];
-  /** Titles linked from the note with `[[Titre]]`. */
-  links?: string[];
-  /** Length of the note (characters), for revision sheets without anchors. */
-  size?: number;
-  review?: Review;
   /** Manual status; derived from the progress when absent. */
   status?: StudyStatus;
-  /** Timestamps / page references in the note (library cards, Notion "Notes" column). */
+}
+
+/**
+ * A note: Markdown in the vault, linked to 0..n resources. Anchors without
+ * target (`[04:15]`, `[p. 12]`) refer to the first resource, the others name
+ * theirs (`[04:15](res:<id>)`). Without resource, it is a revision sheet.
+ */
+export interface Note {
+  /** `note:…` (written in the app) or the extension's note id (`youtube:…`, `web:…`…). */
+  id: string;
+  origin: ItemOrigin;
+  title: string;
+  /** Markdown file, relative to the vault. */
+  noteFile: string;
+  /** Linked resources, in order: the first one is the note's main resource. */
+  resources: string[];
+  /** Save counter (extension revision for browser notes). */
+  rev: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Titles linked with `[[Titre]]`. */
+  links?: string[];
+  /** Length of the Markdown (characters). */
+  size?: number;
+  /** Anchored lines (instants, pages, paragraphs, pins, quoted passages). */
   noteCount?: number;
+  review?: Review;
+  /** Manual status (else derived from the main resource, or the reviews of a sheet). */
+  status?: StudyStatus;
   notion?: NotionLink;
+  /** Last time the note was placed in a chapter (the latest placement wins: app or browser). */
+  placedAt?: number;
+}
+
+/** A chapter holds notes, in order. A note is in at most one chapter. */
+export interface Chapter {
+  id: string;
+  title: string;
+  notes: string[];
+}
+
+/** A course: one or more chapters. */
+export interface Course {
+  id: string;
+  title: string;
+  emoji: string;
+  /** Colour of the course (HSL hue, 0–359): sidebar, graph groups, badges. */
+  hue: number;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+  chapters: Chapter[];
+}
+
+/** Where a note is filed. */
+export interface Placement {
+  courseId: string;
+  chapterId: string;
 }
 
 /** Note as sent by the extension (`note.upsert`). */
@@ -101,6 +160,10 @@ export interface ExtensionNote {
   rev: number;
   /** Notion page written by the extension itself (while the app was closed). */
   notion?: NotionLink;
+  /** Filing chosen in the browser panel: course and chapter titles (created if missing). */
+  course?: string;
+  chapter?: string;
+  placedAt?: number;
 }
 
 export interface ActivePlayer {

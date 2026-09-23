@@ -1,13 +1,12 @@
 import { TypingAutoPause } from '../../../src/shared/autopause';
-import { findTimestamps } from '../../../src/shared/markdown';
 import { formatTimecode } from '../../../src/shared/time';
-import type { ItemView } from '../ipc';
-import { h, icon, iconButton } from './ui';
+import type { ResourceView } from '../ipc';
+import { h, icon, iconButton } from './dom';
 
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2, 0.75];
 
 export interface MediaViewerOptions {
-  item: ItemView;
+  item: Pick<ResourceView, 'id' | 'kind' | 'title' | 'source' | 'origin' | 'progress'>;
   onTime(seconds: number): void;
   onProgress(position: number, duration: number): void;
   onActivity(): void;
@@ -33,14 +32,18 @@ export class MediaViewer {
   private lastSaved = 0;
   private markers: number[] = [];
   private destroyed = false;
+  private hls: { destroy(): void } | null = null;
 
   constructor(private readonly opts: MediaViewerOptions) {
     const { item } = opts;
-    const src = `boo://app/__media/${encodeURIComponent(item.id)}`;
+    // Adaptive streams (HLS) are played through Media Source Extensions; files and direct streams via the app origin.
+    const stream = item.origin === 'url' && /\.m3u8(?:$|[?#])/i.test(item.source);
+    const src = stream ? undefined : `boo://app/__media/${encodeURIComponent(item.id)}`;
     this.media =
       item.kind === 'video'
         ? h('video', { class: 'media-video', src, preload: 'auto', playsinline: true })
         : h('audio', { src, preload: 'auto' });
+    if (stream) void this.attachStream(item.source);
     this.stage =
       item.kind === 'video'
         ? h('div', { class: 'media-stage video' }, this.media)
@@ -123,10 +126,26 @@ export class MediaViewer {
     this.opts.onActivity();
   }
 
-  /** Timestamps of the note, drawn on the scrubber. */
-  setNote(markdown: string): void {
-    this.markers = findTimestamps(markdown).map((m) => m.seconds);
+  /** Instants noted about this media, drawn on the scrubber. */
+  setMarkers(times: number[]): void {
+    this.markers = times;
     this.renderMarkers();
+  }
+
+  private async attachStream(url: string): Promise<void> {
+    const { default: Hls } = await import('hls.js');
+    if (this.destroyed) return;
+    if (!Hls.isSupported()) {
+      this.media.src = url;
+      return;
+    }
+    const hls = new Hls({ enableWorker: false });
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (data.fatal) this.media.dispatchEvent(new Event('error'));
+    });
+    hls.loadSource(url);
+    hls.attachMedia(this.media);
+    this.hls = hls;
   }
 
   /** Current frame as a JPEG data URL (video only). */
@@ -146,6 +165,7 @@ export class MediaViewer {
   destroy(): void {
     this.saveProgress(true);
     this.destroyed = true;
+    this.hls?.destroy();
     this.autoPause.dispose();
     this.media.pause();
     this.media.removeAttribute('src');

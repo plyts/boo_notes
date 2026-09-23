@@ -20,6 +20,8 @@ const common = {
   logLevel: 'info',
 };
 
+export const INTER_FILES = ['inter-latin-opsz-normal.woff2', 'inter-latin-ext-opsz-normal.woff2', 'inter-latin-opsz-italic.woff2'];
+
 const entries = [
   { entryPoints: [join(src, 'background/index.ts')], outfile: join(out, 'background.js'), format: 'esm' },
   { entryPoints: [join(src, 'content/index.ts')], outfile: join(out, 'content.js'), format: 'iife' },
@@ -40,6 +42,10 @@ async function copyStatic() {
     await cp(join(src, rel), join(out, rel));
   }
   await cp(join(src, 'icons'), join(out, 'icons'), { recursive: true });
+  // Inter (OFL), with its optical-size axis: the UI font where SF Pro is not the system font.
+  const inter = join(root, 'node_modules', '@fontsource-variable', 'inter', 'files');
+  await mkdir(join(out, 'fonts'), { recursive: true });
+  for (const f of INTER_FILES) await cp(join(inter, f), join(out, 'fonts', f));
 }
 
 await rm(out, { recursive: true, force: true });

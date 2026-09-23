@@ -1,15 +1,65 @@
 /*
- * Boo Notes design tokens — shared by the panel and the options page.
- * Contrast ratios are checked by tests/unit/contrast.test.ts (WCAG 2.2 AA).
+ * Boo Notes design tokens — shared by the extension (panel, options) and the
+ * desktop app. Contrast ratios are checked by tests/unit/contrast.test.ts
+ * (WCAG 2.2 AA), including text over the glass materials.
  *
- * Principles: quiet surfaces, hairline separators, one accent colour used
- * for interactive / time-related elements only, motion that is short and
- * physical (and disabled with prefers-reduced-motion).
+ * Design language, after Apple's Liquid Glass (WWDC 2025):
+ * - content first: controls and navigation float above it on translucent
+ *   glass that refracts and tints what is behind, with a specular rim;
+ * - concentric shapes: inner radius = outer radius − padding;
+ * - one tint (violet) for interaction and time, system colours for meaning;
+ * - motion is spring-based, short, interruptible — and removed with
+ *   "Reduce motion"; glass becomes opaque with "Reduce transparency" and
+ *   gains contrast with "Increase contrast".
+ *
+ * Typography: SF Pro (Text / Display, optical sizes) on Apple devices, where
+ * it is the system font. SF Pro may not be embedded in apps for other
+ * platforms (Apple licence), so Windows and Linux use Inter — the closest
+ * open-source design, bundled with its optical-size axis — before Segoe UI.
  */
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('fonts/inter-latin-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('fonts/inter-latin-ext-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('fonts/inter-latin-opsz-italic.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  /* SF Pro Text on Apple platforms (system font), else Inter, else Segoe UI Variable. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', 'Inter', 'Segoe UI Variable Text', 'Segoe UI',
+    system-ui, Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Titles (≥ 20 px): SF Pro Display. Inter adapts through its optical-size axis. */
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter Variable', 'Inter', 'Segoe UI Variable Display',
+    'Segoe UI', system-ui, sans-serif;
+  /* Counters, badges: SF Pro Rounded where available. */
+  --font-rounded: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'Inter Variable', 'Segoe UI Variable Text',
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
 
   /* 4 px grid */
   --space-1: 4px;
@@ -18,70 +68,123 @@
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
 
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 14px;
+  /* Concentric radii: a control inside a container uses (container − padding). */
+  --radius-xs: 6px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
   --radius-pill: 999px;
 
-  /* Type scale */
+  /* Type scale (px), after the macOS text styles, a notch larger for reading. */
   --text-xs: 11px;
   --text-s: 12px;
   --text-m: 14px;
   --text-l: 16px;
   --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+  --text-4xl: 38px;
 
-  /* Motion */
+  /* Tracking per size (SF / Inter dynamic metrics): tighter as the text grows. */
+  --tracking-xs: 0.01em;
+  --tracking-s: 0;
+  --tracking-m: -0.006em;
+  --tracking-l: -0.011em;
+  --tracking-xl: -0.017em;
+  --tracking-2xl: -0.021em;
+  --tracking-3xl: -0.024em;
+
+  /* Motion: springs approximated with linear() (critically damped, snappy, bouncy). */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
-  --dur-fast: 120ms;
-  --dur: 180ms;
-  --dur-slow: 260ms;
+  --spring-smooth: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 18.3%, 1.017 23.5%, 1.04 28.8%, 1.026 38.8%, 1.005 50.8%, 0.999 71.1%, 1);
+  --spring-snappy: linear(0, 0.019 1.4%, 0.3 8.3%, 0.635 15.6%, 0.86 23.4%, 0.969 31.9%, 1.009 41.6%, 1.014 52.6%, 1.003 69.2%, 1);
+  --spring-bouncy: linear(0, 0.054 2.1%, 0.265 6.8%, 1.058 20.6%, 1.162 25.4%, 1.17 28.2%, 1.139 32.6%, 0.989 44.5%, 0.967 49.4%, 0.975 55.5%, 1.004 67.8%, 1.004 76.5%, 1);
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --dur-slow: 380ms;
+
+  /* Glass material geometry. */
+  --glass-blur: 22px;
+  --glass-saturate: 175%;
 }
 
 :root,
 [data-theme='dark'] {
   color-scheme: dark;
-  --bg: #141417;
-  --surface: #1b1b20;
-  --surface-2: #26262d;
-  --elevated: #222228;
-  --border: #2e2e36;
-  --hairline: rgba(255, 255, 255, 0.07);
-  --text: #ededf2;
-  --muted: #a6a6b3;
-  --faint: #8c8c99;
-  --accent: #9b8cff;
+  --bg: #111113;
+  --surface: #1a1a1e;
+  --surface-2: #26262c;
+  --elevated: #202025;
+  --border: #303038;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --text: #f2f2f7;
+  --muted: #aeaeb8;
+  --faint: #8e8e9a;
+  --accent: #a497ff;
   --accent-strong: #6d5ef0;
   --on-accent: #ffffff;
-  --accent-soft: rgba(155, 140, 255, 0.14);
-  --ts-bg: rgba(155, 140, 255, 0.16);
-  --ts-text: #cdc5ff;
-  --ok: #22c55e;
-  --ok-soft: rgba(34, 197, 94, 0.14);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.14);
-  --danger: #f87171;
-  --now-bg: #28251a;
-  --now-border: #facc15;
-  --selection: rgba(155, 140, 255, 0.3);
+  --accent-soft: rgba(164, 151, 255, 0.16);
+  --ts-bg: rgba(164, 151, 255, 0.17);
+  --ts-text: #d4ceff;
+  --ok: #30d158;
+  --ok-soft: rgba(48, 209, 88, 0.15);
+  --warn: #ff9f0a;
+  --warn-soft: rgba(255, 159, 10, 0.15);
+  --danger: #ff6961;
+  --now-bg: #29251a;
+  --now-border: #ffd60a;
+  --selection: rgba(164, 151, 255, 0.32);
   --focus: #a5b4fc;
-  --kbd-bg: #2a2a32;
-  --kbd-border: #3a3a44;
-  --backdrop: rgba(8, 8, 10, 0.55);
+  --kbd-bg: #2a2a31;
+  --kbd-border: #3b3b45;
+  --backdrop: rgba(0, 0, 0, 0.42);
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
   --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+
+  /* System colours (Apple dark variants): kinds, statuses, courses. */
+  --c-blue: #0a84ff;
+  --c-green: #30d158;
+  --c-orange: #ff9f0a;
+  --c-red: #ff453a;
+  --c-pink: #ff375f;
+  --c-purple: #bf5af2;
+  --c-teal: #40c8e0;
+  --c-yellow: #ffd60a;
+  --c-indigo: #5e5ce6;
+  --c-gray: #98989d;
+
+  /* Liquid Glass materials: tint over what is behind, specular rim, soft depth. */
+  --glass: rgba(34, 34, 40, 0.62);
+  --glass-thick: rgba(30, 30, 36, 0.8);
+  --glass-clear: rgba(40, 40, 48, 0.36);
+  --glass-rim: rgba(255, 255, 255, 0.16);
+  --glass-rim-strong: rgba(255, 255, 255, 0.28);
+  --glass-shine: rgba(255, 255, 255, 0.09);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+  --glass-control: rgba(255, 255, 255, 0.08);
+  --glass-control-hover: rgba(255, 255, 255, 0.14);
+  --glass-control-active: rgba(255, 255, 255, 0.2);
+  /* The window behind the glass (desktop): a quiet gradient when there is no system material. */
+  --canvas: #0d0d10;
+  --canvas-glow-1: rgba(109, 94, 240, 0.22);
+  --canvas-glow-2: rgba(10, 132, 255, 0.14);
 }
 
 [data-theme='light'] {
   color-scheme: light;
   --bg: #ffffff;
-  --surface: #f6f6f8;
-  --surface-2: #ececf0;
+  --surface: #f5f5f7;
+  --surface-2: #e9e9ee;
   --elevated: #ffffff;
-  --border: #e2e2e8;
-  --hairline: rgba(0, 0, 0, 0.07);
+  --border: #dcdce2;
+  --hairline: rgba(0, 0, 0, 0.08);
   --text: #1d1d1f;
   --muted: #56565f;
   --faint: #6b6b76;
@@ -91,21 +194,46 @@
   --accent-soft: rgba(81, 67, 201, 0.09);
   --ts-bg: rgba(81, 67, 201, 0.1);
   --ts-text: #3f32a8;
-  --ok: #15803d;
-  --ok-soft: rgba(21, 128, 61, 0.1);
+  --ok: #1a7f37;
+  --ok-soft: rgba(26, 127, 55, 0.1);
   --warn: #b45309;
   --warn-soft: rgba(180, 83, 9, 0.1);
-  --danger: #b91c1c;
+  --danger: #c01c28;
   --now-bg: #fdf4d6;
   --now-border: #a16207;
   --selection: rgba(81, 67, 201, 0.18);
   --focus: #4f46e5;
   --kbd-bg: #ffffff;
   --kbd-border: #d4d4dc;
-  --backdrop: rgba(250, 250, 252, 0.6);
+  --backdrop: rgba(242, 242, 247, 0.5);
   --shadow-s: 0 1px 2px rgba(20, 20, 40, 0.08);
   --shadow: 0 12px 32px rgba(20, 20, 40, 0.12), 0 2px 6px rgba(20, 20, 40, 0.06);
   --shadow-l: 0 24px 64px rgba(20, 20, 40, 0.18), 0 4px 12px rgba(20, 20, 40, 0.08);
+
+  --c-blue: #007aff;
+  --c-green: #28a745;
+  --c-orange: #ff9500;
+  --c-red: #ff3b30;
+  --c-pink: #ff2d55;
+  --c-purple: #af52de;
+  --c-teal: #30b0c7;
+  --c-yellow: #ffcc00;
+  --c-indigo: #5856d6;
+  --c-gray: #8e8e93;
+
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-thick: rgba(252, 252, 254, 0.82);
+  --glass-clear: rgba(255, 255, 255, 0.34);
+  --glass-rim: rgba(255, 255, 255, 0.75);
+  --glass-rim-strong: rgba(255, 255, 255, 0.95);
+  --glass-shine: rgba(255, 255, 255, 0.55);
+  --glass-shadow: 0 10px 34px rgba(30, 30, 60, 0.13), 0 2px 8px rgba(30, 30, 60, 0.07);
+  --glass-control: rgba(0, 0, 0, 0.05);
+  --glass-control-hover: rgba(0, 0, 0, 0.08);
+  --glass-control-active: rgba(0, 0, 0, 0.12);
+  --canvas: #eceef4;
+  --canvas-glow-1: rgba(109, 94, 240, 0.16);
+  --canvas-glow-2: rgba(0, 122, 255, 0.12);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -116,7 +244,59 @@
   }
 }
 
-/* Keycaps, shared by the panel and the options page. */
+/* Reduce transparency: glass becomes a solid, still-rounded surface. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-blur: 0px;
+    --glass-saturate: 100%;
+  }
+  :root,
+  [data-theme='dark'] {
+    --glass: #1f1f24;
+    --glass-thick: #1c1c21;
+    --glass-clear: #26262c;
+  }
+  [data-theme='light'] {
+    --glass: #fbfbfd;
+    --glass-thick: #ffffff;
+    --glass-clear: #f2f2f6;
+  }
+}
+
+/* Increase contrast: stronger rims and separators. */
+@media (prefers-contrast: more) {
+  :root {
+    --hairline: rgba(127, 127, 127, 0.5);
+    --glass-rim: rgba(127, 127, 127, 0.7);
+  }
+}
+
+/*
+ * Glass material utility. `.glass` for bars and panels, `.glass-thick` for
+ * text-heavy surfaces (menus, sheets), `.glass-clear` for floating controls
+ * over media. The rim is a 1 px inner highlight, brighter at the top edge.
+ */
+.glass,
+.glass-thick,
+.glass-clear {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-strong),
+    inset 0 0 0 1px var(--glass-rim),
+    var(--glass-shadow);
+}
+
+.glass-thick {
+  background: var(--glass-thick);
+}
+
+.glass-clear {
+  background: var(--glass-clear);
+}
+
+/* Keycaps, shared by the panel, the options page and the app. */
 .keys {
   display: inline-flex;
   gap: 3px;
