@@ -42,9 +42,21 @@ export interface EditorHooks {
   /** Any typed character / deletion (drives auto-pause). */
   onKeystroke(): void;
   onChange(): void;
+  /** Any content change, including loads and external updates (stats, timeline). */
+  onContentChanged(): void;
   onSaveShortcut(): void;
+  /** Ctrl/⌘ + / : keyboard shortcuts sheet. */
+  onHelp(): void;
   loadAsset(path: string): Promise<string>;
 }
+
+export interface NoteMarker {
+  seconds: number;
+  kind: 'note' | 'capture';
+}
+
+/** A line made only of a timestamp and a screenshot: rendered as a capture card. */
+const CAPTURE_LINE = /^\[((?:\d+:)?\d{1,3}:\d{2})\]\s+(?=!\[[^\]\n]*\]\(assets\/[^)\s]+\)\s*$)/;
 
 /** Marks programmatic content changes, which must not trigger a save. */
 const external = Annotation.define<boolean>();
@@ -78,15 +90,23 @@ class ImageWidget extends WidgetType {
     wrap.className = 'cm-boo-img';
     const tc = /(?:\d+:)?\d{1,2}:\d{2}/.exec(this.alt);
     const seconds = tc ? parseTimecode(tc[0]) : null;
-    if (seconds !== null) {
-      wrap.dataset.t = String(seconds);
-      wrap.title = `Capture à ${tc?.[0]} — clic : revoir ce moment`;
-    }
     const img = document.createElement('img');
     img.alt = this.alt || 'Capture';
     img.draggable = false;
     img.decoding = 'async';
     wrap.append(img);
+    if (seconds !== null && tc) {
+      wrap.dataset.t = String(seconds);
+      wrap.title = `Capture à ${tc[0]} — cliquer pour revoir ce moment`;
+      // Timecode badge + "replay" affordance shown on hover.
+      const badge = document.createElement('span');
+      badge.className = 'cm-boo-img-tc';
+      badge.textContent = tc[0];
+      const replay = document.createElement('span');
+      replay.className = 'cm-boo-img-replay';
+      replay.textContent = 'Revoir';
+      wrap.append(badge, replay);
+    }
     this.load(this.path).then(
       (url) => {
         img.src = url;
@@ -174,7 +194,23 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
     for (let pos = from; pos <= to; ) {
       const line = state.doc.lineAt(pos);
       const lineActive = active.has(line.number);
-      for (const m of findTimestamps(line.text, line.from)) {
+      const capture = CAPTURE_LINE.exec(line.text);
+      if (capture && !inCode(tree, line.from)) {
+        out.push(Decoration.line({ class: 'cm-boo-capture-line' }).range(line.from));
+        if (!lineActive) {
+          // The card carries the timecode: hide the leading "[MM:SS] ".
+          out.push(hide.range(line.from, line.from + capture[0].length));
+          pos = line.to + 1;
+          continue;
+        }
+      }
+      const stamps = findTimestamps(line.text, line.from);
+      if (!capture && stamps[0]?.from === line.from && !inCode(tree, line.from)) {
+        // Transcript layout: wrapped text aligns after the leading timestamp.
+        const cls = stamps[0].label.length > 5 ? 'cm-boo-stamped cm-boo-long' : 'cm-boo-stamped';
+        out.push(Decoration.line({ class: cls }).range(line.from));
+      }
+      for (const m of stamps) {
         if (inCode(tree, m.from)) continue;
         out.push(
           Decoration.mark({
@@ -182,7 +218,10 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>)
             attributes: { 'data-t': String(m.seconds), title: `Aller à ${m.label} (Alt+clic pour éditer)` },
           }).range(m.from, m.labelTo),
         );
-        if (!lineActive) {
+        // Reveal the raw `[MM:SS](url)` only when the cursor touches it (Typora-style),
+        // so typing after a timestamp never makes the line jump.
+        const touched = view.hasFocus && state.selection.ranges.some((r) => r.from <= m.to && r.to >= m.from);
+        if (!touched) {
           out.push(hide.range(m.from, m.from + 1), hide.range(m.labelTo - 1, m.labelTo));
           if (m.url !== null) out.push(hide.range(m.labelTo, m.to));
         }
@@ -288,9 +327,10 @@ export class NotesEditor {
       livePreview(hooks.loadAsset),
       nowLine,
       this.editable.of(EditorView.editable.of(true)),
-      placeholder('Prenez vos notes… Chaque nouvelle ligne reçoit l’horodatage de la vidéo.'),
+      placeholder('Écrivez ici…'),
       keymap.of([
         { key: 'Mod-s', preventDefault: true, run: () => (hooks.onSaveShortcut(), true) },
+        { key: 'Mod-/', preventDefault: true, run: () => (hooks.onHelp(), true) },
         // Continue lists / quotes; Enter on an empty item ends the list.
         { key: 'Enter', run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
         { key: 'Backspace', run: deleteMarkupBackward },
@@ -300,6 +340,7 @@ export class NotesEditor {
       ]),
       EditorView.inputHandler.of((view, from, to, text) => this.autoStamp(view, from, to, text)),
       EditorView.updateListener.of((u) => {
+        if (u.docChanged) hooks.onContentChanged();
         if (!u.docChanged || u.transactions.every((tr) => tr.annotation(external))) return;
         if (u.transactions.some((tr) => tr.isUserEvent('input.type') || tr.isUserEvent('delete'))) {
           hooks.onKeystroke();
@@ -342,6 +383,28 @@ export class NotesEditor {
   load(markdownText: string): void {
     this.view.setState(this.createState(markdownText));
     this.tsCache = null;
+    this.hooks.onContentChanged();
+  }
+
+  get isEmpty(): boolean {
+    return this.view.state.doc.length === 0 || this.content.trim() === '';
+  }
+
+  /** Every timestamp of the note, for the timeline and the note statistics. */
+  markers(): NoteMarker[] {
+    const out: NoteMarker[] = [];
+    const { doc } = this.view.state;
+    for (let n = 1; n <= doc.lines; n++) {
+      const text = doc.line(n).text;
+      const capture = CAPTURE_LINE.exec(text);
+      if (capture) {
+        const seconds = parseTimecode(capture[1]);
+        if (seconds !== null) out.push({ seconds, kind: 'capture' });
+        continue;
+      }
+      for (const m of findTimestamps(text)) out.push({ seconds: m.seconds, kind: 'note' });
+    }
+    return out;
   }
 
   /** Content changed elsewhere (other window, background append): keep undo history and cursor. */

@@ -62,6 +62,8 @@ class ContentApp {
   private lastHref = location.href;
   private lastInteraction = 0;
   private capturing = false;
+  /** Set by Smart Pause until playback resumes, so the shortcut can toggle. */
+  private smartPaused = false;
   /** Default shortcuts Chrome did not register globally, handled here instead. */
   private pageBindings: InPageBinding[] = inPageBindings([]).filter((b) => b.command === 'replay');
   private readonly seekedFromUrl = new Set<string>();
@@ -95,10 +97,17 @@ class ContentApp {
     });
   }
 
+  get alive(): boolean {
+    return !this.dead;
+  }
+
   async start(): Promise<void> {
     document.addEventListener(TEARDOWN_EVENT, this.destroy, { once: true });
+    // A teardown may arrive during any await below: never resurrect a destroyed instance.
     this.applySettings(await loadSettings());
+    if (this.dead) return;
     this.tabId = (await this.bg({ type: 'hello' })).tabId;
+    if (this.dead) return;
     try {
       this.pinned = sessionStorage.getItem(PINNED_KEY) === '1';
     } catch {
@@ -108,6 +117,7 @@ class ContentApp {
     this.overlay.mount();
     this.bindEvents();
     await this.syncContext(true);
+    if (this.dead) return;
     if (this.pinned && this.ctx) this.openDrawer(null);
   }
 
@@ -146,7 +156,10 @@ class ContentApp {
         type,
         (e) => {
           if (!(e.target instanceof HTMLVideoElement)) return;
-          if (type === 'play') this.player.adopt(e.target);
+          if (type === 'play') {
+            this.player.adopt(e.target);
+            this.smartPaused = false;
+          }
           if (e.target === this.player.current) this.broadcastPlayback();
         },
         opts,
@@ -391,8 +404,21 @@ class ContentApp {
     port.postMessage({ type: 'insert-timestamp', seconds, focus: true } satisfies ContentToPanel);
   }
 
+  /**
+   * Smart Pause is a toggle: pause + write, then the same shortcut resumes
+   * the video and gives the keyboard back to the player.
+   */
   private async smartPause(): Promise<void> {
+    const video = this.player.current;
+    if (this.smartPaused && video?.paused) {
+      this.smartPaused = false;
+      this.player.play();
+      this.drawer.blurToPage();
+      queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
+      return;
+    }
     this.player.pause();
+    this.smartPaused = true;
     this.postPanels({ type: 'typing-release' });
     const port = await this.inputEditor();
     port.postMessage({ type: 'focus', where: 'end' } satisfies ContentToPanel);
@@ -404,7 +430,7 @@ class ContentApp {
       return;
     }
     const t = this.player.skip(-this.settings.replaySeconds);
-    this.overlay.toast(`${formatTimecode(t)} - Retour de ${this.settings.replaySeconds} s`);
+    this.overlay.toast(`${formatTimecode(t)} - Retour de ${this.settings.replaySeconds} s`, 'info', 1500, { icon: 'replay' });
   }
 
   private async copyTimestamp(): Promise<void> {
@@ -413,7 +439,7 @@ class ContentApp {
     const tc = formatTimecode(t);
     try {
       await navigator.clipboard.writeText(`[${tc}](${timestampUrl(this.ctx.canonicalUrl, t)})`);
-      this.overlay.toast(`${tc} - Lien horodaté copié`, 'success');
+      this.overlay.confirmCopy();
     } catch {
       this.overlay.toast('Copie impossible (presse-papier refusé)', 'error');
     }
@@ -472,7 +498,9 @@ class ContentApp {
           text: line,
         });
       }
-      this.overlay.toast(`${formatTimecode(seconds)} - Capture sauvegardée${warning}`, warning ? 'error' : 'success');
+      this.overlay.toast(`${formatTimecode(seconds)} - Capture sauvegardée${warning}`, warning ? 'error' : 'success', 2000, {
+        thumb: shot.dataUrl,
+      });
     } catch (e) {
       this.overlay.toast(`Capture impossible : ${errorMessage(e)}`, 'error', 3500);
     } finally {
@@ -612,10 +640,16 @@ class ContentApp {
   }
 }
 
+const INSTANCE_KEY = '__booNotesContentApp';
+type WindowWithApp = Window & { [INSTANCE_KEY]?: ContentApp };
+
 const adapter = adapterForHost(location.hostname);
-if (adapter && window.top === window) {
-  // Tear down a previous copy (extension reloaded, or injected twice).
+const existing = (window as WindowWithApp)[INSTANCE_KEY];
+// Injected twice in the same world (declared script + re-injection on install): keep the live copy.
+if (adapter && window.top === window && !existing?.alive) {
+  // A copy from a previous extension version lives in another world: ask it to tear down.
   document.dispatchEvent(new CustomEvent(TEARDOWN_EVENT));
   const app = new ContentApp(adapter);
+  (window as WindowWithApp)[INSTANCE_KEY] = app;
   app.start().catch((e: unknown) => console.warn('[Boo Notes]', errorMessage(e)));
 }

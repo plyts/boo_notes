@@ -1,6 +1,8 @@
 import { h } from '../shared/icons';
-import { DRAWER_MAX_WIDTH, DRAWER_MIN_WIDTH, type DrawerLayout } from '../shared/settings';
+import { DEFAULT_SETTINGS, DRAWER_MAX_WIDTH, DRAWER_MIN_WIDTH, type DrawerLayout } from '../shared/settings';
 import { attachStyles } from './overlay';
+
+const DEFAULT_WIDTH = DEFAULT_SETTINGS.drawerWidth;
 
 /**
  * Right-hand retractable drawer. It only hosts an <iframe> of the extension's
@@ -13,7 +15,7 @@ import { attachStyles } from './overlay';
 const CSS = `
 :host { all: initial; }
 .drawer {
-  position: fixed; top: var(--top, 0px); right: 0; bottom: 0; width: var(--w, 360px); display: flex;
+  position: fixed; top: var(--top, 0px); right: 0; bottom: 0; width: var(--w, 360px); display: flex; box-sizing: border-box;
   transform: translateX(100%); visibility: hidden;
   transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.18s;
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.28); border-left: 1px solid rgba(127, 127, 127, 0.25);
@@ -28,6 +30,15 @@ iframe { flex: 1; width: 100%; height: 100%; border: 0; display: block; backgrou
   opacity: 0; transition: opacity 0.12s ease;
 }
 .resize:hover::after, .drawer.resizing .resize::after { opacity: 1; }
+/* Overlay layout & fullscreen: a floating card that clearly sits above the page. */
+.drawer.floating {
+  top: calc(var(--top, 0px) + 10px); right: 10px; bottom: 10px; border: 0; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(127, 127, 127, 0.28);
+  transform: translateX(calc(100% + 20px));
+}
+.drawer.floating.open { transform: none; }
+.drawer.floating .resize { left: 0; }
+.drawer.floating .resize::after { left: 0; }
 @media (prefers-reduced-motion: reduce) { .drawer, .drawer.open { transition: none; } }
 `;
 
@@ -56,7 +67,7 @@ export class Drawer {
     this.host.style.cssText = 'all:initial;display:block;position:fixed;top:0;right:0;width:0;height:0;z-index:2147483647;';
     const root = this.host.attachShadow({ mode: 'open' });
     attachStyles(root, CSS);
-    const handle = h('div', { class: 'resize', 'aria-hidden': 'true', title: 'Redimensionner' });
+    const handle = h('div', { class: 'resize', 'aria-hidden': 'true', title: 'Glisser pour redimensionner · double-clic : largeur par défaut' });
     this.panel = h('div', { class: 'drawer', role: 'complementary', 'aria-label': 'Notes Boo Notes' }, handle);
     root.append(this.panel);
     this.bindResize(handle);
@@ -173,8 +184,13 @@ export class Drawer {
     this.panel.style.setProperty('--w', `${this.width}px`);
   }
 
+  private applyFloating(): void {
+    this.panel.classList.toggle('floating', this.layout === 'overlay' || this.fullscreenTarget !== null);
+  }
+
   /** Side-by-side layout: reserve the drawer width on the right of the page. */
   private applyDock(): void {
+    this.applyFloating();
     const shouldDock = this.opened && this.layout === 'side-by-side' && !this.fullscreenTarget;
     const html = document.documentElement;
     if (shouldDock) {
@@ -220,5 +236,10 @@ export class Drawer {
     };
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
+    // Double-click resets the default width (macOS split-view convention).
+    handle.addEventListener('dblclick', () => {
+      this.setWidth(DEFAULT_WIDTH);
+      this.opts.onResized(this.width);
+    });
   }
 }

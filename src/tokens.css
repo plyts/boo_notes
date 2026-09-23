@@ -1,65 +1,139 @@
 /*
  * Boo Notes design tokens — shared by the panel and the options page.
- * Contrast ratios are documented in docs/DESIGN.md (WCAG 2.2 AA minimum).
+ * Contrast ratios are checked by tests/unit/contrast.test.ts (WCAG 2.2 AA).
+ *
+ * Principles: quiet surfaces, hairline separators, one accent colour used
+ * for interactive / time-related elements only, motion that is short and
+ * physical (and disabled with prefers-reduced-motion).
  */
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  --radius-s: 6px;
-  --radius-m: 10px;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* 4 px grid */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+  --radius-pill: 999px;
+
+  /* Type scale */
+  --text-xs: 11px;
+  --text-s: 12px;
+  --text-m: 14px;
+  --text-l: 16px;
+  --text-xl: 20px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 260ms;
 }
 
 :root,
 [data-theme='dark'] {
   color-scheme: dark;
-  --bg: #16161a;
-  --surface: #1e1e24;
-  --surface-2: #2a2a33;
-  --border: #33333d;
-  --text: #ececf1;
-  --muted: #a4a4b0;
-  --faint: #8a8a97;
+  --bg: #141417;
+  --surface: #1b1b20;
+  --surface-2: #26262d;
+  --elevated: #222228;
+  --border: #2e2e36;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --text: #ededf2;
+  --muted: #a6a6b3;
+  --faint: #8c8c99;
   --accent: #9b8cff;
   --accent-strong: #6d5ef0;
   --on-accent: #ffffff;
-  --accent-soft: rgba(155, 140, 255, 0.16);
-  --ts-bg: rgba(155, 140, 255, 0.18);
+  --accent-soft: rgba(155, 140, 255, 0.14);
+  --ts-bg: rgba(155, 140, 255, 0.16);
   --ts-text: #cdc5ff;
   --ok: #22c55e;
+  --ok-soft: rgba(34, 197, 94, 0.14);
   --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.14);
   --danger: #f87171;
-  --now-bg: #2a2716;
+  --now-bg: #28251a;
   --now-border: #facc15;
   --selection: rgba(155, 140, 255, 0.3);
   --focus: #a5b4fc;
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --kbd-bg: #2a2a32;
+  --kbd-border: #3a3a44;
+  --backdrop: rgba(8, 8, 10, 0.55);
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 [data-theme='light'] {
   color-scheme: light;
   --bg: #ffffff;
-  --surface: #f6f6f9;
-  --surface-2: #ebebf1;
-  --border: #dcdce4;
-  --text: #1b1b22;
-  --muted: #555562;
-  --faint: #6e6e7b;
+  --surface: #f6f6f8;
+  --surface-2: #ececf0;
+  --elevated: #ffffff;
+  --border: #e2e2e8;
+  --hairline: rgba(0, 0, 0, 0.07);
+  --text: #1d1d1f;
+  --muted: #56565f;
+  --faint: #6b6b76;
   --accent: #5143c9;
   --accent-strong: #4c3dc4;
   --on-accent: #ffffff;
-  --accent-soft: rgba(81, 67, 201, 0.1);
-  --ts-bg: rgba(81, 67, 201, 0.12);
+  --accent-soft: rgba(81, 67, 201, 0.09);
+  --ts-bg: rgba(81, 67, 201, 0.1);
   --ts-text: #3f32a8;
   --ok: #15803d;
+  --ok-soft: rgba(21, 128, 61, 0.1);
   --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.1);
   --danger: #b91c1c;
-  --now-bg: #fdf3d3;
+  --now-bg: #fdf4d6;
   --now-border: #a16207;
-  --selection: rgba(81, 67, 201, 0.2);
+  --selection: rgba(81, 67, 201, 0.18);
   --focus: #4f46e5;
-  --shadow: 0 12px 32px rgba(20, 20, 40, 0.16);
+  --kbd-bg: #ffffff;
+  --kbd-border: #d4d4dc;
+  --backdrop: rgba(250, 250, 252, 0.6);
+  --shadow-s: 0 1px 2px rgba(20, 20, 40, 0.08);
+  --shadow: 0 12px 32px rgba(20, 20, 40, 0.12), 0 2px 6px rgba(20, 20, 40, 0.06);
+  --shadow-l: 0 24px 64px rgba(20, 20, 40, 0.18), 0 4px 12px rgba(20, 20, 40, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+
+/* Keycaps, shared by the panel and the options page. */
+.keys {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--kbd-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--kbd-bg);
+  color: var(--text);
+  font: 600 var(--text-xs) / 1 var(--font-sans);
 }

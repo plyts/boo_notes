@@ -15,9 +15,12 @@ import {
 import { PLATFORM_LABELS, type VideoContext } from '../shared/platforms';
 import { loadSettings, normalizeSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, Note, NoteMeta } from '../shared/store';
-import { findBinding, formatShortcut, inPageBindings, type InPageBinding } from '../shared/shortcuts';
+import { IS_MAC } from '../shared/keycaps';
+import { DEFAULT_SHORTCUTS, findBinding, formatShortcut, inPageBindings, type InPageBinding } from '../shared/shortcuts';
 import { formatTimecode } from '../shared/time';
 import { NotesEditor } from './editor';
+import { EmptyState, ShortcutsSheet, type ShortcutMap } from './sheet';
+import { Timeline } from './timeline';
 
 /**
  * The notes panel. The same page runs embedded in the drawer iframe and in
@@ -28,7 +31,6 @@ const params = new URLSearchParams(location.search);
 const TAB_ID = Number(params.get('tab'));
 const MODE: PanelMode = params.get('mode') === 'popout' ? 'popout' : 'embedded';
 const CLIENT_ID = crypto.randomUUID();
-const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const SAVE_DELAY_MS = 400;
 
 type SaveState = 'saved' | 'pending' | 'saving' | 'error' | 'idle';
@@ -83,15 +85,27 @@ class PanelApp {
   private statusButton!: HTMLButtonElement;
   private statusLabel!: HTMLSpanElement;
   private titleEl!: HTMLHeadingElement;
-  private metaEl!: HTMLSpanElement;
-  private noticeEl!: HTMLSpanElement;
+  private platformEl!: HTMLSpanElement;
+  private statsEl!: HTMLSpanElement;
+  private saveEl!: HTMLSpanElement;
+  private noticeEl!: HTMLDivElement;
   private pinButton: HTMLButtonElement | null = null;
   private exportButton!: HTMLButtonElement;
   private menu!: HTMLDivElement;
   private banner!: HTMLDivElement;
   private clockEl!: HTMLSpanElement;
-  private footerButtons: Record<'timestamp' | 'capture' | 'replay', HTMLButtonElement> | null = null;
+  private durationEl!: HTMLSpanElement;
+  private footerButtons: Record<'timestamp' | 'capture' | 'replay' | 'help', HTMLButtonElement> | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private contentTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly timeline = new Timeline({
+    seek: (seconds) => this.post({ type: 'seek', seconds }),
+    preview: (seconds) => this.post({ type: 'mark', seconds }),
+  });
+  private readonly sheet = new ShortcutsSheet(IS_MAC, () => {
+    void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+  private readonly emptyState = new EmptyState(IS_MAC);
 
   async start(): Promise<void> {
     this.settings = await loadSettings();
@@ -106,7 +120,9 @@ class PanelApp {
       onTimestampClick: (seconds) => this.post({ type: 'seek', seconds }),
       onKeystroke: () => this.autoPause.keystroke(),
       onChange: () => this.scheduleSave(),
+      onContentChanged: () => this.scheduleContentRefresh(),
       onSaveShortcut: () => void this.flush(),
+      onHelp: () => this.sheet.open(),
       loadAsset,
     });
     this.editor.setEditable(false);
@@ -201,9 +217,30 @@ class PanelApp {
 
   private tick(): void {
     const t = this.hasVideo ? this.now() : null;
+    const duration = this.playback.duration;
     this.clockEl.textContent = t === null ? '--:--' : formatTimecode(t);
     this.clockEl.dataset.playing = String(this.hasVideo && this.playback.playing);
+    this.durationEl.textContent = t !== null && duration > 0 ? formatTimecode(duration) : '';
+    this.timeline.update(t, duration);
     this.editor.setPlaybackTime(t);
+  }
+
+  /** Stats, timeline ticks and empty state follow the content (debounced). */
+  private scheduleContentRefresh(): void {
+    if (this.contentTimer) clearTimeout(this.contentTimer);
+    this.contentTimer = setTimeout(() => this.refreshContent(), 120);
+  }
+
+  private refreshContent(): void {
+    const markers = this.editor.markers();
+    this.timeline.setMarkers(markers);
+    const notes = markers.filter((m) => m.kind === 'note').length;
+    const captures = markers.length - notes;
+    const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
+    this.statsEl.textContent = [notes ? plural(notes, 'note') : '', captures ? plural(captures, 'capture') : '']
+      .filter(Boolean)
+      .join(' · ');
+    this.emptyState.el.hidden = !this.note || !this.editor.isEmpty;
   }
 
   // --- Note lifecycle -------------------------------------------------------------------
@@ -297,6 +334,16 @@ class PanelApp {
       b.addEventListener('click', onClick);
       return b;
     };
+    const actionButton = (name: IconName, label: string, onClick: () => void) => {
+      const b = h(
+        'button',
+        { type: 'button', class: 'action', title: label, 'aria-label': label },
+        icon(name),
+        h('span', { class: 'action-label' }, label),
+      );
+      b.addEventListener('click', onClick);
+      return b;
+    };
 
     this.statusLabel = h('span', { class: 'status-label' }, 'Hors-ligne');
     this.statusButton = h(
@@ -316,7 +363,7 @@ class PanelApp {
     } else {
       actions.push(iconButton('dock', 'Rattacher au lecteur (panneau latéral)', () => void this.dock()));
     }
-    this.exportButton = iconButton('export', 'Exporter la note', () => this.toggleMenu(), {
+    this.exportButton = iconButton('share', 'Exporter la note', () => this.toggleMenu(), {
       'aria-haspopup': 'menu',
       'aria-expanded': 'false',
     });
@@ -330,16 +377,24 @@ class PanelApp {
     actions.push(iconButton('close', MODE === 'embedded' ? 'Réduire le panneau (Échap)' : 'Fermer la fenêtre', () => void this.close()));
 
     this.titleEl = h('h1', { class: 'title' }, 'Boo Notes');
-    this.metaEl = h('span', { class: 'meta-text' });
-    this.noticeEl = h('span', { class: 'notice', role: 'status', 'aria-live': 'polite' });
+    this.platformEl = h('span', { class: 'platform' });
+    this.statsEl = h('span', { class: 'stats' });
+    this.saveEl = h('span', { class: 'save', 'data-state': 'idle' });
+    this.noticeEl = h('div', { class: 'notice', role: 'status', 'aria-live': 'polite' });
     this.menu = this.buildMenu();
     this.banner = h('div', { class: 'banner', hidden: true, role: 'status' });
 
-    this.clockEl = h('span', { class: 'clock', title: 'Position de la vidéo' }, '--:--');
-    const timestamp = iconButton('clock', 'Insérer l’horodatage', () => this.post({ type: 'timestamp' }));
-    const capture = iconButton('camera', 'Capturer l’image', () => this.post({ type: 'capture' }));
-    const replay = iconButton('replay', 'Reculer de 5 s', () => this.post({ type: 'replay' }));
-    this.footerButtons = { timestamp, capture, replay };
+    this.clockEl = h('span', { class: 'clock-now', title: 'Position de la vidéo' }, '--:--');
+    this.durationEl = h('span', { class: 'clock-duration', title: 'Durée de la vidéo' });
+    const timestamp = actionButton('clock', 'Horodater', () => this.post({ type: 'timestamp' }));
+    const capture = actionButton('camera', 'Capturer', () => this.post({ type: 'capture' }));
+    const replay = iconButton('replay', 'Revoir 5 s', () => this.post({ type: 'replay' }));
+    const help = iconButton('keyboard', 'Raccourcis clavier', () => this.sheet.open());
+    this.footerButtons = { timestamp, capture, replay, help };
+
+    const editorHost = h('main', { class: 'editor', 'aria-label': 'Éditeur de notes (Markdown)' });
+    editorHost.append(this.emptyState.el);
+    this.emptyState.el.hidden = true;
 
     this.root.append(
       h(
@@ -347,18 +402,31 @@ class PanelApp {
         { class: 'header' },
         h('div', { class: 'toolbar' }, this.statusButton, h('span', { class: 'spacer' }), ...actions),
         this.titleEl,
-        h('div', { class: 'meta' }, this.metaEl, this.noticeEl),
+        h('div', { class: 'meta' }, this.platformEl, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
         this.menu,
       ),
       this.banner,
-      h('main', { class: 'editor', 'aria-label': 'Éditeur de notes (Markdown)' }),
-      h('footer', { class: 'footer' }, this.clockEl, h('span', { class: 'spacer' }), timestamp, capture, replay),
+      editorHost,
+      h(
+        'footer',
+        { class: 'footer' },
+        // Media-player scrubber: current time · notes timeline · duration.
+        h('div', { class: 'scrubber' }, this.clockEl, this.timeline.el, this.durationEl),
+        h('div', { class: 'controls' }, timestamp, capture, h('span', { class: 'spacer' }), replay, help),
+      ),
+      this.noticeEl,
+      this.sheet.el,
     );
   }
 
   private buildMenu(): HTMLDivElement {
-    const item = (target: ExportTarget | 'copy', iconName: IconName, label: string) => {
-      const b = h('button', { type: 'button', role: 'menuitem', 'data-target': target }, icon(iconName), h('span', {}, label));
+    const item = (target: ExportTarget | 'copy', iconName: IconName, label: string, hint: string) => {
+      const b = h(
+        'button',
+        { type: 'button', role: 'menuitem', 'data-target': target, 'data-hint': hint },
+        icon(iconName, 18),
+        h('span', {}, label, h('small', {}, hint)),
+      );
       b.addEventListener('click', () => {
         this.closeMenu(true);
         void (target === 'copy' ? this.copyMarkdown() : this.exportTo(target));
@@ -368,10 +436,13 @@ class PanelApp {
     const menu = h(
       'div',
       { class: 'menu', role: 'menu', hidden: true, 'aria-label': 'Exporter' },
-      item('desktop', 'desktop', 'Envoyer vers l’app Desktop'),
-      item('notion', 'notion', 'Envoyer vers Notion (via Desktop)'),
-      item('download', 'download', 'Télécharger (.md + captures)'),
-      item('copy', 'copy', 'Copier le Markdown'),
+      h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Application Desktop'),
+      item('desktop', 'desktop', 'Envoyer vers l’app Desktop', 'Dossier de notes local'),
+      item('notion', 'notion', 'Envoyer vers Notion', 'Via l’app Desktop'),
+      h('div', { class: 'menu-sep', role: 'separator' }),
+      h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Sur cet appareil'),
+      item('download', 'download', 'Télécharger', 'Fichier .md + dossier assets/'),
+      item('copy', 'copy', 'Copier le Markdown', 'Avec liens horodatés'),
     );
     menu.addEventListener('keydown', (e) => {
       const items = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
@@ -398,7 +469,8 @@ class PanelApp {
     for (const b of this.menu.querySelectorAll<HTMLButtonElement>('button')) {
       const needsDesktop = b.dataset.target === 'desktop' || b.dataset.target === 'notion';
       b.disabled = !this.note || (needsDesktop && !online);
-      b.title = needsDesktop && !online ? 'Application Desktop hors-ligne' : '';
+      const small = b.querySelector('small');
+      if (small) small.textContent = needsDesktop && !online ? 'Application Desktop hors-ligne' : (b.dataset.hint ?? '');
     }
     this.menu.hidden = false;
     this.exportButton.setAttribute('aria-expanded', 'true');
@@ -417,8 +489,8 @@ class PanelApp {
     this.titleEl.textContent = title;
     this.titleEl.title = title;
     document.title = `${title} — Boo Notes`;
-    const platform = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
-    this.metaEl.dataset.platform = platform;
+    this.platformEl.textContent = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
+    this.platformEl.hidden = !this.ctx;
     this.renderSaveState();
   }
 
@@ -433,16 +505,20 @@ class PanelApp {
 
   private renderSaveState(): void {
     const labels: Record<SaveState, string> = {
-      idle: 'Nouvelle note',
-      pending: 'Modifications…',
+      idle: '',
+      pending: 'Modifié',
       saving: 'Enregistrement…',
-      saved: 'Enregistré localement',
-      error: 'Échec de l’enregistrement',
+      saved: 'Enregistré',
+      error: 'Non enregistré',
     };
-    const platform = this.metaEl.dataset.platform;
-    this.metaEl.textContent = [platform, labels[this.saveState]].filter(Boolean).join(' · ');
-    this.metaEl.dataset.state = this.saveState;
-    this.metaEl.title = this.saveError;
+    const state = this.note ? this.saveState : 'idle';
+    this.saveEl.dataset.state = state;
+    this.saveEl.replaceChildren(
+      ...(state === 'saved' ? [icon('check', 13)] : state === 'error' ? [icon('alert', 13)] : []),
+      labels[state],
+    );
+    this.saveEl.title =
+      state === 'error' ? this.saveError : state === 'saved' ? 'Enregistré sur cet appareil (chrome.storage)' : '';
   }
 
   private renderStatus(status: SyncStatus | undefined): void {
@@ -472,13 +548,17 @@ class PanelApp {
     document.documentElement.dataset.theme = theme;
   }
 
-  private notify(text: string, kind: 'info' | 'error' = 'info'): void {
-    this.noticeEl.textContent = text;
+  /** Snackbar above the footer (Material pattern): transient, non-blocking. */
+  private notify(text: string, kind: 'info' | 'success' | 'error' = 'info'): void {
+    const glyph = kind === 'success' ? icon('check', 14) : kind === 'error' ? icon('alert', 14) : null;
+    this.noticeEl.replaceChildren(...(glyph ? [glyph] : []), h('span', {}, text));
     this.noticeEl.dataset.kind = kind;
+    this.noticeEl.classList.add('show');
     if (this.noticeTimer) clearTimeout(this.noticeTimer);
     this.noticeTimer = setTimeout(() => {
-      this.noticeEl.textContent = '';
-    }, 3500);
+      this.noticeEl.classList.remove('show');
+      this.noticeTimer = setTimeout(() => this.noticeEl.replaceChildren(), 250);
+    }, kind === 'error' ? 5000 : 3000);
   }
 
   private showBanner(text: string): void {
@@ -491,26 +571,36 @@ class PanelApp {
   }
 
   private async loadShortcuts(): Promise<void> {
+    let list: Array<{ name: string; shortcut: string }>;
     try {
-      const list = await callBackground({ type: 'shortcuts:list' });
-      this.pageBindings = inPageBindings(list);
-      this.shortcuts = Object.fromEntries(list.map((c) => [c.name, c.shortcut]));
-      if (this.settings.pageShortcuts) {
-        for (const b of this.pageBindings) this.shortcuts[b.command] = formatShortcut(b.shortcut, IS_MAC);
-      }
+      list = await callBackground({ type: 'shortcuts:list' });
     } catch {
       return;
     }
+    this.pageBindings = inPageBindings(list);
+    const registered = new Map(list.map((c) => [c.name, c.shortcut]));
+    const map = {} as ShortcutMap;
+    for (const [id, fallback] of Object.entries(DEFAULT_SHORTCUTS) as Array<[keyof ShortcutMap, string]>) {
+      const global = registered.get(id);
+      if (global) map[id] = { keys: global, scope: 'global' };
+      else if (this.settings.pageShortcuts) map[id] = { keys: fallback, scope: 'page' };
+      else map[id] = { keys: '', scope: 'unset' };
+    }
+    this.shortcuts = Object.fromEntries(
+      Object.entries(map).map(([id, info]) => [id, info.scope === 'page' ? formatShortcut(info.keys, IS_MAC) : info.keys]),
+    );
+    this.sheet.render(map);
+    this.emptyState.render(map);
     if (!this.footerButtons) return;
     const withKey = (label: string, key: string | undefined) => (key ? `${label} (${key})` : label);
-    const replayKey = this.shortcuts.replay;
     const set = (b: HTMLButtonElement, label: string) => {
       b.title = label;
       b.setAttribute('aria-label', label);
     };
     set(this.footerButtons.timestamp, withKey('Insérer l’horodatage', this.shortcuts['insert-timestamp']));
     set(this.footerButtons.capture, withKey('Capturer l’image', this.shortcuts['capture-screenshot']));
-    set(this.footerButtons.replay, withKey(`Reculer de ${this.settings.replaySeconds} s`, replayKey));
+    set(this.footerButtons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, this.shortcuts.replay));
+    set(this.footerButtons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
   }
 
   // --- Actions -----------------------------------------------------------------------------
@@ -537,7 +627,7 @@ class PanelApp {
     this.notify('Export en cours…');
     try {
       const { message } = await callBackground({ type: 'export', noteId: this.note.id, target });
-      this.notify(message);
+      this.notify(message, 'success');
     } catch (e) {
       this.notify(`Export impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
     }
@@ -548,7 +638,7 @@ class PanelApp {
     const text = toPortableMarkdown({ ...this.note, title: this.title || this.note.title, markdown: this.editor.content });
     try {
       await navigator.clipboard.writeText(text);
-      this.notify('Markdown copié dans le presse-papier');
+      this.notify('Markdown copié dans le presse-papier', 'success');
     } catch {
       this.notify('Copie refusée par le navigateur', 'error');
     }
@@ -558,6 +648,13 @@ class PanelApp {
     document.addEventListener(
       'keydown',
       (e) => {
+        if (this.sheet.isOpen) return; // The sheet handles its own keys (Esc, Tab).
+        const plain = !e.altKey && !e.ctrlKey && !e.metaKey;
+        if (e.key === '?' && plain && !this.editor.hasFocus) {
+          e.preventDefault();
+          this.sheet.open();
+          return;
+        }
         const altLeft = e.key === 'ArrowLeft' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
         const binding = this.settings.pageShortcuts ? findBinding(this.pageBindings, e) : undefined;
         // On macOS, ⌥← moves by word inside the editor: keep that.

@@ -36,7 +36,9 @@ test.describe('Flow 1 — prise de note rapide', () => {
     await runCommand(sw, page, 'insert-timestamp');
     const p = panel(page);
     await expect(p.locator('.cm-content')).toBeFocused();
-    await expect(p.locator('.cm-content')).toContainText(/\[00:2[01]\]/);
+    await expect(p.locator('.cm-boo-ts')).toHaveText(/^00:2[01]$/);
+    await page.keyboard.type('x');
+    await expect.poll(async () => (await storedNote(sw))?.markdown).toMatch(/^\[00:2[01]\] x$/);
     expect(await videoPaused(page)).toBe(false);
   });
 
@@ -121,7 +123,9 @@ test.describe('Lecteur & HUD', () => {
     await expect(hud).toHaveClass(/visible/);
     await expect(hud.locator('.tc')).toHaveText('00:15');
     await hud.locator('.tc').click();
-    await expect(page.locator('#boo-notes-overlay .toast')).toHaveText('00:15 - Lien horodaté copié');
+    // Feedback in place, on the pill itself.
+    await expect(hud.locator('.tc')).toHaveText('✓ Copié');
+    await expect(hud.locator('.tc')).toHaveText('00:15', { timeout: 3000 });
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       '[00:15](https://www.youtube.com/watch?v=e2eTest0001#t=15)',
     );

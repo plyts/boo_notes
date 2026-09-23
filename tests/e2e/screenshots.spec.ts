@@ -38,6 +38,45 @@ for (const theme of ['dark', 'light'] as const) {
   });
 }
 
+test('empty note, shortcuts sheet and export menu', async ({ page, sw }) => {
+  await mkdir(OUT, { recursive: true });
+  await page.setViewportSize({ width: 1180, height: 700 });
+  await openWatch(page, '&theme=dark');
+  await setVideo(page, 5);
+  await openNotes(sw, page);
+  const p = panel(page);
+  await expect(p.locator('.empty')).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-empty.png` });
+  await page.keyboard.press('Control+/');
+  await expect(p.locator('.sheet')).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-shortcuts.png` });
+  await page.keyboard.press('Escape');
+  await p.getByRole('button', { name: 'Exporter la note' }).click();
+  await page.waitForTimeout(300);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-export.png` });
+});
+
+test('HUD tooltip and floating drawer (overlay layout)', async ({ page, sw }) => {
+  await mkdir(OUT, { recursive: true });
+  await sw.evaluate(async () => {
+    const current = (await chrome.storage.sync.get('settings')).settings ?? {};
+    await chrome.storage.sync.set({ settings: { ...current, layout: 'overlay' } });
+  });
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await openWatch(page, '&theme=dark');
+  await setVideo(page, 18);
+  await openNotes(sw, page);
+  await page.keyboard.type('Le panneau flotte au-dessus de la page');
+  await page.mouse.move(200, 200);
+  await page.mouse.move(220, 210);
+  await page.locator('#boo-notes-overlay .hud button[aria-label^="Capturer"]').hover();
+  await expect(page.locator('#boo-notes-overlay .tip')).toHaveClass(/visible/);
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `${OUT}/hud-floating.png` });
+});
+
 test('toast after capture', async ({ page, sw }) => {
   await mkdir(OUT, { recursive: true });
   await page.setViewportSize({ width: 900, height: 560 });
@@ -53,8 +92,13 @@ test('options page', async ({ context, sw }) => {
   await mkdir(OUT, { recursive: true });
   const id = new URL(sw.url()).host;
   const page = await context.newPage();
-  await page.setViewportSize({ width: 900, height: 1400 });
-  await page.goto(`chrome-extension://${id}/options/options.html`);
-  await expect(page.locator('#shortcut-rows tr')).toHaveCount(5);
-  await page.screenshot({ path: `${OUT}/options.png`, fullPage: true });
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto(`chrome-extension://${id}/options/options.html#bienvenue`);
+  await expect(page.locator('#shortcut-rows .row')).toHaveCount(5);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/options.png` });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.locator('#panneau').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/options-dark.png` });
 });

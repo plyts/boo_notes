@@ -41,11 +41,15 @@ export const test = base.extend<{ context: BrowserContext; sw: Worker; page: Pag
   context: async ({}, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
-      viewport: { width: 1400, height: 900 },
+      // No viewport emulation: Playwright would shrink the real window to the viewport,
+      // and headless Chromium draws ~140 px of browser UI inside it. Input below the real
+      // content edge is then not routed into cross-process iframes (the notes panel).
+      viewport: null,
       args: [
         `--disable-extensions-except=${DIST}`,
         `--load-extension=${DIST}`,
         '--autoplay-policy=no-user-gesture-required',
+        '--window-size=1400,1040', // ≈ 1400×900 of page content
       ],
     });
     await context.route(/^https:\/\/www\.youtube\.com\//, serveFakeYouTube);

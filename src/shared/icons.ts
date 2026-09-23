@@ -59,6 +59,30 @@ const ICONS = {
     ['path', { d: 'M9 16V8l6 8V8' }],
   ],
   pause: [['path', { d: 'M9 5v14M15 5v14' }]],
+  play: [['path', { d: 'M8 5.5v13l10.5-6.5z', fill: 'currentColor' }]],
+  share: [
+    ['path', { d: 'M12 3v12' }],
+    ['path', { d: 'M8 7l4-4 4 4' }],
+    ['path', { d: 'M7 11H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1' }],
+  ],
+  keyboard: [
+    ['rect', { x: '2.5', y: '6', width: '19', height: '12', rx: '2' }],
+    ['path', { d: 'M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8' }],
+  ],
+  check: [['path', { d: 'M5 12.5l4.5 4.5L19 7.5' }]],
+  alert: [
+    ['path', { d: 'M12 4l9 16H3z' }],
+    ['path', { d: 'M12 10v4M12 17h.01' }],
+  ],
+  ghost: [
+    ['path', { d: 'M6 20V11a6 6 0 0 1 12 0v9l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5z' }],
+    ['circle', { cx: '10', cy: '11', r: '1', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '14', cy: '11', r: '1', fill: 'currentColor', stroke: 'none' }],
+  ],
+  eye: [
+    ['path', { d: 'M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z' }],
+    ['circle', { cx: '12', cy: '12', r: '2.5' }],
+  ],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

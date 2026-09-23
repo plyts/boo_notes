@@ -3,155 +3,255 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Boo Notes — Paramètres</title>
+    <title>Boo Notes — Réglages</title>
     <link rel="stylesheet" href="../tokens.css" />
     <link rel="stylesheet" href="options.css" />
     <script src="options.js" defer></script>
   </head>
   <body>
-    <main class="page">
-      <header class="page-header">
-        <img src="../icons/icon-48.png" width="40" height="40" alt="" />
-        <div>
-          <h1>Boo Notes</h1>
-          <p class="lede">Notes horodatées et captures pour YouTube, Udemy et Coursera.</p>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="../icons/icon-48.png" width="36" height="36" alt="" />
+          <div>
+            <strong>Boo Notes</strong>
+            <small id="version"></small>
+          </div>
         </div>
-      </header>
+        <nav class="nav" aria-label="Sections des réglages">
+          <a href="#raccourcis" data-icon="keyboard">Raccourcis</a>
+          <a href="#notes" data-icon="clock">Prise de notes</a>
+          <a href="#panneau" data-icon="dock">Panneau</a>
+          <a href="#captures" data-icon="camera">Captures</a>
+          <a href="#desktop" data-icon="desktop">App Desktop</a>
+          <a href="#donnees" data-icon="download">Données</a>
+        </nav>
+        <button type="button" class="sidebar-status" id="sidebar-status" data-state="offline">
+          <span class="dot" aria-hidden="true"></span><span class="label">Hors-ligne</span>
+        </button>
+      </aside>
 
-      <section id="bienvenue" class="card welcome" hidden>
-        <h2>Bienvenue 👋</h2>
-        <p>
-          Ouvrez une vidéo puis appuyez sur <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> : le panneau de notes
-          s’ouvre et chaque nouvelle ligne reçoit automatiquement l’horodatage de la vidéo.
-        </p>
-      </section>
+      <main class="content">
+        <section id="bienvenue" class="hero" hidden aria-labelledby="h-welcome">
+          <p class="eyebrow">Bienvenue</p>
+          <h1 id="h-welcome">Vos cours, annotés sans quitter la vidéo.</h1>
+          <p class="lede">Trois gestes suffisent. Tout se fait au clavier, et vos notes restent sur votre appareil.</p>
+          <ol class="steps">
+            <li>
+              <span class="step-num">1</span>
+              <strong>Ouvrez une vidéo</strong>
+              <small>YouTube, Udemy ou Coursera.</small>
+            </li>
+            <li>
+              <span class="step-num">2</span>
+              <strong>Ouvrez les notes</strong>
+              <span class="step-keys" data-command="toggle-sidebar"></span>
+              <small>Écrivez : chaque ligne est horodatée.</small>
+            </li>
+            <li>
+              <span class="step-num">3</span>
+              <strong>Capturez un schéma</strong>
+              <span class="step-keys" data-command="capture-screenshot"></span>
+              <small>L’image arrive dans la note.</small>
+            </li>
+          </ol>
+        </section>
 
-      <section class="card" aria-labelledby="h-shortcuts">
-        <div class="card-head">
-          <h2 id="h-shortcuts">Raccourcis clavier</h2>
-          <button type="button" id="edit-shortcuts" class="btn">Modifier les raccourcis</button>
-        </div>
-        <p class="hint">
-          Les raccourcis sont globaux au navigateur : ils fonctionnent même quand le focus est dans le lecteur ou dans
-          une autre fenêtre. Chrome limite à quatre les raccourcis proposés par défaut et ignore ceux qui entrent en
-          conflit avec les siens : ceux-là sont gérés directement dans la page (mention « dans la page »).
-        </p>
-        <table class="shortcuts">
-          <thead>
-            <tr><th scope="col">Action</th><th scope="col">Raccourci</th></tr>
-          </thead>
-          <tbody id="shortcut-rows"></tbody>
-        </table>
-      </section>
+        <section id="raccourcis" class="group" aria-labelledby="h-shortcuts">
+          <header class="group-head">
+            <h2 id="h-shortcuts">Raccourcis clavier</h2>
+            <p>
+              Globaux : ils marchent même quand le focus est dans le lecteur ou dans une autre fenêtre. Chrome en accepte
+              quatre par défaut et ignore ceux qui entrent en conflit avec les siens ; ceux-là fonctionnent dans la page.
+            </p>
+          </header>
+          <div class="card">
+            <div id="shortcut-rows" class="rows"></div>
+            <div class="card-foot">
+              <span class="hint">Modifiables dans les réglages de Chrome.</span>
+              <button type="button" id="edit-shortcuts" class="btn">Personnaliser…</button>
+            </div>
+          </div>
+        </section>
 
-      <section class="card" aria-labelledby="h-notes">
-        <h2 id="h-notes">Prise de notes</h2>
-        <label class="row">
-          <input type="checkbox" name="autoTimestamp" />
-          <span><strong>Horodatage automatique</strong><small>Chaque nouvelle ligne commence par <code>[MM:SS]</code>.</small></span>
-        </label>
-        <label class="row">
-          <input type="checkbox" name="autoPause" />
-          <span>
-            <strong>Pause automatique pendant la saisie</strong>
-            <small>Pause après 1,5 s de frappe continue, reprise 1 s après le dernier caractère.</small>
-          </span>
-        </label>
-        <label class="row">
-          <input type="checkbox" name="pageShortcuts" />
-          <span>
-            <strong>Raccourcis de secours dans la page</strong>
-            <small>
-              Alt + ← (saut arrière) et tout raccourci que Chrome n’a pas pu enregistrer (par ex. Alt + Shift + T,
-              réservé par Chrome sous Windows / Linux) fonctionnent quand le focus est sur la vidéo ou dans les notes.
-            </small>
-          </span>
-        </label>
-        <label class="row inline">
-          <span><strong>Durée du saut arrière</strong></span>
-          <input type="number" name="replaySeconds" min="1" max="60" step="1" /> <span>secondes</span>
-        </label>
-        <label class="row">
-          <input type="checkbox" name="hudEnabled" />
-          <span><strong>HUD sur la vidéo</strong><small>Barre discrète en haut à droite du lecteur, au survol.</small></span>
-        </label>
-      </section>
+        <section id="notes" class="group" aria-labelledby="h-notes">
+          <header class="group-head"><h2 id="h-notes">Prise de notes</h2></header>
+          <div class="card rows">
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Horodatage automatique</span>
+                <span class="row-desc">Chaque nouvelle ligne commence par <code>[MM:SS]</code>.</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="autoTimestamp" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Pause pendant la saisie</span>
+                <span class="row-desc">Pause après 1,5 s de frappe continue, reprise 1 s après la dernière touche.</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="autoPause" />
+            </label>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label" id="l-replay">Saut arrière</span>
+                <span class="row-desc">Durée de « Revoir les dernières secondes ».</span>
+              </span>
+              <div class="segmented" role="radiogroup" aria-labelledby="l-replay">
+                <label><input type="radio" name="replaySeconds" value="3" /><span>3 s</span></label>
+                <label><input type="radio" name="replaySeconds" value="5" /><span>5 s</span></label>
+                <label><input type="radio" name="replaySeconds" value="10" /><span>10 s</span></label>
+                <label><input type="radio" name="replaySeconds" value="15" /><span>15 s</span></label>
+              </div>
+            </div>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">HUD sur la vidéo</span>
+                <span class="row-desc">Barre discrète en haut à droite du lecteur, visible au survol.</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="hudEnabled" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Raccourcis de secours dans la page</span>
+                <span class="row-desc">
+                  Alt + ← et tout raccourci que Chrome n’a pas pu enregistrer (ex. Alt + Shift + T sous Windows / Linux).
+                </span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="pageShortcuts" />
+            </label>
+          </div>
+        </section>
 
-      <section class="card" aria-labelledby="h-layout">
-        <h2 id="h-layout">Panneau latéral</h2>
-        <fieldset class="row">
-          <legend>Disposition</legend>
-          <label><input type="radio" name="layout" value="side-by-side" /> Côte à côte <small>(la page se décale, le lecteur reste entièrement visible)</small></label>
-          <label><input type="radio" name="layout" value="overlay" /> Superposé <small>(par-dessus la page)</small></label>
-        </fieldset>
-        <label class="row inline">
-          <span><strong>Largeur par défaut</strong></span>
-          <input type="range" name="drawerWidth" min="300" max="500" step="10" />
-          <output id="drawerWidth-out"></output>
-        </label>
-        <fieldset class="row">
-          <legend>Thème</legend>
-          <label><input type="radio" name="theme" value="auto" /> Automatique <small>(suit la page)</small></label>
-          <label><input type="radio" name="theme" value="dark" /> Sombre</label>
-          <label><input type="radio" name="theme" value="light" /> Clair</label>
-        </fieldset>
-      </section>
+        <section id="panneau" class="group" aria-labelledby="h-layout">
+          <header class="group-head"><h2 id="h-layout">Panneau de notes</h2></header>
+          <div class="card rows">
+            <div class="row stacked">
+              <span class="row-text">
+                <span class="row-label" id="l-layout">Disposition</span>
+              </span>
+              <div class="layout-picker" role="radiogroup" aria-labelledby="l-layout">
+                <label class="tile">
+                  <input type="radio" name="layout" value="side-by-side" />
+                  <span class="mini" aria-hidden="true"><span class="mini-page"><span class="mini-video"></span></span><span class="mini-panel"></span></span>
+                  <span class="tile-label">Côte à côte</span>
+                  <span class="tile-desc">La page se décale : le lecteur reste entièrement visible.</span>
+                </label>
+                <label class="tile">
+                  <input type="radio" name="layout" value="overlay" />
+                  <span class="mini overlay" aria-hidden="true"><span class="mini-page"><span class="mini-video"></span></span><span class="mini-panel"></span></span>
+                  <span class="tile-label">Superposé</span>
+                  <span class="tile-desc">Une carte flottante par-dessus la page.</span>
+                </label>
+              </div>
+            </div>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Largeur par défaut</span>
+                <span class="row-desc">Ajustable aussi en glissant le bord du panneau (double-clic : 360 px).</span>
+              </span>
+              <span class="slider">
+                <input type="range" name="drawerWidth" min="300" max="500" step="10" />
+                <output id="drawerWidth-out"></output>
+              </span>
+            </label>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label" id="l-theme">Apparence</span>
+                <span class="row-desc">« Auto » suit le thème de la page vidéo.</span>
+              </span>
+              <div class="segmented" role="radiogroup" aria-labelledby="l-theme">
+                <label><input type="radio" name="theme" value="auto" /><span>Auto</span></label>
+                <label><input type="radio" name="theme" value="dark" /><span>Sombre</span></label>
+                <label><input type="radio" name="theme" value="light" /><span>Clair</span></label>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <section class="card" aria-labelledby="h-capture">
-        <h2 id="h-capture">Captures d’écran</h2>
-        <p class="hint">
-          L’image est extraite directement de la balise <code>&lt;video&gt;</code>, en résolution native, sans l’interface
-          du navigateur ni du lecteur.
-        </p>
-        <label class="row inline">
-          <span><strong>Format</strong></span>
-          <select name="captureFormat">
-            <option value="image/jpeg">JPEG (compact)</option>
-            <option value="image/png">PNG (sans perte, idéal pour les schémas)</option>
-            <option value="image/webp">WebP</option>
-          </select>
-        </label>
-        <label class="row inline">
-          <span><strong>Qualité</strong></span>
-          <input type="range" name="captureQuality" min="0.5" max="1" step="0.01" />
-          <output id="captureQuality-out"></output>
-        </label>
-      </section>
+        <section id="captures" class="group" aria-labelledby="h-capture">
+          <header class="group-head">
+            <h2 id="h-capture">Captures d’écran</h2>
+            <p>Extraites de la balise <code>&lt;video&gt;</code> en résolution native, sans l’interface du lecteur.</p>
+          </header>
+          <div class="card rows">
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label" id="l-format">Format</span>
+                <span class="row-desc" id="format-desc"></span>
+              </span>
+              <div class="segmented" role="radiogroup" aria-labelledby="l-format">
+                <label><input type="radio" name="captureFormat" value="image/jpeg" /><span>JPEG</span></label>
+                <label><input type="radio" name="captureFormat" value="image/png" /><span>PNG</span></label>
+                <label><input type="radio" name="captureFormat" value="image/webp" /><span>WebP</span></label>
+              </div>
+            </div>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Qualité</span>
+                <span class="row-desc">JPEG et WebP uniquement.</span>
+              </span>
+              <span class="slider">
+                <input type="range" name="captureQuality" min="0.5" max="1" step="0.01" />
+                <output id="captureQuality-out"></output>
+              </span>
+            </label>
+          </div>
+        </section>
 
-      <section class="card" aria-labelledby="h-desktop">
-        <div class="card-head">
-          <h2 id="h-desktop">Application Desktop</h2>
-          <span id="sync-badge" class="badge" data-state="offline">Hors-ligne</span>
-        </div>
-        <p class="hint">
-          Les notes sont toujours enregistrées dans le navigateur. Quand l’application Desktop est lancée, elles lui sont
-          envoyées en local (WebSocket) puis synchronisées vers votre dossier de notes ou Notion.
-        </p>
-        <label class="row stacked">
-          <strong>Adresse locale</strong>
-          <input type="text" name="desktopUrl" spellcheck="false" autocomplete="off" placeholder="ws://localhost:43117" />
-          <small>Uniquement <code>localhost</code> / <code>127.0.0.1</code>.</small>
-        </label>
-        <label class="row stacked">
-          <strong>Jeton d’appairage</strong>
-          <input type="password" name="desktopToken" spellcheck="false" autocomplete="off" placeholder="Affiché par l’application Desktop" />
-        </label>
-        <div class="actions">
-          <button type="button" id="sync-retry" class="btn">Tester la connexion</button>
-          <span id="sync-detail" class="hint" role="status"></span>
-        </div>
-      </section>
+        <section id="desktop" class="group" aria-labelledby="h-desktop">
+          <header class="group-head">
+            <h2 id="h-desktop">Application Desktop</h2>
+            <p>
+              Les notes sont toujours enregistrées dans le navigateur. Quand l’application Desktop est lancée, elles lui
+              sont envoyées en local, puis vers votre dossier de notes ou Notion.
+            </p>
+          </header>
+          <div class="card">
+            <div class="status-card" id="sync-card" data-state="offline">
+              <span class="status-orb" aria-hidden="true"></span>
+              <div class="status-text">
+                <span id="sync-badge" class="status-title">Hors-ligne</span>
+                <span id="sync-detail" class="row-desc" role="status"></span>
+              </div>
+              <button type="button" id="sync-retry" class="btn">Tester la connexion</button>
+            </div>
+            <div class="rows inset">
+              <label class="row stacked">
+                <span class="row-label">Adresse locale</span>
+                <input type="text" name="desktopUrl" spellcheck="false" autocomplete="off" placeholder="ws://localhost:43117" />
+                <span class="row-desc">Uniquement <code>localhost</code> ou <code>127.0.0.1</code>.</span>
+              </label>
+              <div class="row stacked">
+                <label class="row-label" for="desktopToken">Jeton d’appairage</label>
+                <span class="field-with-action">
+                  <input type="password" id="desktopToken" name="desktopToken" spellcheck="false" autocomplete="off" placeholder="Affiché par l’application Desktop" />
+                  <button type="button" class="btn ghost" id="toggle-token" aria-pressed="false">Afficher</button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <section class="card" aria-labelledby="h-data">
-        <h2 id="h-data">Données</h2>
-        <p class="hint" id="data-summary" role="status">…</p>
-        <ul id="note-list" class="note-list"></ul>
-        <div class="actions">
-          <button type="button" id="clear-all" class="btn danger">Effacer toutes les notes…</button>
-        </div>
-      </section>
-
-      <p class="saved" id="saved" role="status" aria-live="polite"></p>
-    </main>
+        <section id="donnees" class="group" aria-labelledby="h-data">
+          <header class="group-head"><h2 id="h-data">Données</h2></header>
+          <div class="card">
+            <div class="data-summary">
+              <span id="data-summary" role="status">…</span>
+            </div>
+            <ul id="note-list" class="note-list"></ul>
+          </div>
+          <div class="card danger-zone">
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label">Effacer toutes les notes</span>
+                <span class="row-desc">Supprime définitivement les notes et captures stockées dans ce navigateur.</span>
+              </span>
+              <button type="button" id="clear-all" class="btn danger">Effacer…</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <p class="saved" id="saved" role="status" aria-live="polite"></p>
   </body>
 </html>

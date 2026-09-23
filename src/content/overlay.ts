@@ -1,11 +1,12 @@
-import { h, icon } from '../shared/icons';
+import { h, icon, type IconName } from '../shared/icons';
+import { IS_MAC, shortcutKeys } from '../shared/keycaps';
 import { formatTimecode } from '../shared/time';
 
 /**
  * Everything drawn on top of the video lives in this shadow root: the
- * floating HUD, the capture flash, toasts and the progress-bar preview
- * marker. It is a separate layer (pointer-events: none) positioned from the
- * player's geometry: the native player DOM is never touched.
+ * floating HUD (+ its tooltips), the capture flash, toasts and the
+ * progress-bar preview marker. It is a separate layer (pointer-events: none)
+ * positioned from the player's geometry: the native player DOM is never touched.
  */
 export interface OverlayGeometry {
   videoRect(): DOMRect | null;
@@ -26,41 +27,92 @@ export interface OverlayActions {
 
 export type ToastKind = 'info' | 'success' | 'error';
 
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+export interface ToastExtra {
+  /** Data URL of the captured frame, shown as a thumbnail (macOS screenshot style). */
+  thumb?: string;
+  icon?: IconName;
+}
+
+const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+const SANS = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const SPRING = 'cubic-bezier(0.34, 1.36, 0.64, 1)';
 
 const CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; }
+
+/* HUD pill — top-right of the player */
 .hud {
   position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 2px; padding: 3px;
-  border-radius: 999px; background: rgba(18, 18, 22, 0.82); color: #f4f4f5;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(10px); font: 500 12px/1 ${MONO};
-  opacity: 0; pointer-events: none; transition: opacity 0.16s ease; will-change: transform, opacity;
+  border-radius: 999px; background: rgba(18, 18, 22, 0.8); color: #f4f4f5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(14px) saturate(1.4); font: 500 12px/1 ${MONO};
+  opacity: 0; translate: 0 -4px; pointer-events: none;
+  transition: opacity 0.16s ease, translate 0.22s ${SPRING};
+  will-change: transform, opacity;
 }
-.hud.visible { opacity: 1; pointer-events: auto; }
+.hud.visible { opacity: 1; translate: 0 0; pointer-events: auto; }
 .hud button {
-  all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
-  height: 28px; min-width: 28px; padding: 0 6px; border-radius: 999px; cursor: pointer; color: inherit; font: inherit;
+  all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 30px; min-width: 30px; padding: 0 7px; border-radius: 999px; cursor: pointer; color: inherit; font: inherit;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .hud button:hover { background: rgba(255, 255, 255, 0.14); }
+.hud button:active { background: rgba(255, 255, 255, 0.2); }
 .hud button:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 1px; }
 .hud button[aria-pressed="true"] { background: #6d5ef0; color: #fff; }
-.hud .tc { padding: 0 10px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
-.hud .tc::before { content: "["; opacity: 0.55; margin-right: 3px; }
-.hud .tc::after { content: "]"; opacity: 0.55; margin-left: 3px; }
-.hud .sep { width: 1px; height: 16px; background: rgba(255, 255, 255, 0.16); margin: 0 2px; }
+.hud .tc { padding: 0 11px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; min-width: 72px; }
+.hud .tc::before { content: "["; opacity: 0.5; margin-right: 3px; }
+.hud .tc::after { content: "]"; opacity: 0.5; margin-left: 3px; }
+.hud .tc.copied { color: #4ade80; font-family: ${SANS}; font-weight: 600; }
+.hud .tc.copied::before, .hud .tc.copied::after { content: none; }
+.hud .sep { width: 1px; height: 16px; background: rgba(255, 255, 255, 0.16); margin: 0 3px; }
+
+/* Quick tooltips (native title tooltips are slow and unstyled) */
+.tip {
+  position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px;
+  border-radius: 8px; background: rgba(14, 14, 17, 0.95); color: #f4f4f5; font: 500 12px/1.2 ${SANS};
+  white-space: nowrap; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); pointer-events: none;
+  opacity: 0; translate: 0 -2px; transition: opacity 0.12s ease, translate 0.12s ease;
+}
+.tip.visible { opacity: 1; translate: 0 0; }
+.keys { display: inline-flex; gap: 3px; }
+kbd {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+  color: #fff; font: 600 11px/1 ${SANS};
+}
+
+/* Capture flash */
 .flash { position: fixed; top: 0; left: 0; width: 0; height: 0; background: #fff; opacity: 0; pointer-events: none; }
+
+/* Toasts — bottom-left of the player, above its controls */
 .toasts { position: fixed; top: 0; left: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
 .toast {
-  max-width: min(420px, 80vw); padding: 7px 12px; border-radius: 8px; background: rgba(14, 14, 17, 0.92);
-  color: #f4f4f5; font: 500 12px/1.35 ${MONO}; white-space: pre-wrap;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  opacity: 0; transform: translateY(6px); transition: opacity 0.16s ease, transform 0.16s ease;
+  display: flex; align-items: center; gap: 10px; max-width: min(440px, 80vw); padding: 7px 14px 7px 7px;
+  border-radius: 11px; background: rgba(18, 18, 22, 0.94); color: #e4e4e7; font: 500 12px/1.35 ${MONO};
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  opacity: 0; transform: translateY(10px) scale(0.97); transform-origin: bottom left;
+  transition: opacity 0.16s ease, transform 0.28s ${SPRING};
 }
 .toast.show { opacity: 1; transform: none; }
-.toast.success { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 3px 0 0 #22c55e; }
-.toast.error { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 3px 0 0 #f59e0b; }
+.toast.leave { opacity: 0; transform: translateY(4px); transition: opacity 0.18s ease, transform 0.18s ease; }
+.toast .ico {
+  display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08); color: #c4b5fd;
+}
+.toast.success .ico { color: #4ade80; }
+.toast.error .ico { color: #fbbf24; }
+.toast .thumb {
+  flex: none; width: 64px; height: 36px; object-fit: cover; border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.toast .t-tc { color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.toast .t-sep { opacity: 0.4; }
+.toast .t-msg { color: #e4e4e7; }
+
+/* Progress-bar preview marker */
 .marker { position: fixed; top: 0; left: 0; opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
 .marker.visible { opacity: 1; }
 .marker .line {
@@ -68,10 +120,13 @@ const CSS = `
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 10px rgba(250, 204, 21, 0.75);
 }
 .marker .label {
-  position: absolute; left: 0; bottom: 14px; transform: translateX(-50%); padding: 3px 6px; border-radius: 4px;
-  background: #facc15; color: #111; font: 600 11px/1 ${MONO}; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  position: absolute; left: 0; bottom: 14px; transform: translateX(-50%); padding: 3px 6px; border-radius: 5px;
+  background: #facc15; color: #111; font: 700 11px/1 ${MONO}; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
-@media (prefers-reduced-motion: reduce) { .hud, .toast, .marker { transition: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud, .tip, .toast, .toast.leave, .marker { transition: none; }
+}
 `;
 
 export function attachStyles(root: ShadowRoot, css: string): void {
@@ -86,6 +141,8 @@ export function attachStyles(root: ShadowRoot, css: string): void {
 
 const HUD_MARGIN = 12;
 const TOAST_LIMIT = 3;
+const TIP_DELAY_MS = 280;
+const TOAST_TIMECODE = /^((?:\d+:)?\d{1,2}:\d{2}) - (.+)$/s;
 
 export class Overlay {
   readonly host: HTMLDivElement;
@@ -93,12 +150,15 @@ export class Overlay {
   private readonly tc: HTMLButtonElement;
   private readonly pinButton: HTMLButtonElement;
   private readonly captureButton: HTMLButtonElement;
+  private readonly tip: HTMLDivElement;
   private readonly flashEl: HTMLDivElement;
   private readonly toasts: HTMLDivElement;
   private readonly marker: HTMLDivElement;
   private readonly markerLabel: HTMLDivElement;
   private hudVisible = false;
   private hudTimer: ReturnType<typeof setTimeout> | null = null;
+  private tipTimer: ReturnType<typeof setTimeout> | null = null;
+  private copiedUntil = 0;
   private markerSeconds: number | null = null;
   private raf = 0;
   private enabled = true;
@@ -114,21 +174,26 @@ export class Overlay {
     attachStyles(root, CSS);
 
     const button = (label: string, child: Node, onClick: () => void, extra: Record<string, string> = {}) => {
-      const b = h('button', { type: 'button', title: label, 'aria-label': label, ...extra }, child);
+      const b = h('button', { type: 'button', 'aria-label': label, 'data-tip': label, ...extra }, child);
       b.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        this.hideTip();
         onClick();
       });
+      b.addEventListener('pointerenter', () => this.scheduleTip(b));
+      b.addEventListener('pointerleave', () => this.hideTip());
+      b.addEventListener('focus', () => this.scheduleTip(b));
+      b.addEventListener('blur', () => this.hideTip());
       return b;
     };
 
-    this.tc = button('Copier le lien horodaté (Markdown)', document.createTextNode('00:00'), () => actions.copyTimestamp());
+    this.tc = button('Copier le lien horodaté', document.createTextNode('00:00'), () => actions.copyTimestamp());
     this.tc.classList.add('tc');
-    this.pinButton = button('Épingler le panneau de notes', icon('pin'), () => actions.togglePin(), {
+    this.captureButton = button('Capturer l’image', icon('camera'), () => actions.capture());
+    this.pinButton = button('Garder les notes ouvertes', icon('pin'), () => actions.togglePin(), {
       'aria-pressed': 'false',
     });
-    this.captureButton = button('Capturer l’image', icon('camera'), () => actions.capture());
     this.hud = h(
       'div',
       { class: 'hud', role: 'toolbar', 'aria-label': 'Boo Notes' },
@@ -136,17 +201,18 @@ export class Overlay {
       h('span', { class: 'sep', 'aria-hidden': 'true' }),
       this.captureButton,
       this.pinButton,
-      button('Paramètres Boo Notes', icon('settings'), () => actions.openSettings()),
+      button('Paramètres', icon('settings'), () => actions.openSettings()),
     );
     this.hud.inert = true;
     // Keep the HUD alive while the pointer is on it.
     this.hud.addEventListener('pointerenter', () => this.armHide(4000));
 
+    this.tip = h('div', { class: 'tip', role: 'tooltip' });
     this.flashEl = h('div', { class: 'flash' });
     this.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     this.markerLabel = h('div', { class: 'label' });
     this.marker = h('div', { class: 'marker', 'aria-hidden': 'true' }, h('div', { class: 'line' }), this.markerLabel);
-    root.append(this.flashEl, this.hud, this.toasts, this.marker);
+    root.append(this.flashEl, this.hud, this.tip, this.toasts, this.marker);
   }
 
   mount(parent: Element = document.documentElement): void {
@@ -161,6 +227,7 @@ export class Overlay {
   destroy(): void {
     cancelAnimationFrame(this.raf);
     if (this.hudTimer) clearTimeout(this.hudTimer);
+    if (this.tipTimer) clearTimeout(this.tipTimer);
     this.host.remove();
   }
 
@@ -171,16 +238,23 @@ export class Overlay {
 
   setPinned(pinned: boolean): void {
     this.pinButton.setAttribute('aria-pressed', String(pinned));
-    const label = pinned ? 'Détacher l’épingle du panneau' : 'Épingler le panneau de notes';
-    this.pinButton.title = label;
+    const label = pinned ? 'Ne plus garder les notes ouvertes' : 'Garder les notes ouvertes';
+    this.pinButton.dataset.tip = label;
     this.pinButton.setAttribute('aria-label', label);
   }
 
   /** Shows the configured global shortcut in the capture button tooltip. */
   setCaptureShortcut(shortcut: string): void {
-    const label = shortcut ? `Capturer l’image (${shortcut})` : 'Capturer l’image';
-    this.captureButton.title = label;
-    this.captureButton.setAttribute('aria-label', label);
+    this.captureButton.dataset.keys = shortcut;
+    this.captureButton.setAttribute('aria-label', shortcut ? `Capturer l’image (${shortcut})` : 'Capturer l’image');
+  }
+
+  /** In-place confirmation on the timecode pill (feedback where the user clicked). */
+  confirmCopy(): void {
+    this.copiedUntil = performance.now() + 1400;
+    this.tc.classList.add('copied');
+    this.tc.textContent = '✓ Copié';
+    this.armHide(2500);
   }
 
   /** Temporarily hides the whole layer (visible-tab screenshots). */
@@ -204,15 +278,29 @@ export class Overlay {
     }
   }
 
-  toast(text: string, kind: ToastKind = 'info', ms = 2000): void {
-    const el = h('div', { class: `toast ${kind}` }, text);
+  toast(text: string, kind: ToastKind = 'info', ms = 2000, extra: ToastExtra = {}): void {
+    const m = TOAST_TIMECODE.exec(text);
+    const body = m
+      ? [h('span', { class: 't-tc' }, m[1]), h('span', { class: 't-sep' }, ' - '), h('span', { class: 't-msg' }, m[2])]
+      : [h('span', { class: 't-msg' }, text)];
+    const glyph = icon(extra.icon ?? (kind === 'success' ? 'check' : kind === 'error' ? 'alert' : 'clock'), 15);
+    let lead: HTMLElement = h('span', { class: 'ico', 'aria-hidden': 'true' }, glyph);
+    if (extra.thumb) {
+      const img = h('img', { class: 'thumb', alt: '' });
+      const fallback = lead;
+      // The site's CSP may refuse data: images: fall back to the icon.
+      img.addEventListener('error', () => img.replaceWith(fallback), { once: true });
+      img.src = extra.thumb;
+      lead = img;
+    }
+    const el = h('div', { class: `toast ${kind}` }, lead, h('span', {}, ...body));
     this.toasts.append(el);
     while (this.toasts.childElementCount > TOAST_LIMIT) this.toasts.firstElementChild?.remove();
     this.layout();
     this.ensureLoop();
     requestAnimationFrame(() => el.classList.add('show'));
     setTimeout(() => {
-      el.classList.remove('show');
+      el.classList.add('leave');
       setTimeout(() => el.remove(), 200);
     }, ms);
   }
@@ -242,6 +330,31 @@ export class Overlay {
     this.marker.classList.remove('visible');
   }
 
+  private scheduleTip(button: HTMLButtonElement): void {
+    if (this.tipTimer) clearTimeout(this.tipTimer);
+    this.tipTimer = setTimeout(() => this.showTip(button), TIP_DELAY_MS);
+  }
+
+  private showTip(button: HTMLButtonElement): void {
+    if (!this.hudVisible) return;
+    const keys = shortcutKeys(button.dataset.keys ?? '', IS_MAC);
+    this.tip.replaceChildren(
+      h('span', {}, button.dataset.tip ?? ''),
+      ...(keys.length ? [h('span', { class: 'keys' }, ...keys.map((k) => h('kbd', {}, k)))] : []),
+    );
+    const r = button.getBoundingClientRect();
+    const w = this.tip.offsetWidth;
+    const left = Math.max(4, Math.min(innerWidth - w - 4, r.left + r.width / 2 - w / 2));
+    this.tip.style.transform = `translate(${Math.round(left)}px, ${Math.round(r.bottom + 8)}px)`;
+    this.tip.classList.add('visible');
+  }
+
+  private hideTip(): void {
+    if (this.tipTimer) clearTimeout(this.tipTimer);
+    this.tipTimer = null;
+    this.tip.classList.remove('visible');
+  }
+
   private showHud(): void {
     if (this.hudVisible) return;
     this.hudVisible = true;
@@ -255,6 +368,7 @@ export class Overlay {
     this.hudVisible = false;
     this.hud.inert = true;
     this.hud.classList.remove('visible');
+    this.hideTip();
   }
 
   private armHide(ms: number): void {
@@ -292,7 +406,10 @@ export class Overlay {
       const left = Math.max(4, Math.min(innerWidth - w - 4, video.right - w - HUD_MARGIN));
       const top = Math.max(4, video.top + HUD_MARGIN);
       this.hud.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
-      this.tc.textContent = formatTimecode(this.geo.currentTime());
+      if (performance.now() >= this.copiedUntil) {
+        this.tc.classList.remove('copied');
+        this.tc.textContent = formatTimecode(this.geo.currentTime());
+      }
     } else if (this.hudVisible) {
       this.hideHud();
     }

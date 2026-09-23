@@ -6,9 +6,13 @@ vignette dans la note Markdown, et une synchronisation locale avec l’applicati
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
 
-| Thème clair | Toast après capture |
+| Note vide : le mode d’emploi | Raccourcis (`Ctrl/⌘ + /`) | Toast de capture |
+| --- | --- | --- |
+| ![Note vide](docs/screenshots/panel-empty.png) | ![Raccourcis](docs/screenshots/panel-shortcuts.png) | ![Toast](docs/screenshots/capture-toast.png) |
+
+| Réglages | HUD et panneau flottant |
 | --- | --- |
-| ![Thème clair](docs/screenshots/drawer-light.png) | ![Toast](docs/screenshots/capture-toast.png) |
+| ![Réglages](docs/screenshots/options.png) | ![HUD](docs/screenshots/hud-floating.png) |
 
 Extension Chrome / Chromium **Manifest V3**, écrite en TypeScript, sans framework UI. L’éditeur
 s’appuie sur **CodeMirror 6** (Markdown « à la volée »).
@@ -35,10 +39,11 @@ npm run build        # → dist/
 | Ouvrir / réduire le panneau | `Alt+Shift+N` | Ouvre le panneau et donne le focus à l’éditeur ; `Échap` le referme. |
 | Insérer l’horodatage | `Alt+Shift+T` | Injecte `[MM:SS]` au curseur, sans interrompre la lecture. |
 | Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. |
-| Smart Pause | `Alt+Shift+Space` | Pause + focus immédiat sur une nouvelle ligne de l’éditeur. |
-| Saut arrière | `Alt+←` | Recule de 5 s (durée réglable). |
+| Smart Pause | `Alt+Shift+Space` | Pause + focus sur une nouvelle ligne de l’éditeur ; un second appui relance la vidéo et rend le clavier au lecteur. |
+| Saut arrière | `Alt+←` | Recule de 5 s (3 / 5 / 10 / 15 s au choix). |
+| Aide | `Ctrl+/` (`⌘/`) | Dans le panneau : feuille de tous les raccourcis (et `?` hors de l’éditeur). |
 
-Tous sont modifiables dans `chrome://extensions/shortcuts` (bouton dans la page d’options).
+Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bouton dans les réglages).
 
 > **Limites de Chrome, gérées automatiquement.** Chrome n’accepte que **4** raccourcis par défaut
 > par extension et **ignore silencieusement** ceux qui entrent en conflit avec les siens —
@@ -66,6 +71,19 @@ Tous sont modifiables dans `chrome://extensions/shortcuts` (bouton dans la page 
 | **Capture** | `<canvas>` détaché à la résolution de la vidéo ; repli sur une capture de l’onglet recadrée si la source est cross-origin sans CORS. |
 | **Desktop** | WebSocket local `ws://localhost:43117` + jeton d’appairage ; stockage `chrome.storage.local` d’abord, file d’envoi rejouée à la reconnexion. Voir [docs/PROTOCOL.md](docs/PROTOCOL.md). |
 | **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés. |
+
+### Au-delà du cahier des charges (UX)
+
+| | |
+| --- | --- |
+| **Chronologie des notes** | Dans le pied du panneau : progression de la vidéo, un trait par note, un point par capture. Survol = aperçu sur la barre du lecteur, clic ou flèches = navigation. |
+| **Mise en page « transcription »** | Le texte d’une ligne horodatée s’aligne après l’horodatage ; les crochets n’apparaissent que si le curseur touche l’horodatage. |
+| **Cartes de capture** | Vignette 16:9 avec badge de temps et « ▶ Revoir » au survol. |
+| **État vide pédagogique** | Une note vide explique quoi faire et montre les 4 raccourcis en touches. |
+| **Retour au bon endroit** | « ✓ Copié » sur la pilule du HUD, vignette dans le toast de capture, snackbar pour les exports, « ✓ Enregistré » dans l’en-tête. |
+| **Infobulles rapides** | Sur le HUD, avec les touches (`⌥ ⇧ S` sur macOS). |
+| **Disposition superposée** | Carte flottante arrondie au-dessus de la page (et en plein écran). Double-clic sur le bord : largeur par défaut. |
+| **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -98,9 +116,11 @@ Puis renseigner le jeton dans la page d’options de l’extension.
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
 
 Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Shift+T` (y compris le
-repli dans la page), Smart Pause, capture + toast + vignette, `Alt+←`, HUD et copie du lien,
-épinglage, plein écran, liens `#t=`, marqueur de prévisualisation et clic sur un horodatage, pop-out
-puis rattachement, export `.md` + captures et copie du Markdown, persistance après rechargement,
+repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
+lien, épinglage, plein écran, liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
+chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
+disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
+captures et copie du Markdown, persistance après rechargement, double injection du script de contenu,
 synchronisation hors-ligne → en ligne avec le mock Desktop, jeton refusé, auto-pause, routage
 multi-onglets.
 

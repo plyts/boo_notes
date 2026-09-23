@@ -119,6 +119,15 @@ qui permet à un second éditeur (pop-out) d’ignorer ses propres échos et d�
 `chrome.storage.session` : état de routage (lecteurs, onglet actif, pop-outs) et statut de
 synchronisation lu par le badge. `chrome.storage.sync` : réglages.
 
+## Robustesse
+
+- **Une seule instance du script de contenu par onglet** : à l’installation, le service worker
+  réinjecte le script dans les onglets déjà ouverts, ce qui peut doubler l’injection déclarative.
+  Une copie vivante dans le même monde isolé est conservée ; une copie d’une version précédente
+  (autre monde) est démontée via l’événement `boo-notes:teardown`, et le démarrage s’interrompt si
+  ce démontage survient pendant une étape asynchrone.
+- L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
+
 ## Sécurité
 
 - Le port du panneau n’est accepté que depuis l’extension elle-même (`sender.id`).
