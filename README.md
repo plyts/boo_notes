@@ -1,21 +1,28 @@
 # Boo Notes — des notes liées à tout ce que vous étudiez
 
 Prise de notes **au clavier**, quel que soit le support : chaque note reste **liée à son origine**
-— l’instant d’une vidéo ou d’un audio, la page d’un PDF, le passage d’un article ou d’une page
-Notion, le paragraphe d’un texte, le repère posé sur un graphe — et y ramène d’un clic, dans les
-deux sens. Les notes deviennent des **fiches de révision** reliées par `[[liens]]`, et **Notion**
-les garde toutes dans un tableau de votre page.
+— l’instant d’une vidéo, d’un audio ou d’un flux en direct, la page d’un PDF, le passage d’un
+article ou d’une page Notion, le paragraphe d’un texte, le repère posé sur un graphe — et y ramène
+d’un clic, dans les deux sens. Organisées en **cours › chapitres › notes**, reliées entre elles par
+`[[liens]]` et à **plusieurs supports** à la fois, elles forment un **second cerveau** que la
+**carte mentale** dessine, que les **révisions** entretiennent, que l’**export** transforme en
+fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tableau de votre page.
 
-- **Extension navigateur** (Chrome, Edge, Brave…) : YouTube, Udemy, Coursera, vidéos et audios
-  déposés dans **Notion**, tout site vidéo ou audio, et **toute page à lire** (article, chapitre de
-  cours, documentation, page Notion) en **mode lecture** : citations liées au passage, surlignées
-  dans la page, progression de lecture.
-- **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : bibliothèque de tous vos
-  supports, lecteur **PDF** annoté, **textes** et **images** (graphes, schémas) annotés, audio /
-  vidéo locaux, **fiches de révision** reliées avec révision espacée, dossier de notes Markdown.
+- **Extension navigateur** (Chrome, Edge, Brave…) : **toute vidéo ou tout audio du web** — YouTube,
+  Udemy, Coursera, Notion, lecteurs intégrés (Vimeo, Kaltura, Panopto, Wistia…), lecteurs en web
+  components, podcasts et radios `new Audio()`, et un **chronomètre** pour ce qu’aucun script ne
+  peut lire — plus **toute page à lire** en **mode lecture** (citations liées au passage, surlignées
+  dans la page). Chaque note se range dans un cours › chapitre depuis le panneau.
+- **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : cours, chapitres et notes ;
+  une note liée à plusieurs supports (**PDF**, **vidéo / audio** locaux ou **flux** par adresse —
+  HLS, radios —, **images**, **textes**, pages vues dans le navigateur) ; **carte mentale** de tout
+  le savoir (réseau groupé par cours, repliable, ou arborescence) ; **révisions** de cartes ;
+  **export** (fiches PDF, Anki, Markdown, JSON). Interface **React + React Aria**, design **Liquid
+  Glass**, typographie **SF Pro** (Apple) / **Inter** (Windows).
 - **Notion** ([docs/NOTION.md](docs/NOTION.md)) : le tableau « Boo Notes — Mes notes » intégré à la
-  page de votre choix, une page par note, les `[[liens]]` en mentions et en relations « Liens » /
-  « Liée depuis » — écrit par l’application, ou directement par l’extension quand elle est fermée.
+  page de votre choix, une page par note avec ses colonnes **Cours**, **Chapitre**, **Supports**, les
+  `[[liens]]` en mentions et en relations — écrit par l’application, ou par l’extension quand
+  l’application est fermée.
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
 
@@ -32,13 +39,19 @@ la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie un
 | --- | --- |
 | ![Réglages](docs/screenshots/options.png) | ![HUD](docs/screenshots/hud-floating.png) |
 
-| Desktop : bibliothèque | Desktop : lecteur PDF annoté |
+| Desktop : accueil | Desktop : une note, deux supports |
 | --- | --- |
-| ![Bibliothèque](docs/screenshots/desktop-library.png) | ![PDF](docs/screenshots/desktop-pdf.png) |
+| ![Accueil](docs/screenshots/desktop-today.png) | ![Note](docs/screenshots/desktop-note.png) |
 
-Extension Chrome / Chromium **Manifest V3** et application **Electron**, écrites en TypeScript,
-sans framework UI. L’éditeur, partagé par les deux, s’appuie sur **CodeMirror 6** (Markdown « à la
-volée ») ; les PDF sont affichés avec **pdf.js**.
+| Desktop : carte mentale (réseau groupé par cours) | Desktop : cours › chapitres › notes |
+| --- | --- |
+| ![Carte mentale](docs/screenshots/desktop-graph.png) | ![Cours](docs/screenshots/desktop-course.png) |
+
+Extension Chrome / Chromium **Manifest V3** (TypeScript, DOM natif : légère, sans framework, pour ne
+jamais alourdir les pages visitées) et application **Electron** (TypeScript, **React 19**, **React
+Aria Components**, **Motion**, **Zustand**, **React Flow** + **d3**). L’éditeur, partagé par les
+deux, s’appuie sur **CodeMirror 6** (Markdown « à la volée ») ; les PDF sont affichés avec
+**pdf.js**, les flux HLS lus avec **hls.js**.
 
 ---
 
@@ -102,13 +115,16 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 
 | Support | Ancre d’une note | Extension | Application Desktop |
 | --- | --- | --- | --- |
-| **Vidéo** | `[04:15]` → l’instant | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé ; captures | MP4, WebM, MKV, MOV… locaux, captures ; notes du navigateur, « Reprendre à 21:00 » |
-| **Audio** | `[04:15]` | Podcasts, radios, audios Notion, tout `<audio>` (auto-pause, saut arrière) | MP3, M4A, WAV, OGG, Opus, FLAC… |
+| **Vidéo** | `[04:15]` → l’instant | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé, **lecteurs intégrés** en iframe, lecteurs en **shadow DOM** ; captures | MP4, WebM, MKV, MOV… locaux ou **par adresse** (HLS `.m3u8`) ; captures ; notes du navigateur, « Reprendre à 21:00 » |
+| **Audio** | `[04:15]` | Podcasts, radios, audios Notion, tout `<audio>`, lecteurs `new Audio()` hors page (auto-pause, saut arrière) | MP3, M4A, WAV, OGG, Opus, FLAC… locaux ou par adresse (radios, podcasts) |
+| **Flux illisible** (DRM, application, cours en salle) | `[04:15]` → l’instant du **chronomètre** | Chronomètre lancé depuis le panneau | — |
 | **Page web / page Notion** | `> citation [↗](URL#:~:text=…)`, `[↗ Section](…)` → le passage, surligné | **Mode lecture** : citations, repères de section, passages surlignés dans la page, capture de la page, % lu | Notes reçues, « Rouvrir la page » |
 | **PDF** | `[p. 12]` → la page | — | Notes par page, surlignage 4 couleurs, citations, pastilles de notes dans la marge |
 | **Texte** (.txt, .md) | `[§ 4]` → le paragraphe | — | Paragraphes numérotés, citations |
 | **Image** (graphe, schéma, tableau blanc) | `[pin 3]` → le repère | — | Repères numérotés posés sur l’image, zoom / déplacement |
 | **Fiche de révision** | `[[Titre]]` → une autre note | Liens `[[…]]` (complétion des titres, clic = ouvrir la note) | Fiches reliées, aperçu au survol, « Liée depuis », révision espacée |
+| **Plusieurs supports dans une note** | `[04:15](res:…)`, `[p. 12](res:…)` → le bon support | — | Onglets numérotés, pastilles sur les repères, support principal modifiable |
+| **Cours › chapitre** | — | Classement depuis le panneau (cours de l’app proposés) | Arbre des cours, glisser-déposer, inspecteur, carte mentale |
 | **Notion** | — | Envoi direct quand l’app est fermée (options › Notion) | Tableau « Boo Notes — Mes notes » dans votre page, synchro automatique |
 
 ### Au-delà du cahier des charges (UX)
@@ -156,7 +172,7 @@ npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 | --- | --- |
 | `npm run build` / `npm run watch` | Bundle esbuild → `dist/` |
 | `npm run typecheck` | TypeScript strict |
-| `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown, auto-stamp, auto-pause, raccourcis, stockage, synchronisation Desktop, passages d’une page, synchronisation Notion directe (API simulée), **contrastes WCAG des tokens** |
+| `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown et repères qualifiés, cartes de révision, auto-stamp, auto-pause, raccourcis, stockage (dont le classement), synchronisation Desktop, passages d’une page, synchronisation Notion directe (API simulée), **contrastes WCAG des tokens** |
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
@@ -173,31 +189,37 @@ multi-onglets, **podcast audio sur un site quelconque** (activation au raccourci
 progression, capture refusée), « Toujours activer ici » et page d’options, **vidéo déposée dans une
 page Notion** (note et capture liées à la page), **mode lecture** (citation liée au passage,
 surlignage dans la page, retour au passage, bulle « Citer », repère de section, progression de
-lecture), **`[[liens]]`** (complétion sans accents, ouverture de la note liée) et **envoi direct
-vers Notion** sans l’application (connexion dans les options, API Notion simulée).
+lecture), **`[[liens]]`** (complétion sans accents, ouverture de la note liée), **envoi direct
+vers Notion** sans l’application (connexion dans les options, API Notion simulée), **tout flux**
+(vidéo dans un shadow DOM fermé, `new Audio()` hors page, lecteur dans une iframe d’un autre
+domaine : horodatage, saut, capture ; lecteur non autorisé proposé à l’autorisation ; chronomètre)
+et le **classement cours › chapitre** depuis le panneau.
 
-Côté Desktop : tests unitaires (bibliothèque, serveur WebSocket avec le vrai client de l’extension,
-conversion Markdown → Notion, synchronisation incrémentale contre une API Notion simulée) et tests
-d’interface Playwright + Electron (PDF, audio, vidéo, extension, Notion). La CI
+Côté Desktop : tests unitaires (bibliothèque v2 et migration, graphe et carte mentale, serveur
+WebSocket avec le vrai client de l’extension, conversion Markdown → Notion, synchronisation
+incrémentale contre une API Notion simulée) et tests d’interface Playwright + Electron (cours et
+chapitres, note multi-supports, flux par adresse, PDF, audio, vidéo, texte, image, fiches,
+révisions, carte mentale, export, extension, Notion). La CI
 ([.github/workflows/desktop.yml](.github/workflows/desktop.yml)) construit l’installeur Windows.
 
 ```
 src/
   background/   service worker : raccourcis, routage multi-onglets, stockage, export, sync Desktop, sync Notion directe
-  content/      script de contenu : détection du média, mode lecture, HUD / toasts / flash / marqueur, panneau
+  content/      script de contenu : détection du média (page, shadow DOM, iframes via frame.js, pont media-bridge.js), mode lecture, HUD / toasts / flash / marqueur, panneau
   panel/        page du panneau (iframe du drawer + fenêtre pop-out) : éditeur CodeMirror
   options/      page d’options
   shared/       logique pure partagée (testée unitairement)
 tools/mock-desktop/   serveur WebSocket simulant l’application Desktop
 tests/unit, tests/e2e
-desktop/      application Desktop (Electron) : core/ (bibliothèque, serveur, Notion), main/, preload/, renderer/
+desktop/      application Desktop (Electron) : core/ (bibliothèque v2, export, serveur, Notion), main/, preload/, renderer/ (React)
 docs/         architecture, protocole, design, Desktop, Notion
 ```
 
 ## Limites connues
 
 - **Contenu DRM** (Widevine, certains cours Udemy) : le navigateur renvoie une image noire ; la
-  capture est enregistrée avec un avertissement.
+  capture est enregistrée avec un avertissement. L’horodatage fonctionne (la position reste
+  lisible) ; pour un lecteur totalement fermé, le **chronomètre** prend le relais.
 - **Vidéo cross-origin sans CORS** : la capture passe par une capture de l’onglet recadrée, qui exige
   que Chrome ait accordé `activeTab` — c’est le cas quand la capture est lancée par le raccourci
   global, pas par le bouton du HUD (un message l’explique).
@@ -221,9 +243,11 @@ docs/         architecture, protocole, design, Desktop, Notion
   lu.
 - **Notion depuis l’extension** : le secret de l’intégration est alors conservé dans le stockage
   local de l’extension (voir [docs/NOTION.md](docs/NOTION.md)).
-- **Vidéos intégrées dans une page** (iframe YouTube dans Notion, lecteur embarqué d’un autre site) :
-  le script ne s’exécute que dans la page principale ; ouvrez la vidéo sur son site. Les vidéos et
-  audios **déposés** dans Notion (fichiers) sont, eux, pris en charge.
+- **Lecteurs intégrés** (iframes) : pris en charge dès que l’extension peut lire l’hôte du lecteur
+  (YouTube, et tout hôte autorisé en un clic depuis le panneau). Une iframe dans une iframe est
+  pilotée, mais le HUD ne peut pas s’y superposer. Les lecteurs `new Audio()` sont vus dès leur
+  prochain démarrage quand Boo Notes est activé après le début de la lecture (mettre en pause puis
+  relancer), et dès le premier sur un site « toujours actif ».
 - **Détection de l’extension** : le panneau étant accessible sur tous les sites (activation à la
   demande), un site peut savoir que Boo Notes est installé (voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 - **Sélecteurs Notion** (blocs vidéo / audio) : écrits d’après le DOM connu, non vérifiés sur

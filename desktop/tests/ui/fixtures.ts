@@ -1,5 +1,5 @@
 import { _electron as electron, test as base, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +100,7 @@ export const test = base.extend<{ ctx: Ctx }>({
             BOO_USER_DATA: userData,
             BOO_VAULT: vault,
             BOO_PORT: String(port),
+            BOO_EXPORT_DIR: join(dir, 'exports'),
             NOTION_API_BASE: notion.url,
             ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
           },
@@ -117,3 +118,42 @@ export const test = base.extend<{ ctx: Ctx }>({
 });
 
 export { expect };
+
+// --- Library file and navigation helpers ----------------------------------------------------
+
+export interface LibraryFile {
+  version: 2;
+  notes: Record<string, any>;
+  resources: Record<string, any>;
+  courses: Array<{ id: string; title: string; chapters: Array<{ id: string; title: string; notes: string[] }> }>;
+}
+
+export async function libraryJson(vault: string): Promise<LibraryFile> {
+  return JSON.parse(await readFile(join(vault, '.boo', 'library.json'), 'utf8'));
+}
+
+export const noteByTitle = async (vault: string, title: string) => Object.values((await libraryJson(vault)).notes).find((n) => n.title === title);
+export const resourceByTitle = async (vault: string, title: string) =>
+  Object.values((await libraryJson(vault)).resources).find((r) => r.title === title);
+export const noteText = async (vault: string, title: string) => readFile(join(vault, (await noteByTitle(vault, title))!.noteFile), 'utf8');
+
+/** Waits for the view transition to end (the leaving view is gone). */
+export const settled = (page: Page) => expect(page.locator('.view')).toHaveCount(1);
+
+/** Opens a note from « Toutes les notes ». */
+export async function openNote(page: Page, title: string): Promise<void> {
+  await page.locator('.nav-item', { hasText: 'Toutes les notes' }).click();
+  await settled(page);
+  await page.locator('.row', { hasText: title }).first().click();
+  await settled(page);
+  await expect(page.locator('.note-title')).toHaveText(title);
+}
+
+/** Imports files as the drop / file picker does, then opens the note of the first one. */
+export async function importAndOpen(page: Page, paths: string[], title: string): Promise<void> {
+  await page.evaluate((p) => window.boo.library.importFiles(p), paths);
+  await openNote(page, title);
+}
+
+export const editor = (page: Page) => page.locator('.note-editor .cm-content');
+export const saved = (page: Page) => expect(page.locator('.save-state')).toHaveText('Enregistré');

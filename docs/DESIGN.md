@@ -15,6 +15,29 @@ le produit. Les valeurs sont celles du code : `src/tokens.css` (panneau, réglag
 | **Ne jamais masquer le lecteur** | Panneau côte à côte par défaut, sous l’en-tête du site ; en superposé, carte flottante clairement au-dessus de la page. |
 | **Accessible et sobre en mouvement** | Contrastes WCAG vérifiés par les tests, focus visible partout, animations courtes (120–260 ms) et désactivées avec `prefers-reduced-motion`. |
 
+## Liquid Glass et typographie
+
+Depuis la v2, l’application Desktop et l’extension partagent un langage inspiré de **Liquid Glass**
+(Apple, WWDC 2025), défini dans `src/tokens.css` :
+
+| Aspect | Règle |
+| --- | --- |
+| **Contenu d’abord** | Le contenu occupe la fenêtre ; navigation et commandes flottent au-dessus, sur du verre : `.glass` (barres, panneaux), `.glass-thick` (menus, feuilles, texte dense), `.glass-clear` (commandes sur un média). |
+| **Matériau** | Teinte translucide + `backdrop-filter: blur(22px) saturate(175%)`, liseré spéculaire (1 px plus clair en haut), ombre douce. Sous Windows 11, la fenêtre est posée sur le matériau **Mica** (macOS : *vibrancy*) ; ailleurs, un fond dégradé discret donne quelque chose à réfracter. |
+| **Formes concentriques** | Rayons `--radius-xs` 6 → `--radius-2xl` 28 ; un élément dans un conteneur prend *rayon du conteneur − marge*. Boutons et segments en capsule. |
+| **Couleur** | Une teinte d’action (violet `--accent`), les couleurs système pour le sens : types de support (vidéo violet, audio orange, PDF rouge, image rose, fiche verte…), statuts, et une teinte par cours (arbre, cartes, bulles de la carte mentale). |
+| **Mouvement** | Ressorts (`--spring-smooth`, `--spring-snappy`, `--spring-bouncy` en `linear()`, Motion côté React), courts et interruptibles ; supprimés avec « Réduire les animations ». |
+| **Accessibilité** | « Réduire la transparence » rend le verre opaque, « Augmenter le contraste » renforce liserés et séparateurs ; contrastes WCAG 2.2 AA vérifiés par `tests/unit/contrast.test.ts`, y compris le texte sur verre ; tous les contrôles de l’app viennent de **React Aria** (clavier, focus, lecteurs d’écran). |
+
+**Typographie.** `--font-sans` / `--font-display` / `--font-rounded` : **SF Pro Text**, **SF Pro
+Display** (titres ≥ 20 px) et **SF Pro Rounded** (compteurs, pastilles) sur les appareils Apple, où
+San Francisco est la police du système (`-apple-system`) et choisit seule ses tailles optiques. La
+licence d’Apple réserve SF Pro aux logiciels pour plateformes Apple : sous Windows et Linux, Boo Notes
+utilise **Inter Variable** (OFL), embarquée avec son axe de taille optique (`font-optical-sizing:
+auto`), puis Segoe UI Variable. SF Compact vise les petits écrans (Apple Watch) et n’est pas
+utilisée. Échelle : 11 · 12 · 14 · 16 · 20 · 24 · 30 · 38 px, approche resserrée quand la taille
+grandit (`--tracking-*`, de +0,01 em à −0,024 em), chiffres tabulaires pour les temps et compteurs.
+
 ## Panneau de notes
 
 ```

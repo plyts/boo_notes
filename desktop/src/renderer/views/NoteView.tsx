@@ -106,6 +106,15 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
     if (!active && note.resources.length) setActive(note.resources[0]);
   }, [note, active]);
 
+  // Anchors without a target (`[04:15]`) belong to the main resource.
+  useEffect(() => {
+    const ed = editorRef.current?.editor;
+    if (!ed) return;
+    ed.setPrimaryResource(primary);
+    ed.refreshBadges();
+    viewerRef.current?.syncMarkers();
+  }, [primary, note?.resources.length]);
+
   const onViewerReady = useCallback((h: ViewerHandle | null) => {
     viewerRef.current = h;
     setViewer(h);
@@ -182,7 +191,8 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
       const mod = e.ctrlKey || e.metaKey;
       const code = e.code;
       let handled = true;
-      if (altShift && code === 'KeyT') v?.togglePlacing && !v.position() ? v.togglePlacing() : stampNow();
+      // On an image the shortcut places a new pin (click where), like the « Repère » button.
+      if (altShift && code === 'KeyT') v?.togglePlacing ? v.togglePlacing() : stampNow();
       else if (altShift && code === 'KeyN') editorRef.current?.focus();
       else if (altShift && code === 'KeyS') void capture();
       else if (altShift && code === 'Space') v?.toggle?.();

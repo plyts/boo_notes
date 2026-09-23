@@ -7,10 +7,10 @@ intégré dans la page de votre choix :
 ```
 📄 Mes cours                       ← votre page (le « hub »)
    👻 Boo Notes — Mes notes        ← tableau intégré (base inline) : une ligne par note
-      🎬 React — Les hooks          Vidéo · YouTube · En cours · 42 % · 21:00 / 50:00 · Liens : 🗂️ useEffect
-      🌐 La loi d’Ohm — Cours       Page web · Web · En cours · 62 % lu
-      📄 Probabilités — Chapitre 3  PDF · Fichier local · p. 12 / 40
-      🗂️ useEffect                  Fiche · Prochaine révision : 12 oct. · Liée depuis : 🎬 React — Les hooks
+      🎬 React — Les hooks          React › Hooks · Vidéo · YouTube · En cours · 42 % · 21:00 / 50:00 · Liens : 🗂️ useEffect
+      🌐 La loi d’Ohm — Cours       Physique › Électricité · Page web · En cours · 62 % lu
+      📄 Probabilités — Chapitre 3  Maths › Probabilités · PDF + audio · p. 12 / 40
+      🗂️ useEffect                  React › Hooks · Fiche · Prochaine révision : 12 oct. · Liée depuis : 🎬 React — Les hooks
 ```
 
 Chaque ligne est une page : la source en tête (vidéo YouTube intégrée, signet, image), puis la note
@@ -62,6 +62,9 @@ qu’il ne quitte pas l’application.
 | Nom | Titre de la note (vidéo, page, document, fiche) |
 | Type | Vidéo · Audio · PDF · Texte · Image · Page web · Fiche |
 | Plateforme | YouTube · Udemy · Coursera · Notion · Web · Fichier local |
+| Cours | Le cours de la note (sélection : une couleur par cours) — choisi dans l’app ou dans le panneau de l’extension |
+| Chapitre | Le chapitre du cours |
+| Supports | Tous les supports liés à la note, un par ligne (`PDF · Probabilités — Chapitre 3`, `Audio · Amphi 3`…) |
 | Statut | À commencer · En cours · Terminé (déduit de la progression, ou choisi dans l’app) |
 | Progression | Part du support parcourue (point le plus loin atteint) |
 | Position | `21:00 / 50:00`, `p. 12 / 40`, `§ 4 / 30`, `62 % lu`, `3 repères` |
@@ -73,14 +76,16 @@ qu’il ne quitte pas l’application.
 | Dernière activité | Date de la dernière note ou progression |
 | Boo ID | Identifiant de la note (utilisé par Boo Notes, ne pas modifier) |
 
-Idées de vues : **« À réviser »** (filtre *Prochaine révision* ≤ aujourd’hui, trié par date),
+Idées de vues : **par cours** (groupé par *Cours*, puis trié par *Chapitre*), **« À réviser »** (filtre *Prochaine révision* ≤ aujourd’hui, trié par date),
 **« En cours »** (Statut), **tableau Kanban** par Statut, **calendrier** sur *Prochaine révision*,
 **galerie** groupée par Type.
 
 ## La page de chaque note
 
 - En tête : la **vidéo YouTube intégrée**, un **signet** vers le cours ou l’article, l’**image**
-  étudiée (téléversée), ou un encadré « Fichier local : cours.pdf ».
+  étudiée (téléversée), ou un encadré « Fichier local : cours.pdf » — et, pour une note appuyée sur
+  **plusieurs supports**, un en-tête par support (PDF, enregistrement de l’amphi, vidéo…), chaque
+  repère renvoyant au sien.
 - Puis la note, **une ligne = un bloc** : `04:15` rouvre la vidéo à cet instant (l’extension gère
   `#t=` sur toutes les plateformes), `p. 12`, `§ 4`, `◉ 3` rappellent la page, le paragraphe ou le
   repère de l’image ; une **citation** d’article garde son lien `↗` qui rouvre la page *sur le

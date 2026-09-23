@@ -9,8 +9,10 @@ import {
   ViewportPortal,
   applyNodeChanges,
   useReactFlow,
+  useStore,
   type NodeChange,
 } from '@xyflow/react';
+import { shallow } from 'zustand/shallow';
 import { animate, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button as AriaButton, Header, Menu, MenuItem, MenuSection, MenuTrigger, Popover, type Selection } from 'react-aria-components';
@@ -130,6 +132,8 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
   }, [snap, options]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const placed = useMemo(() => (layout === 'mindmap' ? layoutMindMap(graph) : new Map<string, Placed>()), [graph, layout]);
+  const placedRef = useRef(placed);
+  placedRef.current = placed;
 
   // --- Layout -----------------------------------------------------------------------------------
 
@@ -158,12 +162,47 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
 
   const fitKey = useRef('');
   /** Frames the whole graph, never below a readable zoom (the rest is a pan away). */
-  const frame = useCallback(
-    () => void rf.fitView({ padding: 0.12, minZoom: layoutRef.current === 'mindmap' ? 0.72 : 0.3, maxZoom: 1.25, duration: reduced ? 0 : 520 }),
-    [rf, reduced],
-  );
+  const size = useStore((s) => ({ width: s.width, height: s.height }), shallow);
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  /**
+   * Frames the graph from the layout's own positions (nodes need not be
+   * measured yet), never below a readable zoom: the rest is a pan away.
+   */
+  const frame = useCallback(() => {
+    const mindmap = layoutRef.current === 'mindmap';
+    const points = mindmap ? [...placedRef.current.values()] : [...net.current!.positions().values()];
+    const { width, height } = sizeRef.current;
+    if (!points.length || !width || !height) return;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const x0 = Math.min(...xs) - 150;
+    const x1 = Math.max(...xs) + 150;
+    const y0 = Math.min(...ys) - 70;
+    const y1 = Math.max(...ys) + 70;
+    // The floating toolbar covers the top of the canvas.
+    const top = 64;
+    const zoom = Math.min(1.25, Math.max(mindmap ? 0.72 : 0.3, Math.min(width / (x1 - x0), (height - top) / (y1 - y0))));
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    void rf.setViewport({ x: width / 2 - cx * zoom, y: top + (height - top) / 2 - cy * zoom, zoom }, { duration: reduced ? 0 : 520 });
+  }, [rf, reduced]);
+
+  // A pending framing survives the data refreshes that follow (it is not a cleanup of the layout effect).
+  const frameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleFrame = useCallback(
+    (delay: number) => {
+      if (frameTimer.current) clearTimeout(frameTimer.current);
+      frameTimer.current = setTimeout(() => {
+        frameTimer.current = null;
+        frame();
+      }, delay);
+    },
+    [frame],
+  );
+  useEffect(() => () => void (frameTimer.current && clearTimeout(frameTimer.current)), []);
 
   const prevLayout = useRef<Layout | null>(null);
   useEffect(() => {
@@ -198,11 +237,8 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
       }
       const pos = sim.positions();
       setNodes(graph.nodes.map((g) => make(g, pos.get(g.id) ?? { x: 0, y: 0 })));
-      if (refit) {
-        // Let the forces settle a little before framing.
-        const t = setTimeout(frame, reduced ? 50 : 450);
-        return () => clearTimeout(t);
-      }
+      // Let the forces settle a little before framing.
+      if (refit) scheduleFrame(reduced ? 50 : 450);
       return;
     }
 
@@ -217,17 +253,14 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
     }
     if (reduced) {
       setNodes(graph.nodes.map((g) => make(g, target(g.id))));
-      if (refit) {
-        const t = setTimeout(frame, 50);
-        return () => clearTimeout(t);
-      }
+      if (refit) scheduleFrame(50);
       return;
     }
     setNodes(graph.nodes.map((g) => make(g, from.get(g.id)!)));
     const controls = animate(0, 1, {
       duration: 0.55,
       ease: [0.32, 0.72, 0, 1],
-      onComplete: () => refit && frame(),
+      onComplete: () => refit && scheduleFrame(0),
       onUpdate: (t) =>
         setNodes((ns) =>
           ns.map((n) => {
@@ -462,11 +495,11 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
                 onPress={() => {
                   net.current!.shuffle();
                   setNodes((ns) => ns.map((n) => (n.data.pinned ? { ...n, data: { ...n.data, pinned: false } } : n)));
-                  setTimeout(frame, reduced ? 50 : 900);
+                  scheduleFrame(reduced ? 50 : 900);
                 }}
               />
             ) : null}
-            <IconButton icon="fit" label="Tout voir" onPress={() => void rf.fitView({ padding: 0.12, duration: reduced ? 0 : 400 })} />
+            <IconButton icon="fit" label="Tout voir" onPress={frame} />
           </>
         }
       />
@@ -501,7 +534,6 @@ function GraphCanvas({ courseId }: { courseId?: string }) {
           elementsSelectable={false}
           nodesConnectable={false}
           edgesFocusable={false}
-          onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
           zoomOnDoubleClick={false}
           onMove={(_, vp) => setZoom(zoomBucket(vp.zoom))}

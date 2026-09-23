@@ -510,8 +510,10 @@ class PanelApp {
         'header',
         { class: 'header' },
         h('div', { class: 'toolbar' }, this.statusButton, h('span', { class: 'spacer' }), ...actions),
+        // Course › chapter of the library, as a breadcrumb above the title.
+        this.placeButton,
         this.titleEl,
-        h('div', { class: 'meta' }, this.platformEl, this.placeButton, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
+        h('div', { class: 'meta' }, this.platformEl, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
         this.siteHint,
         this.playersHint,
         this.menu,

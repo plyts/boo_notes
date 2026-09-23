@@ -2,93 +2,134 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Page } from '@playwright/test';
 import { WebSocket } from 'ws';
-import { expect, makePdf, makeWav, test } from './fixtures';
+import { editor, expect, makePdf, makeWav, openNote, settled, test } from './fixtures';
 
 const OUT = fileURLToPath(new URL('../../../docs/screenshots/', import.meta.url));
 
 test.skip(!process.env.SCREENSHOTS, 'SCREENSHOTS=1 pour régénérer les captures');
 
-const clearToasts = (page: import('@playwright/test').Page) =>
-  page.evaluate(() => document.querySelectorAll('.toast').forEach((t) => t.remove()));
+const clearToasts = (page: Page) => page.evaluate(() => document.querySelectorAll('.toast').forEach((t) => t.remove()));
 
-test('bibliothèque et lecteur PDF', async ({ ctx }) => {
-  const pdf = join(ctx.dir, 'Probabilités — Chapitre 3.pdf');
+async function shot(page: Page, name: string): Promise<void> {
+  await page.mouse.move(640, 5);
+  await page.waitForTimeout(700);
+  await clearToasts(page);
+  await page.screenshot({ path: `${OUT}${name}.png` });
+}
+
+test('le second cerveau : accueil, cours, note, carte mentale, révisions', async ({ ctx }) => {
+  test.setTimeout(180_000);
+  const pdf = join(ctx.dir, 'Électrocinétique — Chapitre 2.pdf');
   await writeFile(
     pdf,
     makePdf([
-      ['Chapitre 3 : Variables aleatoires', 'Definition', 'Une variable aleatoire X est une application mesurable.', 'Esperance : E[X] = somme des x P(X = x).'],
-      ['Loi binomiale', 'X suit B(n, p) si X compte les succes de n epreuves.', 'Esperance np, variance np(1 - p).'],
-      ['Loi de Poisson', 'P(X = k) = exp(-l) l^k / k!', 'Approximation de B(n, p) quand n est grand.'],
+      ['Chapitre 2 : La loi d Ohm', 'Definition', 'La tension aux bornes d un resistor est proportionnelle au courant.', 'U = R I'],
+      ['Association de resistances', 'En serie : R = R1 + R2', 'En parallele : 1/R = 1/R1 + 1/R2'],
+      ['Puissance', 'P = U I = R I^2'],
     ]),
   );
-  const wav = join(ctx.dir, 'Podcast — Histoire des sciences.wav');
-  await writeFile(wav, makeWav(30));
-  const { page } = await ctx.launch();
+  const wav = join(ctx.dir, 'Amphi 3 — enregistrement.wav');
+  await writeFile(wav, makeWav(40));
+  const { app, page } = await ctx.launch();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
   await page.evaluate(() => window.boo.settings.set({ theme: 'dark' }));
-  await page.evaluate(([a, b]) => window.boo.library.addFiles([a, b]), [pdf, wav]);
 
-  // Courses noted in the browser, with their progress.
+  // A small library: two courses, chapters, notes linked to each other, resources.
+  const ids = await page.evaluate(
+    async ([pdf, wav]) => {
+      const L = window.boo.library;
+      const phys = await L.createCourse({ title: 'Physique — Électricité', emoji: '⚡', hue: 45 });
+      const hist = await L.createCourse({ title: 'Histoire des sciences', emoji: '🏛️', hue: 262 });
+      const bio = await L.createCourse({ title: 'Biologie cellulaire', emoji: '🧬', hue: 152 });
+      const rc = await L.addChapter(phys.id, 'Circuits RC');
+      let snap = await L.snapshot();
+      const first = (id: string) => snap.courses.find((c) => c.id === id)!.chapters[0].id;
+      await L.updateChapter(phys.id, first(phys.id), { title: 'La loi d’Ohm' });
+      await L.updateChapter(hist.id, first(hist.id), { title: 'La révolution industrielle' });
+      await L.updateChapter(bio.id, first(bio.id), { title: 'La membrane' });
+      const ohm = { courseId: phys.id, chapterId: first(phys.id) };
+      const { notes } = await L.importFiles([pdf], ohm);
+      const audio = (await L.importFiles([wav], ohm)).notes[0];
+      await L.linkResource(notes[0].id, audio.resources[0]);
+      await L.saveNote(
+        notes[0].id,
+        '# La loi d’Ohm\n\n[p. 1] U = R × I :: tension, résistance, intensité\n[p. 1] La ==résistance== se mesure en ohms (Ω)\n' +
+          `[00:12](res:${audio.resources[0]}) Exemple au tableau : 2 résistances en série\n[p. 2] En parallèle, les inverses s’ajoutent\n\nVoir [[Condensateur]] et [[Énergie électrique]].\n`,
+      );
+      const cond = await L.createNote({ title: 'Condensateur', placement: { courseId: phys.id, chapterId: rc.id }, body: 'q = C × U :: charge d’un condensateur\nτ = R × C :: constante de temps\n[[Électrocinétique — Chapitre 2]]' });
+      const energy = await L.createNote({ title: 'Énergie électrique', placement: ohm, body: 'E = P × t :: énergie\n[[Machine à vapeur]]' });
+      await L.createNote({ title: 'Machine à vapeur', placement: { courseId: hist.id, chapterId: first(hist.id) }, body: '==1769== : brevet de James Watt\n[[Énergie électrique]]' });
+      await L.createNote({ title: 'Potentiel de membrane', placement: { courseId: bio.id, chapterId: first(bio.id) }, body: 'Pompe Na/K :: 3 Na+ sortent, 2 K+ entrent\n[[Électrocinétique — Chapitre 2]]' });
+      await L.createNote({ title: 'Idées en vrac', body: '[[Condensateur]] et la photo du tableau' });
+      for (const id of [notes[0].id, cond.id, energy.id]) await L.review(id, 'start');
+      await L.setProgress(notes[0].resources[0], 2, 3);
+      snap = await L.snapshot();
+      return { pdfNote: notes[0].id, phys: phys.id };
+    },
+    [pdf, wav],
+  );
+
+  // Browser notes, filed from the extension.
   const ws = new WebSocket(`ws://127.0.0.1:${ctx.port}`, { origin: 'chrome-extension://abcdefghijklmnop' });
   await new Promise((r) => ws.once('open', r));
   ws.send(JSON.stringify({ type: 'hello', protocol: 1, token: 'TEST-TOKN-ABCD-EFGH' }));
-  const courses = [
-    ['youtube:abcdefghijk', 'youtube', 'video', 'React — Les hooks en profondeur', 'https://www.youtube.com/watch?v=abcdefghijk', 1260, 2700],
-    ['udemy:ml/42', 'udemy', 'video', 'Machine Learning — Régression linéaire', 'https://www.udemy.com/course/ml/learn/lecture/42', 2400, 2520],
-    ['notion:0123456789abcdef0123456789abcdef', 'notion', 'video', 'Cours d’anglais — Semaine 4', 'https://www.notion.so/0123456789abcdef0123456789abcdef', 300, 1500],
-  ] as const;
-  for (const [id, platform, kind, title, url, pos, dur] of courses) {
-    ws.send(
-      JSON.stringify({
-        type: 'note.upsert',
-        note: { id, platform, kind, url, title, markdown: '[00:05] Intro\n[02:10] Idée clé\n[05:42] Exemple', createdAt: 1, updatedAt: Date.now(), rev: 1 },
-      }),
-    );
-    ws.send(JSON.stringify({ type: 'media.progress', noteId: id, position: pos, duration: dur }));
-  }
-  ws.send(JSON.stringify({ type: 'player.active', player: { noteId: courses[0][0], title: courses[0][3], url: courses[0][4] } }));
-  await expect(page.locator('.row')).toHaveCount(5);
+  ws.send(
+    JSON.stringify({
+      type: 'note.upsert',
+      note: {
+        id: 'youtube:abcdefghijk',
+        platform: 'youtube',
+        kind: 'video',
+        url: 'https://www.youtube.com/watch?v=abcdefghijk',
+        title: 'Loi d’Ohm — expérience en vidéo',
+        markdown: '[00:05] Montage\n[02:10] Mesures\n[05:42] [[Électrocinétique — Chapitre 2]]',
+        createdAt: 1,
+        updatedAt: Date.now(),
+        rev: 1,
+        course: 'Physique — Électricité',
+        chapter: 'La loi d’Ohm',
+        placedAt: Date.now(),
+      },
+    }),
+  );
+  ws.send(JSON.stringify({ type: 'media.progress', noteId: 'youtube:abcdefghijk', position: 610, duration: 960 }));
+  await page.waitForTimeout(800);
 
-  // The PDF: read to page 2, a few notes, a highlight.
-  await page.locator('.row-main', { hasText: 'Probabilités' }).click();
+  await page.locator('.nav-item', { hasText: 'Accueil' }).click();
+  await settled(page);
+  await shot(page, 'desktop-today');
+
+  await page.locator('.tree-item', { hasText: 'Physique' }).first().click();
+  await settled(page);
+  await shot(page, 'desktop-course');
+
+  await openNote(page, 'Électrocinétique — Chapitre 2');
   await expect(page.locator('.pdf-page[data-page="1"].rendered')).toBeVisible();
-  await page.locator('.notes-editor .cm-content').click();
-  await page.keyboard.type('# Variables aléatoires');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('Une v.a. est une **application mesurable**');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('Espérance = moyenne pondérée par les probabilités');
-  const span = page.locator('.pdf-page[data-page="1"] .textLayer span', { hasText: 'Une variable aleatoire' });
-  await span.selectText();
-  await page.keyboard.press('Alt+Shift+H');
-  await span.selectText();
-  await page.keyboard.press('Alt+Shift+Q');
-  await page.locator('.pdf-scroller').click({ position: { x: 20, y: 400 } });
-  await expect(page.locator('.save-state')).toHaveText('Enregistré');
-  await page.waitForTimeout(400);
-  await clearToasts(page);
-  await page.screenshot({ path: `${OUT}desktop-pdf.png` });
+  await editor(page).click();
+  await page.keyboard.press('Control+End');
+  await page.locator('.pdf-scroller').click({ position: { x: 20, y: 300 } });
+  await shot(page, 'desktop-note');
 
-  await page.keyboard.press('Escape');
-  await page.locator('.nav-item[data-key="all"]').click();
-  await page.mouse.move(700, 20);
-  await page.waitForTimeout(400);
-  await clearToasts(page);
-  await page.screenshot({ path: `${OUT}desktop-library.png` });
+  await page.locator('.nav-item', { hasText: 'Carte mentale' }).click();
+  await settled(page);
+  await page.waitForTimeout(2500);
+  await shot(page, 'desktop-graph');
+  await page.locator('.segment', { hasText: 'Carte mentale' }).click();
+  await page.waitForTimeout(1500);
+  await page.locator('.react-flow__node', { hasText: 'Condensateur' }).first().click();
+  await shot(page, 'desktop-mindmap');
 
   await page.evaluate(() => window.boo.settings.set({ theme: 'light' }));
-  await page.locator('.row-main', { hasText: 'Podcast' }).click();
-  await page.evaluate(async () => {
-    const a = document.querySelector('audio')!;
-    const seeked = new Promise((r) => a.addEventListener('seeked', r, { once: true }));
-    a.currentTime = 12;
-    await seeked;
-  });
-  await page.locator('.notes-editor .cm-content').click();
-  await page.keyboard.type('Galilée et la méthode expérimentale');
-  await page.locator('.media-stage').click({ position: { x: 10, y: 10 } });
-  await page.waitForTimeout(700);
-  await clearToasts(page);
-  await page.screenshot({ path: `${OUT}desktop-audio.png` });
+  await page.locator('.nav-item', { hasText: 'À réviser' }).click();
+  await settled(page);
+  await page.getByRole('button', { name: /Réviser \(/ }).click();
+  await page.keyboard.press('Space');
+  await shot(page, 'desktop-review');
+
+  await page.keyboard.press('Control+Shift+E');
+  await shot(page, 'desktop-export');
   ws.close();
+  void ids;
 });

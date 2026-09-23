@@ -181,7 +181,11 @@ export function App() {
     void window.boo.status().then(s.setStatus);
     const offs = [
       window.boo.on('library', () => void useApp.getState().refresh()),
-      window.boo.on('status', (st) => useApp.getState().setStatus(st)),
+      window.boo.on('status', (st) => {
+        useApp.getState().setStatus(st);
+        // Settings may change elsewhere (tray, another window): theme and Notion follow.
+        void useApp.getState().loadSettings();
+      }),
       window.boo.on('open-note', (id) => {
         void useApp
           .getState()

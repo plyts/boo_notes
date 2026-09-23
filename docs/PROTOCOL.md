@@ -33,7 +33,7 @@ alarme par minute tant que des notes attendent).
 | type | Champs | Réponse attendue |
 | --- | --- | --- |
 | `asset.put` | `path` (`assets/…`), `noteId`, `mime`, `width`, `height`, `time` (s), `data` (base64) | `asset.ack { path }` |
-| `note.upsert` | `note` (`id`, `platform`, `kind`, `url`, `title`, `markdown`, `createdAt`, `updatedAt`, `rev`, `notion?`), `portableMarkdown` | `ack { noteId, rev }` |
+| `note.upsert` | `note` (`id`, `platform`, `kind`, `url`, `title`, `markdown`, `createdAt`, `updatedAt`, `rev`, `notion?`, `course?`, `chapter?`, `placedAt?`), `portableMarkdown` | `ack { noteId, rev }` |
 | `media.progress` | `noteId`, `kind`, `title`, `url`, `platform`, `position` (s), `duration` (s), `updatedAt` | — |
 | `export` | `requestId`, `noteId`, `target`: `"local"` \| `"notion"` | `export.result { requestId, ok, message }` |
 | `player.active` | `player`: `{ noteId, title, url }` ou `null` | — |
@@ -50,6 +50,11 @@ alarme par minute tant que des notes attendent).
   syncedRev }`. L’application garde la plus récente (`syncedAt`) : les deux côtés mettent à jour la
   même page au lieu d’en créer une seconde. Une note dont seule la correspondance a changé est
   renvoyée avec le même `rev`.
+- `note.course` / `note.chapter` (facultatifs) : titres du **cours** et du **chapitre** choisis dans
+  le panneau de l’extension ; `placedAt` : date de ce classement (ms). L’application range la note
+  dans ce cours › chapitre (créés s’ils n’existent pas, titres comparés sans accents ni casse) si
+  ce classement est plus récent que le sien. `placedAt` sans `course` : la note a été **retirée** de
+  son cours dans le navigateur (elle devient « non classée »).
 - Pour une page lue (`kind: "page"`), `media.progress` porte le **pourcentage lu** : `position`
   0–100, `duration` 100 (point le plus loin atteint).
 - `media.progress` n’est envoyé que pour un média **qui a une note** : à la pause, à la fin, après
@@ -76,6 +81,7 @@ alarme par minute tant que des notes attendent).
 | `notion.config { config, connected }` | Envoyé après `welcome` et à chaque changement. `connected` : l’application écrit elle-même dans Notion (l’extension lui laisse alors cette tâche). `config` : connexion partagée `{ token, databaseId, databaseUrl, parentId, workspace }` pour que l’extension écrive dans Notion quand l’application est fermée, ou `null` (partage désactivé ou Notion déconnecté). Sans ce message (application plus ancienne), l’extension considère que l’application gère Notion. |
 | `notion.link { noteId, link }` | Correspondance Notion d’une note de l’extension, après une synchronisation par l’application (même forme que `note.notion`). |
 | `library.titles { titles }` | Titres de la bibliothèque (fiches, PDF, textes…), proposés par l’extension après `[[` ; renvoyé quand ils changent. |
+| `library.courses { courses }` | Cours de la bibliothèque et leurs chapitres, `[{ title, emoji, chapters: [titre…] }]`, pour ranger une note depuis le panneau de l’extension ; envoyé après `welcome` et quand ils changent. |
 | `error { code, message, requestId? }` | `unauthorized` : jeton refusé (affiché dans le badge). Avec `requestId` : échec d’un export. |
 
 ## Exemple de session
@@ -90,6 +96,9 @@ alarme par minute tant que des notes attendent).
 → media.progress  youtube:dQw4w9WgXcQ 255 / 612 s
 ← notion.config { connected: true, config: { token: "…", databaseId: "…" } }
 ← library.titles { titles: ["useEffect", "Probabilités — Chapitre 3"] }
+← library.courses { courses: [{ title: "React", emoji: "⚛️", chapters: ["Hooks", "Contexte"] }] }
+→ note.upsert  youtube:dQw4w9WgXcQ rev 8 { course: "React", chapter: "Hooks", placedAt: 1727… }
+← ack rev 8
 → export  { target: "notion", requestId: "exp-…" }
 ← export.result { ok: true, message: "Envoyé vers Notion" }
 ← notion.link  youtube:dQw4w9WgXcQ { pageId: "…", syncedRev: 7 }

@@ -38,7 +38,10 @@ export function ExportSheet() {
   const inbox = useApp((s) => s.snap.inbox.length);
   const route = useApp((s) => s.route);
   const [formats, setFormats] = useState<string[]>(['sheets', 'cards']);
-  const [picked, setPicked] = useState<string[]>([]);
+  // Courses left out: every course (even one created meanwhile) is exported unless unticked.
+  const [excluded, setExcluded] = useState<string[]>([]);
+  const picked = courses.filter((c) => !excluded.includes(c.id)).map((c) => c.id);
+  const setPicked = (ids: string[]) => setExcluded(courses.map((c) => c.id).filter((id) => !ids.includes(id)));
   const [unfiled, setUnfiled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ExportResult | null>(null);
@@ -47,7 +50,7 @@ export function ExportSheet() {
     if (!open) return;
     setResult(null);
     // From a course, that course is proposed; otherwise all of them.
-    setPicked(route.name === 'course' ? [route.id] : courses.map((c) => c.id));
+    setExcluded(route.name === 'course' ? courses.map((c) => c.id).filter((id) => id !== route.id) : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

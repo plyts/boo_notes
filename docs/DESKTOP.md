@@ -1,15 +1,25 @@
 # Boo Notes Desktop (Windows)
 
-L’application Desktop réunit tout ce que vous étudiez : les cours pris en notes dans le navigateur
-(YouTube, Udemy, Coursera, pages et vidéos Notion, articles, podcasts…), vos **fichiers locaux** —
-PDF, textes, images (graphes, schémas), audio, vidéo — et vos **fiches de révision**, reliées entre
-elles, avec le suivi de progression, la révision espacée et la synchronisation **Notion**.
+L’application Desktop est votre **second cerveau d’étudiant** : des **cours** découpés en
+**chapitres**, des **notes** dans chaque chapitre, et chaque note reliée à **un ou plusieurs
+supports** — vidéos, audios, flux en direct, PDF, images, textes, pages web — ainsi qu’aux autres
+notes par des `[[liens]]`. La **carte mentale** dessine le tout ; les **révisions** et l’**export**
+(fiches PDF, cartes Anki, données pour QCM) en font des outils de révision ; **Notion** en garde une
+copie.
 
-![Bibliothèque](screenshots/desktop-library.png)
+![Accueil](screenshots/desktop-today.png)
 
-| Lecteur PDF : notes par page, surlignage, citation | Audio local : notes horodatées |
+| Un cours, ses chapitres et ses notes | Une note, deux supports (PDF + enregistrement) |
 | --- | --- |
-| ![PDF](screenshots/desktop-pdf.png) | ![Audio](screenshots/desktop-audio.png) |
+| ![Cours](screenshots/desktop-course.png) | ![Note](screenshots/desktop-note.png) |
+
+| Carte mentale — réseau groupé par cours | Carte mentale — vue arborescente |
+| --- | --- |
+| ![Réseau](screenshots/desktop-graph.png) | ![Carte mentale](screenshots/desktop-mindmap.png) |
+
+| Révision : cartes à retourner | Export : fiches, Anki, Markdown, JSON |
+| --- | --- |
+| ![Révision](screenshots/desktop-review.png) | ![Export](screenshots/desktop-export.png) |
 
 ## Installer
 
@@ -35,96 +45,101 @@ Windows demande Windows (ou Wine).
 
 ## Premier lancement
 
-1. L’écran d’accueil affiche le **jeton d’appairage** (ex. `K7QX-M2PA-9TRZ-HW4C`).
-2. Dans l’extension : **Réglages › App Desktop**, adresse `ws://localhost:43117`, collez le jeton.
-   Le point vert « Extension connectée » apparaît dans la barre latérale de l’application et le
-   badge du panneau de l’extension passe au vert.
-3. Glissez un PDF, un texte, une image, un audio ou une vidéo dans la fenêtre (ou `Ctrl+O`), ou
-   créez une fiche (`Ctrl+N`).
-4. Facultatif : **Réglages › Notion** ([guide](NOTION.md)).
+Une présentation en quatre écrans explique le modèle (cours › chapitres › notes ↔ supports), affiche
+le **jeton d’appairage** de l’extension (ex. `K7QX-M2PA-9TRZ-HW4C`, adresse `ws://localhost:43117`)
+et propose de créer le premier cours. Dans l’extension : **Réglages › App Desktop**, collez le jeton ;
+« Extension connectée » s’allume en bas de la barre latérale. Notion se connecte dans **Réglages ›
+Notion** ([guide](NOTION.md)).
 
-L’application reste dans la **zone de notification** quand on ferme la fenêtre (réglable) afin que
+L’application reste dans la **zone de notification** quand on ferme la fenêtre (réglable) pour que
 l’extension puisse toujours lui envoyer les notes ; « Lancer au démarrage de Windows » la démarre
 discrètement à l’ouverture de session.
 
-## Bibliothèque
+## Cours › chapitres › notes ↔ supports
 
-- **Reprendre** : les cours en cours, les plus récents d’abord, avec leur position.
-- **Tous les cours** : type, plateforme, nombre de notes, progression, statut, état Notion.
-- Filtres latéraux (À réviser, En cours, Terminés, Fiches, Vidéos, Audio, PDF, Images, Textes,
-  Pages web), recherche `Ctrl+F`, **Nouvelle fiche** (`Ctrl+N`).
-- Menu « ⋯ » : envoyer / ouvrir dans Notion, afficher la note `.md`, marquer comme terminé,
-  retirer de la bibliothèque.
-- En bas de la barre latérale : état de l’extension (et le cours en lecture dans le navigateur),
-  état de Notion.
+| Élément | Ce que c’est | Où |
+| --- | --- | --- |
+| **Cours** | Un sujet : icône, couleur, un ou plusieurs chapitres, progression | Barre latérale (arbre), page du cours |
+| **Chapitre** | Une partie ordonnée du cours ; contient des notes, dans l’ordre | Page du cours (glisser-déposer pour réordonner) |
+| **Note** | Du Markdown : texte, repères, citations, cartes, `[[liens]]` | Un fichier `.md` dans le dossier de notes |
+| **Support** | Vidéo, audio, flux, PDF, image, texte, page web — local, par adresse ou vu dans le navigateur | **Supports** (bibliothèque) ; partageable entre plusieurs notes |
 
-Le **statut** est déduit de la progression (≥ 95 % d’une vidéo, dernière page d’un PDF = Terminé),
-ou choisi à la main dans l’en-tête du cours.
+- **Créer** : « Nouveau cours » (barre latérale, accueil), « Ajouter un chapitre », « Note » dans un
+  chapitre, `Ctrl+N` (dans le chapitre ouvert), fichiers déposés dans la fenêtre ou `Ctrl+O` (une
+  note par fichier, rangée dans le cours ouvert), `Ctrl+Shift+O` pour un flux par son adresse.
+- **Ranger** : glisser une note sur un cours ou un chapitre de la barre latérale, la réordonner dans
+  son chapitre, ou choisir cours et chapitre dans l’**inspecteur** de la note. « Non classées »
+  rassemble les notes sans cours. Les notes prises dans le navigateur arrivent dans le cours choisi
+  depuis le panneau de l’extension (le plus récent des deux classements l’emporte).
+- **Plusieurs supports par note** : « Lier un support » (inspecteur, ou `+` au-dessus du lecteur)
+  propose des fichiers, une adresse ou un support déjà dans la bibliothèque. Chaque support a son
+  onglet et son numéro (pastille colorée). Les repères d’une note ciblent leur support :
+  `[04:15]` renvoie au support principal, `[04:15](res:…)` à un autre — les puces portent alors le
+  numéro du support, et un clic change d’onglet et va au bon endroit. Changer le support principal
+  (menu du support › « Définir comme principal ») réécrit les repères pour qu’ils visent toujours le
+  même endroit.
 
-## Étudier un PDF
+## Étudier : un support, ses gestes
 
-| Action | Geste |
+| Support | Repère | Gestes |
+| --- | --- | --- |
+| **PDF** | `[p. 12]` | Chaque ligne commence par la page lue ; surligner (4 couleurs, `Alt+Shift+H`), citer (`Alt+Shift+Q`), pastilles de notes dans la marge, zoom `Ctrl` + molette / `Ctrl 0` |
+| **Vidéo / audio** | `[04:15]` | Chaque ligne horodatée ; `Alt+Shift+T` horodate, `Alt+Shift+S` capture l’image, `Alt+Shift+Espace` lecture / pause, `Alt+←` recule de 5 s, vitesse 0,75–2×, pause pendant la frappe, reprise là où vous étiez |
+| **Flux par adresse** | `[04:15]` | Vidéo ou audio direct (`.mp4`, `.webm`, `.mp3`, `.wav`…), **HLS** (`.m3u8`, direct), radio / podcast (Icecast…), PDF ou image en ligne : lus dans l’app via le protocole interne (reprise de lecture, recherche dans le flux) |
+| **Texte** (.txt, .md) | `[§ 4]` | Paragraphes numérotés, clic dans la marge = note sur le paragraphe, citations |
+| **Image** (graphe, schéma) | `[pin 3]` | Double-clic ou `Alt+Shift+T` puis clic : repère numéroté ; zoom, déplacement ; clic repère ↔ note |
+| **Page d’une plateforme** (YouTube, Udemy, Coursera…) | — | « Reprendre à 21:00 » / « Ouvrir » dans le navigateur, où l’extension prend les notes |
+
+Le **temps d’étude** (fenêtre au premier plan, activité récente) et la **progression** (≥ 95 % d’un
+média, dernière page d’un PDF = Terminé) sont enregistrés ; le statut se force dans l’inspecteur.
+
+## Liens, carte mentale et second cerveau
+
+- Dans toute note, `[[` propose les titres (sans tenir compte des accents) ; `[[Titre]]` : survol =
+  aperçu, clic = ouvrir (créée si elle n’existe pas). L’inspecteur liste **Liens** et **Liée depuis**.
+- **Carte mentale** (`Ctrl+Shift+G`, ou depuis un cours / une note) :
+  - **Réseau** : cours, chapitres, notes et supports ; liens de structure, notes → supports et
+    références `[[…]]` (pointillés). Les nœuds sont **regroupés par cours** (ou par type de support,
+    ou sans groupe) dans des bulles colorées que l’on **déplace d’un bloc** par leur étiquette.
+    Un cours ou un chapitre se **replie** (bouton de la bulle ou du nœud) : ses liens remontent au
+    nœud replié, avec leur nombre — la vue d’ensemble des relations *entre cours*.
+  - **Carte mentale** : « Mon second cerveau » au centre, cours → chapitres → notes → supports
+    répartis à gauche et à droite ; chaque branche se replie ; déplacer un nœud emporte sa branche.
+  - Recherche (les résultats restent vifs, le reste s’estompe), survol / sélection = voisinage mis
+    en avant, fiche du nœud (liens, « Ouvrir », « Centrer », « Replier », « Épingler »), filtres
+    (chapitres, notes, supports, familles de liens), mini-carte, légende. Double-clic ou `Entrée` =
+    ouvrir ; `Échap` = désélectionner. Les nœuds déplacés restent épinglés (« Réorganiser » libère tout).
+
+## Réviser
+
+- **Cartes** écrites dans les notes : `Question :: Réponse`, une ligne suivie de `?` puis la réponse,
+  un titre `## Question ?` suivi de la réponse, ou `==mot==` pour un texte à trous. L’inspecteur les
+  montre ; l’export les emporte.
+- **Révision espacée** : « Ajouter aux révisions » (inspecteur, bouton « Réviser » de la note).
+  **À réviser** lance la session du jour : chaque note montre ses cartes (`Espace` = retourner /
+  suivante), ou son texte à relire, puis **À revoir** (demain), **Je sais** (palier suivant),
+  **Facile** (deux paliers) — touches `1`, `2`, `3`. Paliers : 1, 3, 7, 14, 30, 60, 120 jours ;
+  trois réussites d’affilée = Terminé. « S’entraîner quand même » repasse les notes à venir.
+
+## Exporter
+
+`Ctrl+Shift+E` (ou menu d’un cours › « Exporter ce cours ») : choisissez les **cours** et les
+**formats**, puis un dossier.
+
+| Format | Contenu |
 | --- | --- |
-| Note sur la page courante | Écrire dans le panneau : chaque nouvelle ligne commence par `[p. 12]` ; `Alt+Shift+T` ou « Page » ajoute une ligne |
-| Aller à une page | Clic sur une puce `p. 12` des notes, champ de page, flèches de la barre d’outils |
-| Surligner | Sélectionner du texte › pastille de couleur, ou `Alt+Shift+H` (jaune) |
-| Citer | Sélection › « Citer », ou `Alt+Shift+Q` : `> texte [p. 12]` ajouté en fin de note |
-| Retirer un surlignage | Clic dessus › « Retirer » |
-| Zoom | `Ctrl` + molette, `Ctrl +`, `Ctrl −`, `Ctrl 0` (ajuster à la largeur) |
-
-Le PDF rouvre à la dernière page lue ; la progression (page la plus loin atteinte / nombre de
-pages) et le **temps d’étude** (fenêtre au premier plan et activité récente) sont enregistrés.
-
-## Étudier un texte
-
-Fichiers `.txt` et `.md` : chaque paragraphe est numéroté dans la marge. Une note sur le paragraphe
-lu commence par `[§ 4]` (`Alt+Shift+T` ou « Paragraphe ») ; clic sur une puce `§ 4` = retour au
-paragraphe, qui porte en retour un repère « notes » dans la marge. Sélection › **Citer**
-(`Alt+Shift+Q`). La progression suit le paragraphe le plus loin atteint.
-
-## Étudier une image (graphe, schéma, tableau blanc)
-
-PNG, JPEG, WebP, GIF, SVG, BMP, AVIF. Zoom à la molette, déplacement à la souris, « Ajuster ».
-**Repère** (`Alt+Shift+T`, ou double-clic sur l’image) pose un repère numéroté ① sur le détail
-étudié ; la note qui suit commence par `[pin 1]`. Clic sur le repère = ses notes ; clic sur la
-puce `◉ 1` d’une note = le repère, centré et animé. Les repères se déplacent en les faisant
-glisser ; clic droit › Retirer. Dans Notion, l’image est téléversée en tête de la page.
-
-## Fiches de révision et liens
-
-- **Nouvelle fiche** (`Ctrl+N`) : une note libre, sans support (définition, synthèse, formule…).
-- Dans **toute** note, `[[` propose les titres de la bibliothèque (sans tenir compte des accents) ;
-  `[[Titre]]` devient un lien : survol = aperçu, clic = ouvrir (une fiche qui n’existe pas encore
-  est créée). Un fil d’Ariane permet de revenir en arrière.
-- Le panneau d’une fiche liste ses **liens** et les notes qui la citent (**« Liée depuis »**) ; les
-  mêmes relations apparaissent dans Notion (colonnes « Liens » / « Liée depuis », mentions).
-- **Révision espacée** : « Ajouter aux révisions » ; la fiche revient dans **À réviser** au bon
-  moment (1, 3, 7, 14, 30, 60, 120 jours). À chaque révision (`Alt+Shift+R`) : « À revoir »
-  (demain), « Je sais » (palier suivant), « Facile » (deux paliers). Trois révisions réussies d’affilée =
-  Terminé. La date de la prochaine révision est aussi dans Notion.
-
-## Étudier un audio ou une vidéo locale
-
-Formats : MP3, M4A, AAC, WAV, OGG, Opus, FLAC, WebM audio ; MP4, M4V, WebM, MKV, MOV, OGV
-(selon les codecs pris en charge par Chromium : H.264, VP8/VP9, AV1, AAC, MP3, Opus…).
-
-Mêmes gestes que l’extension : chaque ligne est horodatée `[MM:SS]`, `Alt+Shift+T` horodate,
-`Alt+Shift+S` capture l’image (vidéo), `Alt+Shift+Espace` lecture / pause, `Alt+←` recule de
-5 s ; clic sur un horodatage = saut dans le média. La barre de lecture montre un repère par note,
-la vitesse se règle (0,75× à 2×), la lecture est mise en pause pendant la frappe et reprend
-ensuite, et le média reprend là où vous l’aviez laissé.
+| **Fiches de révision** | `Fiches de révision.pdf` (+ `.html`) : cours › chapitres › notes, repères lisibles, captures, cartes en fin de fiche — prêt à imprimer |
+| **Cartes Anki / Quizlet** | `Cartes - questions (Anki).txt` et `Cartes - textes à trous (Anki).txt` : un paquet par cours (`Boo Notes::Cours`), étiquettes cours / chapitre / note, à importer tel quel dans Anki |
+| **Dossiers Markdown** | Un dossier par cours et chapitre, une note par fichier (front matter : cours, chapitre, supports), captures, `README.md` sommaire |
+| **Données JSON (QCM)** | `boo-notes.json` : cours, chapitres, notes (texte, liens, repères), supports, cartes — la base pour générer des QCM |
 
 ## Cours pris en notes dans le navigateur
 
-Les notes de l’extension arrivent automatiquement (dès que l’extension est connectée) avec la
-progression de la vidéo ou de la lecture. Elles se lisent dans l’application (les horodatages
-rouvrent la vidéo au bon moment, les citations `↗` rouvrent l’article sur le passage) et se
-modifient dans l’extension. « Reprendre à 21:00 » / « Rouvrir la page » ramène au cours.
-
-L’application envoie à l’extension les **titres** de sa bibliothèque (complétion des `[[liens]]`
-dans le navigateur) ; un clic sur un `[[lien]]` dans le navigateur affiche la note dans
-l’application. Elle partage aussi sa **connexion Notion** (réglable) pour que l’extension écrive
-dans Notion quand l’application est fermée ([guide](NOTION.md)).
+Les notes de l’extension arrivent automatiquement avec la progression et le **cours › chapitre**
+choisi dans le panneau (cours et chapitres créés au besoin). Elles se lisent dans l’application
+(horodatages et citations `↗` rouvrent le navigateur au bon endroit) et se modifient dans
+l’extension. L’application envoie à l’extension ses **titres** (complétion `[[`), ses **cours et
+chapitres** (pour ranger depuis le navigateur) et, si vous le souhaitez, sa **connexion Notion**.
 
 ## Dossier de notes
 
@@ -132,15 +147,34 @@ Par défaut `Documents\Boo Notes` (modifiable ; l’extension renvoie alors tout
 
 ```
 Boo Notes/
-  React — Les hooks.md            une note par cours : front matter YAML + Markdown
-  Probabilités — Chapitre 3.md
-  assets/                          captures (extension et vidéos locales)
-  useEffect.md                     une fiche de révision
-  .boo/library.json                progression, surlignages, repères, révisions, liens, correspondance Notion
+  Électrocinétique — Chapitre 2.md   une note : front matter YAML + Markdown
+  Condensateur.md
+  assets/                             captures (extension, vidéos, flux)
+  .boo/library.json                   cours, chapitres, notes, supports, progression, surlignages,
+                                      repères, révisions, correspondance Notion (format v2 ; v1 migré)
 ```
 
-Les fichiers `.md` s’ouvrent dans n’importe quel éditeur (Obsidian, VS Code…). Les notes de
-l’extension y sont écrites avec des horodatages cliquables `[04:15](URL#t=255)`.
+Les fichiers `.md` s’ouvrent dans n’importe quel éditeur (Obsidian, VS Code…).
+
+## Interface : frameworks et design
+
+- **React 19** et **React Aria Components** (Adobe) : chaque contrôle — menus, listes, arbre des
+  cours avec glisser-déposer, onglets, sélecteurs, feuilles modales, infobulles — a le clavier, le
+  focus et l’accessibilité (lecteurs d’écran) d’un contrôle natif. **Motion** pour les animations à
+  ressort (réduites avec « Réduire les animations »), **Zustand** pour l’état, **React Flow** +
+  **d3-force** / **d3-hierarchy** pour la carte mentale. Le lecteur PDF (pdf.js), l’éditeur
+  (CodeMirror 6, partagé avec l’extension) et les lecteurs média / image / texte restent des
+  composants impératifs éprouvés, montés dans React (« îlots »).
+- **Liquid Glass** (Apple, 2025) : le contenu occupe la fenêtre ; barre latérale, barres d’outils,
+  menus et feuilles flottent sur du verre translucide (flou + saturation, liseré spéculaire), sur le
+  matériau **Mica** de Windows 11 (ou la *vibrancy* de macOS) ; rayons concentriques, une seule
+  teinte d’action, couleurs système pour le sens. Opaque avec « Réduire la transparence »,
+  contrasté avec « Augmenter le contraste ».
+- **Typographie** : **SF Pro** (Text / Display, tailles optiques, et SF Pro Rounded pour les
+  compteurs) sur les appareils Apple, où c’est la police du système. Sa licence interdit de
+  l’embarquer dans une application pour Windows : l’app y utilise **Inter Variable** (dessinée dans
+  le même esprit, axe de taille optique), incluse, puis Segoe UI Variable. SF Compact, pensée pour
+  les petits écrans de l’Apple Watch, n’a pas sa place dans une application de bureau.
 
 ## Sécurité et vie privée
 
@@ -149,29 +183,31 @@ l’extension y sont écrites avec des horodatages cliquables `[04:15](URL#t=255
   jeton » déconnecte les navigateurs appairés).
 - Le secret Notion est chiffré avec le coffre du système (`safeStorage` : DPAPI sous Windows).
 - Interface isolée : `contextIsolation`, `sandbox`, pas de Node.js dans l’interface, API minimale
-  exposée par le script de préchargement, politique CSP stricte ; l’interface, les médias et les
-  captures sont servis par un protocole interne `boo://app/` qui n’expose que les fichiers de la
-  bibliothèque. Les liens s’ouvrent dans le navigateur, jamais dans l’application.
-- Aucune télémétrie. Seules connexions sortantes : Notion (si connecté) et les miniatures YouTube.
+  exposée par le script de préchargement, politique CSP stricte ; l’interface, les médias, les flux
+  ajoutés par adresse et les captures sont servis par un protocole interne `boo://app/` qui n’expose
+  que les fichiers et adresses de la bibliothèque. Les liens s’ouvrent dans le navigateur.
+- Aucune télémétrie. Connexions sortantes : Notion (si connecté), les flux que vous ajoutez, les
+  miniatures YouTube.
 
 ## Architecture
 
 ```
 desktop/src/
   core/          logique sans Electron (testée unitairement)
-    library.ts     dossier de notes, bibliothèque, progression, surlignages
+    library.ts     cours, chapitres, notes, supports ; dossier de notes ; migration v1 → v2
+    views.ts       instantané affiché (statuts, progression, cours) ; export.ts : fiches, Anki, Markdown, JSON
     server.ts      WebSocket de l’extension (protocole v1, docs/PROTOCOL.md)
-    notion/        client REST (débit, reprises, fichiers), Markdown → blocs, synchronisation
-    config.ts      réglages, jeton d’appairage, secret chiffré
-  main/          processus principal : fenêtre, zone de notification, IPC, protocole boo://
+    notion/        client REST, Markdown → blocs, synchronisation
+  main/          processus principal : fenêtre (Mica / vibrancy), zone de notification, IPC, protocole boo://
   preload/       pont typé window.boo (contextBridge)
-  renderer/      interface : bibliothèque, lecteurs PDF (pdf.js), texte, image, média, fiches, réglages
+  renderer/      interface React
+    shell/         App, barre latérale, palette de commandes, barre d’outils
+    views/         Accueil, notes, cours, note (+ inspecteur), supports, carte mentale (graph/), révisions, réglages, export
+    islands/       éditeur CodeMirror et lecteurs (PDF, média, image, texte) montés dans React
+    ui/            boutons, champs, menus, feuilles, toasts (React Aria + Liquid Glass)
+    styles/        app.css (+ composants, vues, graphe, lecteurs) sur src/tokens.css
   ipc.ts         contrat interface ↔ processus principal
 ```
-
-L’éditeur de notes (CodeMirror 6, aperçu Markdown, puces d’horodatage et de page) est **le même
-que celui de l’extension** (`src/panel/editor.ts`), ainsi que les jetons de design
-(`src/tokens.css`) et la logique Markdown / horodatage (`src/shared/`).
 
 ## Développement
 
@@ -181,11 +217,18 @@ npm ci
 npm start                    # build + lance l’application
 npm run watch                # rebuild continu (relancer l’app)
 npm run typecheck
-npm test                     # unitaires : bibliothèque, serveur (+ vrai client de l’extension), Markdown → Notion, synchro Notion (API simulée)
-npm run test:ui              # Playwright + Electron : PDF, audio, vidéo, texte, image, fiches, révisions, extension, Notion (sous Linux : xvfb-run -a npm run test:ui)
+npm test                     # unitaires : bibliothèque v2, graphe (regroupement, repli, carte), serveur, Markdown → Notion, synchro Notion
+npm run test:ui              # Playwright + Electron (sous Linux : xvfb-run -a npm run test:ui)
 SCREENSHOTS=1 npm run test:ui -- screenshots   # régénère docs/screenshots/desktop-*.png
 npm run icons                # régénère build/icon.ico et les icônes de la zone de notification
 ```
 
+Les tests d’interface couvrent : présentation et jeton, cours › chapitres (création, glisser-déposer,
+inspecteur), note à deux supports (repères qualifiés, pastilles), flux par adresse, PDF (pages,
+surlignage, citation), audio, vidéo (capture), texte, image (repères), fiches et `[[liens]]`,
+révision de cartes, carte mentale (groupes, repli, recherche, arborescence), export (PDF, Anki,
+JSON), notes de l’extension rangées dans leur cours, Notion (colonne Cours).
+
 Variables utiles : `BOO_USER_DATA` (dossier des réglages), `BOO_VAULT` (dossier de notes),
-`BOO_PORT` (port de l’extension), `NOTION_API_BASE` (API Notion simulée).
+`BOO_PORT` (port de l’extension), `BOO_EXPORT_DIR` (dossier d’export, sans boîte de dialogue),
+`NOTION_API_BASE` (API Notion simulée).

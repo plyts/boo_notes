@@ -200,7 +200,11 @@ button {
 }
 
 .stats {
+  min-width: 0;
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .save {
@@ -816,31 +820,31 @@ button {
   color: var(--warn);
 }
 
-/* Filing in a course › chapter of the library. */
+/* Filing in a course › chapter of the library: a breadcrumb above the title. */
 .place {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
-  min-width: 0;
-  max-width: 55%;
+  max-width: 100%;
   height: 22px;
-  padding: 0 9px 0 7px;
+  margin: 4px 0 0 -6px;
+  padding: 0 8px 0 6px;
   border: 0;
   border-radius: var(--radius-pill);
-  background: var(--glass-control, var(--surface-2));
-  color: var(--muted);
+  background: transparent;
+  color: var(--faint);
   font: 600 var(--text-xs) / 1 var(--font-sans);
   cursor: pointer;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
 
-.place:hover {
+.place:hover,
+.place:focus-visible {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
 .place[data-placed='true'] {
-  background: var(--accent-soft);
   color: var(--accent);
 }
 

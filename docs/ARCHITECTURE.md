@@ -7,7 +7,8 @@
 |  Onglet (YouTube, Udemy, Coursera, Notion, tout site activé)                     |
 |  +-------------------------------------------+                                   |
 |  | Content script (src/content)              |   runtime.sendMessage             |
-|  |  - MediaController : <video> / <audio>    | --------------------+             |
+|  |  - MediaController : page, shadow DOM,    | --------------------+             |
+|  |    iframes (agents), chronomètre          |                     |             |
 |  |  - PageReader : mode lecture (citations,  |                     |             |
 |  |    passages surlignés, % lu)              |                     |             |
 |  |  - Overlay (Shadow DOM) : HUD, toasts,    |                     v             |
@@ -16,6 +17,9 @@
 |  |  - Capture <canvas>                       |   | (src/background)           |  |
 |  |  - Raccourcis de secours dans la page     |   |  - chrome.commands         |  |
 |  +-------------------------------------------+   |  - routage lecteur actif   |  |
+|  | Iframes des lecteurs : frame.js (agent) --+-->|  - relais des iframes      |  |
+|  | Monde de la page : media-bridge.js        |   |    (port boo-notes-frame)  |  |
+|  +-------------------------------------------+   |                            |  |
 |        ^  port (chrome.tabs.connect)             |  - injection à la demande  |  |
 |        v                                         |  - NoteStore (storage)     |  |
 |  +-------------------------------------------+   |  - export / téléchargement |  |
@@ -58,10 +62,39 @@ et les jetons `src/tokens.css`.
 | Page Notion avec un bloc vidéo / audio | `notion.so` / `notion.site` (script déclaré), identifiant de page dans l’URL (`?p=` pour une page ouverte en aperçu) | `notion:<id de page>` |
 | Tout autre site (podcast, radio, plateforme de cours) | Injection **à la demande** : icône de l’extension ou `Alt+Shift+N` (`activeTab` + `scripting.executeScript`) ; « Toujours activer ici » demande la permission du site (`optional_host_permissions`) et enregistre un script de contenu dynamique | `web:<hôte><chemin>` (paramètres de suivi `utm_*`, `fbclid`… retirés) |
 
-`MediaController` choisit la plus grande `<video>` visible, sinon un `<audio>` (même caché) qui
-joue ou a une source ; une vidéo sans image (`videoWidth = 0`) est traitée comme un audio. Pour un
-audio, la capture est désactivée (message explicite) ; horodatage, auto-pause, saut arrière et
-progression fonctionnent à l’identique.
+`MediaController` choisit la plus grande `<video>` visible (celle qui joue d’abord), sinon un
+`<audio>` (même caché) qui joue ou a une source ; une vidéo sans image (`videoWidth = 0`) est
+traitée comme un audio. Pour un audio, la capture est désactivée (message explicite) ; horodatage,
+auto-pause, saut arrière et progression fonctionnent à l’identique.
+
+### Tout flux, toute plateforme
+
+Un lecteur peut cacher son média de quatre façons ; chacune a sa réponse
+(`src/content/media-scan.ts`, `player.ts`, `frame.ts`, `media-bridge.ts`) :
+
+| Où est le média | Comment Boo Notes le trouve et le pilote |
+| --- | --- |
+| Dans la page | `querySelectorAll('video, audio')` à chaque besoin (peu coûteux). |
+| Dans un **shadow DOM** (lecteurs en web components), ouvert ou **fermé** | Parcours `TreeWalker` au plus toutes les 0,9 s tant qu’aucun média n’est trouvé ; les racines fermées sont ouvertes par `chrome.dom.openOrClosedShadowRoot` (réservé aux scripts de contenu). Les événements média n’étant pas « composés », un écouteur est posé dans chaque racine rencontrée. |
+| **Hors page** (`new Audio()` jamais inséré : podcasts, radios, musique) | `media-bridge.js`, exécuté dans le monde JavaScript de la page (`world: MAIN`, `document_start`), enveloppe `HTMLMediaElement.prototype.play` : un média qui démarre hors du document est déplacé dans un `<boo-media-dock hidden>` — rien d’autre n’est touché, et un média ajouté au document continue de jouer. |
+| Dans une **iframe** d’un autre site (Vimeo, Kaltura, Panopto, Wistia, YouTube intégré…) | `frame.js` (agent sans interface, `all_frames`) trouve le média de l’iframe et ouvre un port `boo-notes-frame` vers le service worker, qui relaie son état (`frame:media` : lecture, position, cadre de l’image) au script de la page et lui transmet lecture / pause / saut / capture (`frame:command`). L’agent poste aussi un jeton à la page parente, qui retrouve ainsi l’élément `<iframe>` (`contentWindow === event.source`) pour dessiner le HUD et recadrer une capture de l’onglet. |
+
+Les iframes d’un site non autorisé ne peuvent pas recevoir l’agent : le script de la page repère
+celles qui ressemblent à un lecteur (hôtes connus, `allowfullscreen`, `allow="autoplay…"`) et le
+panneau propose **« Autoriser »** (permission facultative de l’hôte, demandée depuis le panneau —
+un geste de l’utilisateur est requis) ; l’agent est alors injecté (`scripting.executeScript` avec
+`allFrames`) et enregistré pour les visites suivantes (`registerContentScripts`, `allFrames`).
+Les sites « toujours actifs » reçoivent aussi le pont et l’agent.
+
+**Chronomètre.** Quand aucun script ne peut lire le flux (lecteur protégé dessiné dans un
+`<canvas>`, application native, cours en salle), le panneau propose un **chronomètre** : la source
+de temps devient une horloge démarrée à la main (`MediaSource = 'stopwatch'`) ; horodatages,
+chronologie et saut d’un horodatage (qui recale l’horloge) fonctionnent comme pour un média. La
+progression n’est alors pas enregistrée.
+
+**Classement.** Le panneau range la note dans un cours › chapitre (`note:place`), parmi les cours de
+l’application (`library.courses`) et ceux déjà utilisés dans le navigateur ; le classement voyage
+avec la note (`course`, `chapter`, `placedAt`) vers l’application et Notion.
 
 **Mode lecture.** Sur Notion et les sites génériques (`requiresMedia`), une page **sans** média est
 notée comme un document (`kind: "page"`), dès que l’utilisateur ouvre les notes :
@@ -148,7 +181,7 @@ macOS Option).
 
 | Clé | Contenu |
 | --- | --- |
-| `note:<noteId>` | `{ id, platform, url, title, markdown, createdAt, updatedAt, rev, lastWriter }` |
+| `note:<noteId>` | `{ id, platform, url, title, markdown, createdAt, updatedAt, rev, lastWriter, course?, chapter?, placedAt? }` |
 | `asset:<path>` | capture (data URL), dimensions, temps vidéo |
 | `notes:index` | résumé de chaque note (page d’options) |
 | `sync:outbox` | `{ noteId: rev }` en attente d’acquittement Desktop |
@@ -160,6 +193,8 @@ macOS Option).
 | `notion:link:<noteId>` | page Notion de la note et empreintes de ses blocs (synchro incrémentale) |
 | `notion:pending` | notes à écrire dans Notion (application fermée) |
 | `desktop:titles` | titres de la bibliothèque Desktop (complétion `[[`) |
+| `desktop:courses` | cours et chapitres de la bibliothèque Desktop (classement depuis le panneau) |
+| `players:allowed` | hôtes de lecteurs intégrés autorisés (agent injecté dans leurs iframes) |
 
 `noteId` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<item>`, `notion:<page>`,
 `web:<hôte><chemin>` — une note par vidéo, audio ou page.
@@ -194,3 +229,7 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
   requêtes CORS des pages). Le secret n’est lu que par le service worker ; les sites n’ont pas accès à
   `chrome.storage` de l’extension.
 - Les icônes sont construites en DOM (pas d’`innerHTML`), compatible Trusted Types (YouTube).
+- `media-bridge.js` s’exécute dans le monde de la page mais ne lit ni n’envoie rien : il déplace
+  seulement un média qui joue hors du document dans un élément caché. Les agents d’iframe parlent au
+  service worker par un port (`sender.frameId` fait foi) ; le seul message visible des scripts de la
+  page est le jeton posté à la page parente, qui ne sert qu’à situer l’`<iframe>` à l’écran.

@@ -31,6 +31,8 @@ export function plainText(markdown: string): string {
     .trim();
 }
 
+const LEADING_ANCHORS = /^(?:\[(?:(?:\d+:)?\d{1,3}:\d{2}|p\.\s?\d+|§\s?\d+|pin\s?\d+)\](?:\([^()\s]*\))?\s*)+/i;
+
 /** Stable id of a card (same note, same question → same id), in Node and in browsers. */
 function cardId(noteId: string, front: string): string {
   let h1 = 0xdeadbeef;
@@ -64,7 +66,8 @@ export function extractCards(noteId: string, markdown: string): Flashcard[] {
       continue;
     }
     if (fence !== null || !line.trim()) continue;
-    const content = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?)/, '');
+    // The anchor that starts a note line ([04:15], [p. 12]…) is not part of the question.
+    const content = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?)/, '').replace(LEADING_ANCHORS, '');
     // Question :: Réponse
     const inline = /^(.+?)\s::\s(.+)$/.exec(content);
     if (inline) {
