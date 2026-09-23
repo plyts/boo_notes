@@ -1,5 +1,5 @@
 import { appendBlock } from './markdown';
-import { noteSlug, type Platform } from './platforms';
+import { noteSlug, type MediaKind, type Platform } from './platforms';
 import { formatTimecode } from './time';
 
 /**
@@ -9,12 +9,23 @@ import { formatTimecode } from './time';
  *   note:<noteId>   → Note
  *   asset:<path>    → AssetRecord (screenshot as data URL)
  *   notes:index     → { [noteId]: NoteSummary }
+ *   progress:<id>   → MediaProgress (last playback position, course tracking)
  *   sync:outbox     → { [noteId]: rev }  notes waiting for the desktop app
  *   sync:assets     → { [path]: true }   screenshots already sent
+ *   sync:progress   → { [noteId]: true } progress not yet sent to the desktop app
  */
+export interface MediaProgress {
+  /** Seconds (media) — the desktop app also uses it for PDF pages. */
+  position: number;
+  duration: number;
+  updatedAt: number;
+}
+
 export interface Note {
   id: string;
   platform: Platform;
+  /** Absent on notes created before audio / PDF support: video. */
+  kind?: MediaKind;
   url: string;
   title: string;
   markdown: string;
@@ -30,10 +41,12 @@ export interface NoteMeta {
   platform: Platform;
   url: string;
   title: string;
+  kind?: MediaKind;
 }
 
 export interface NoteSummary extends NoteMeta {
   updatedAt: number;
+  progress?: MediaProgress;
 }
 
 export interface AssetRecord {
@@ -60,6 +73,8 @@ const assetKey = (path: string) => `asset:${path}`;
 const INDEX = 'notes:index';
 const OUTBOX = 'sync:outbox';
 const SYNCED_ASSETS = 'sync:assets';
+const PENDING_PROGRESS = 'sync:progress';
+const progressKey = (id: string) => `progress:${id}`;
 
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -109,6 +124,7 @@ export class NoteStore {
       title: meta.title || prev.title,
       url: meta.url || prev.url,
       platform: meta.platform,
+      kind: meta.kind ?? prev.kind,
       markdown: update(prev.markdown),
       updatedAt: Date.now(),
       rev: prev.rev + 1,
@@ -117,7 +133,7 @@ export class NoteStore {
     const res = await this.area.get([INDEX, OUTBOX]);
     const index = (res[INDEX] as Record<string, NoteSummary> | undefined) ?? {};
     const outbox = (res[OUTBOX] as Record<string, number> | undefined) ?? {};
-    index[id] = { platform: note.platform, url: note.url, title: note.title, updatedAt: note.updatedAt };
+    index[id] = { ...index[id], platform: note.platform, kind: note.kind, url: note.url, title: note.title, updatedAt: note.updatedAt };
     outbox[id] = note.rev;
     await this.area.set({ [noteKey(id)]: note, [INDEX]: index, [OUTBOX]: outbox });
     return note;
@@ -126,6 +142,49 @@ export class NoteStore {
   async listNotes(): Promise<Record<string, NoteSummary>> {
     const res = await this.area.get(INDEX);
     return (res[INDEX] as Record<string, NoteSummary> | undefined) ?? {};
+  }
+
+  /**
+   * Records the playback position of a media that has a note (course
+   * tracking). Returns null when there is no note yet: watching alone is
+   * never tracked.
+   */
+  saveProgress(id: string, position: number, duration: number): Promise<MediaProgress | null> {
+    return this.exclusive(async () => {
+      const res = await this.area.get([INDEX, PENDING_PROGRESS]);
+      const index = (res[INDEX] as Record<string, NoteSummary> | undefined) ?? {};
+      if (!index[id]) return null;
+      const progress: MediaProgress = {
+        position: Math.max(0, position),
+        duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+        updatedAt: Date.now(),
+      };
+      index[id] = { ...index[id], progress };
+      const pending = (res[PENDING_PROGRESS] as Record<string, true> | undefined) ?? {};
+      pending[id] = true;
+      await this.area.set({ [progressKey(id)]: progress, [INDEX]: index, [PENDING_PROGRESS]: pending });
+      return progress;
+    });
+  }
+
+  async getProgress(id: string): Promise<MediaProgress | null> {
+    const res = await this.area.get(progressKey(id));
+    return (res[progressKey(id)] as MediaProgress | undefined) ?? null;
+  }
+
+  async pendingProgress(): Promise<string[]> {
+    const res = await this.area.get(PENDING_PROGRESS);
+    return Object.keys((res[PENDING_PROGRESS] as Record<string, true> | undefined) ?? {});
+  }
+
+  clearPendingProgress(id: string): Promise<void> {
+    return this.exclusive(async () => {
+      const res = await this.area.get(PENDING_PROGRESS);
+      const pending = (res[PENDING_PROGRESS] as Record<string, true> | undefined) ?? {};
+      if (!pending[id]) return;
+      delete pending[id];
+      await this.area.set({ [PENDING_PROGRESS]: pending });
+    });
   }
 
   saveAsset(input: Omit<AssetRecord, 'path' | 'createdAt'>): Promise<AssetRecord> {
@@ -195,7 +254,11 @@ export class NoteStore {
     return this.exclusive(async () => {
       const all = await this.area.get(null);
       const keys = Object.keys(all).filter(
-        (k) => k.startsWith('note:') || k.startsWith('asset:') || [INDEX, OUTBOX, SYNCED_ASSETS].includes(k),
+        (k) =>
+          k.startsWith('note:') ||
+          k.startsWith('asset:') ||
+          k.startsWith('progress:') ||
+          [INDEX, OUTBOX, SYNCED_ASSETS, PENDING_PROGRESS].includes(k),
       );
       if (keys.length) await this.area.remove(keys);
     });

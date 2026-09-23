@@ -23,6 +23,7 @@
           <a href="#notes" data-icon="clock">Prise de notes</a>
           <a href="#panneau" data-icon="dock">Panneau</a>
           <a href="#captures" data-icon="camera">Captures</a>
+          <a href="#sites" data-icon="globe">Sites</a>
           <a href="#desktop" data-icon="desktop">App Desktop</a>
           <a href="#donnees" data-icon="download">Données</a>
         </nav>
@@ -39,8 +40,8 @@
           <ol class="steps">
             <li>
               <span class="step-num">1</span>
-              <strong>Ouvrez une vidéo</strong>
-              <small>YouTube, Udemy ou Coursera.</small>
+              <strong>Ouvrez un cours</strong>
+              <small>YouTube, Udemy, Coursera, Notion ou un podcast.</small>
             </li>
             <li>
               <span class="step-num">2</span>
@@ -195,6 +196,22 @@
                 <output id="captureQuality-out"></output>
               </span>
             </label>
+          </div>
+        </section>
+
+        <section id="sites" class="group" aria-labelledby="h-sites">
+          <header class="group-head">
+            <h2 id="h-sites">Sites vidéo et audio</h2>
+            <p>
+              YouTube, Udemy, Coursera et les vidéos / audios déposés dans Notion sont pris en charge d’office. Sur tout
+              autre site (podcast, radio, plateforme de cours), cliquez sur l’icône Boo Notes ou appuyez sur
+              <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> : Boo Notes s’active pour l’onglet. Dans le panneau,
+              « Toujours activer ici » ajoute le site à cette liste.
+            </p>
+          </header>
+          <div class="card">
+            <ul id="site-list" class="site-list"></ul>
+            <p id="site-empty" class="data-summary">Aucun site ajouté pour l’instant.</p>
           </div>
         </section>
 

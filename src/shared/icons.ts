@@ -79,6 +79,37 @@ const ICONS = {
     ['circle', { cx: '10', cy: '11', r: '1', fill: 'currentColor', stroke: 'none' }],
     ['circle', { cx: '14', cy: '11', r: '1', fill: 'currentColor', stroke: 'none' }],
   ],
+  globe: [
+    ['circle', { cx: '12', cy: '12', r: '9' }],
+    ['path', { d: 'M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18' }],
+  ],
+  headphones: [
+    ['path', { d: 'M4 15v-3a8 8 0 0 1 16 0v3' }],
+    ['rect', { x: '3', y: '14', width: '5', height: '7', rx: '2' }],
+    ['rect', { x: '16', y: '14', width: '5', height: '7', rx: '2' }],
+  ],
+  file: [
+    ['path', { d: 'M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z' }],
+    ['path', { d: 'M14 3v4h4M9 13h6M9 17h6' }],
+  ],
+  video: [
+    ['rect', { x: '3', y: '6', width: '13', height: '12', rx: '2' }],
+    ['path', { d: 'M16 10l5-3v10l-5-3' }],
+  ],
+  refresh: [
+    ['path', { d: 'M20 11a8 8 0 0 0-14.9-3M4 5v4h4' }],
+    ['path', { d: 'M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4' }],
+  ],
+  folder: [['path', { d: 'M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z' }]],
+  search: [
+    ['circle', { cx: '11', cy: '11', r: '6.5' }],
+    ['path', { d: 'M16 16l4.5 4.5' }],
+  ],
+  quote: [['path', { d: 'M7 17c-2 0-3-1.5-3-3.5C4 10 6 7.5 9 6.5M17 17c-2 0-3-1.5-3-3.5 0-3.5 2-6 5-7' }]],
+  chevronLeft: [['path', { d: 'M15 5l-7 7 7 7' }]],
+  chevronRight: [['path', { d: 'M9 5l7 7-7 7' }]],
+  plus: [['path', { d: 'M12 5v14M5 12h14' }]],
+  minus: [['path', { d: 'M5 12h14' }]],
   eye: [
     ['path', { d: 'M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z' }],
     ['circle', { cx: '12', cy: '12', r: '2.5' }],

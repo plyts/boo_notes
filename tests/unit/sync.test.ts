@@ -137,4 +137,30 @@ describe('DesktopSync', () => {
     const { sync } = setup();
     await expect(sync.exportNote('n', 'local')).rejects.toThrow(/hors-ligne/);
   });
+
+  it('sends playback progress with the note kind, and re-sends positions saved offline', async () => {
+    const { store, sync } = setup();
+    await store.saveNote('n', { ...meta, kind: 'audio' }, '[00:01] a');
+    await store.saveProgress('n', 90, 1800);
+    await sync.sendProgress('n'); // offline: kept pending, triggers a connection
+    expect(await store.pendingProgress()).toEqual(['n']);
+
+    const socket = FakeSocket.last();
+    socket.responder = desktop;
+    socket.serverOpen();
+    await vi.waitFor(async () => expect(await store.pendingProgress()).toEqual([]));
+    const progress = socket.sent.find((m) => m.type === 'media.progress');
+    expect(progress).toMatchObject({
+      noteId: 'n',
+      kind: 'audio',
+      title: 'Vidéo',
+      platform: 'youtube',
+      position: 90,
+      duration: 1800,
+    });
+    // Progress follows the note it belongs to.
+    const types = socket.sent.map((m) => m.type);
+    expect(types.indexOf('note.upsert')).toBeLessThan(types.indexOf('media.progress'));
+  });
 });
+

@@ -1,23 +1,48 @@
 import { parseTimeParam } from './time';
 
-export type Platform = 'youtube' | 'udemy' | 'coursera';
+/**
+ * `notion`: video / audio uploaded in a Notion page. `web`: any other site the
+ * user activated Boo Notes on. `local`: a file opened in the desktop app.
+ */
+export type Platform = 'youtube' | 'udemy' | 'coursera' | 'notion' | 'web' | 'local';
 
 export const PLATFORM_LABELS: Record<Platform, string> = {
   youtube: 'YouTube',
   udemy: 'Udemy',
   coursera: 'Coursera',
+  notion: 'Notion',
+  web: 'Web',
+  local: 'Fichier local',
 };
 
-/** Identifies the video (and therefore the note) a page is about. */
+/** What is being studied: time-based media (timestamps) or a document (page references). */
+export type MediaKind = 'video' | 'audio' | 'pdf';
+
+export const KIND_LABELS: Record<MediaKind, string> = {
+  video: 'Vidéo',
+  audio: 'Audio',
+  pdf: 'PDF',
+};
+
+/** Identifies the media (and therefore the note) a page is about. */
 export interface VideoContext {
   platform: Platform;
-  /** Platform-local identifier (YouTube video id, `course/lecture` for Udemy / Coursera). */
+  /** Platform-local identifier (YouTube video id, `course/lecture` for Udemy / Coursera…). */
   videoId: string;
-  /** Stable note key, e.g. `youtube:dQw4w9WgXcQ`. One note per video. */
+  /** Stable note key, e.g. `youtube:dQw4w9WgXcQ`. One note per video / audio / document. */
   noteId: string;
   /** URL without tracking params / time offsets, used to build timestamp links. */
   canonicalUrl: string;
+  /**
+   * Generic pages (Notion, other sites) are only "about" a media when they
+   * actually contain one; the three course platforms are identified by URL.
+   */
+  requiresMedia?: boolean;
 }
+
+const KNOWN_PLATFORM_DOMAINS = ['youtube.com', 'udemy.com', 'coursera.org'];
+const NOTION_ID = /([0-9a-f]{32})(?:$|[?#/])/i;
+const TRACKING_PARAMS = /^(utm_\w+|fbclid|gclid|mc_eid|mc_cid|ref|si)$/i;
 
 const YT_ID = /^[\w-]{6,20}$/;
 
@@ -75,7 +100,29 @@ export function detectVideoContext(href: string): VideoContext | null {
     };
   }
 
-  return null;
+  if (isHost(url.hostname, 'notion.so') || isHost(url.hostname, 'notion.site')) {
+    // Page id: 32 hex chars ending the path (`/Titre-<id>`), or a peeked page (`?p=<id>`).
+    const peek = url.searchParams.get('p');
+    const id = (peek && /^[0-9a-f]{32}$/i.test(peek) ? peek : NOTION_ID.exec(url.pathname)?.[1])?.toLowerCase();
+    if (!id) return null;
+    const origin = isHost(url.hostname, 'notion.site') ? url.origin : 'https://www.notion.so';
+    return { platform: 'notion', videoId: id, noteId: `notion:${id}`, canonicalUrl: `${origin}/${id}`, requiresMedia: true };
+  }
+
+  if (KNOWN_PLATFORM_DOMAINS.some((d) => isHost(url.hostname, d))) return null;
+
+  // Any other site the user activated Boo Notes on: one note per page (tracking params dropped).
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const params = [...url.searchParams].filter(([k]) => !TRACKING_PARAMS.test(k));
+  const search = params.length ? `?${new URLSearchParams(params).toString()}` : '';
+  const canonicalUrl = `${url.origin}${url.pathname}${search}`;
+  const videoId = `${url.host}${url.pathname}${search}`;
+  return { platform: 'web', videoId, noteId: `web:${videoId}`, canonicalUrl, requiresMedia: true };
+}
+
+/** True for the hosts where the content script is declared in the manifest. */
+export function isDeclaredPlatformHost(hostname: string): boolean {
+  return [...KNOWN_PLATFORM_DOMAINS, 'notion.so', 'notion.site'].some((d) => isHost(hostname, d));
 }
 
 /** Link to a precise instant of the video: `URL#t=255` (media fragment, handled by the content script). */

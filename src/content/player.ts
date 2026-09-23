@@ -1,31 +1,47 @@
 import type { PlaybackState } from '../shared/messages';
+import type { MediaKind } from '../shared/platforms';
 import { queryVisible, type PlatformAdapter } from './adapters';
 
 const MIN_VIDEO_AREA = 200 * 112;
 
 /**
- * Read / drive access to the page's main <video>. When several videos exist
- * (previews, ads…), the one that last started playing wins.
+ * Read / drive access to the page's main media: the main <video>, or an
+ * <audio> player (podcasts, audio lectures) when there is no video. When
+ * several exist (previews, ads…), the one that last started playing wins.
  */
-export class VideoController {
-  private video: HTMLVideoElement | null = null;
+export class MediaController {
+  private media: HTMLMediaElement | null = null;
 
   constructor(private readonly adapter: PlatformAdapter) {}
 
-  /** The current main video, re-resolved if the page swapped it. */
-  get current(): HTMLVideoElement | null {
-    if (this.video && this.video.isConnected && isVisible(this.video)) return this.video;
-    this.video = this.find();
-    return this.video;
+  /** The current main media, re-resolved if the page swapped it. */
+  get current(): HTMLMediaElement | null {
+    if (this.media && this.media.isConnected && isUsable(this.media)) return this.media;
+    this.media = this.find();
+    return this.media;
+  }
+
+  /** Current element when it is a video (screenshots, geometry). */
+  get video(): HTMLVideoElement | null {
+    const m = this.current;
+    return m instanceof HTMLVideoElement && this.kind === 'video' ? m : null;
+  }
+
+  /** `audio` for <audio> players and for audio-only streams played through a <video> tag. */
+  get kind(): MediaKind {
+    const m = this.current;
+    if (!m || m instanceof HTMLAudioElement) return m ? 'audio' : 'video';
+    const v = m as HTMLVideoElement;
+    return v.readyState >= HTMLMediaElement.HAVE_METADATA && v.videoWidth === 0 ? 'audio' : 'video';
   }
 
   /** Called for every media event seen on the page (capture phase). */
-  adopt(video: HTMLVideoElement): void {
-    if (isVisible(video) && area(video) >= MIN_VIDEO_AREA) this.video = video;
+  adopt(media: HTMLMediaElement): void {
+    if (isUsable(media)) this.media = media;
   }
 
   reset(): void {
-    this.video = null;
+    this.media = null;
   }
 
   time(): number {
@@ -33,12 +49,12 @@ export class VideoController {
   }
 
   playback(): PlaybackState {
-    const v = this.current;
+    const m = this.current;
     return {
-      time: v?.currentTime ?? 0,
-      playing: Boolean(v && !v.paused && !v.ended),
-      rate: v?.playbackRate ?? 1,
-      duration: v && Number.isFinite(v.duration) ? v.duration : 0,
+      time: m?.currentTime ?? 0,
+      playing: Boolean(m && !m.paused && !m.ended),
+      rate: m?.playbackRate ?? 1,
+      duration: m && Number.isFinite(m.duration) ? m.duration : 0,
       at: Date.now(),
     };
   }
@@ -52,22 +68,22 @@ export class VideoController {
   }
 
   seek(seconds: number): void {
-    const v = this.current;
-    if (!v) return;
-    const max = Number.isFinite(v.duration) ? v.duration : Number.POSITIVE_INFINITY;
-    v.currentTime = Math.min(Math.max(0, seconds), max);
+    const m = this.current;
+    if (!m) return;
+    const max = Number.isFinite(m.duration) ? m.duration : Number.POSITIVE_INFINITY;
+    m.currentTime = Math.min(Math.max(0, seconds), max);
   }
 
   skip(delta: number): number {
-    const v = this.current;
-    if (!v) return 0;
-    this.seek(v.currentTime + delta);
-    return v.currentTime;
+    const m = this.current;
+    if (!m) return 0;
+    this.seek(m.currentTime + delta);
+    return m.currentTime;
   }
 
   /** Displayed video picture (letterboxing removed), in viewport CSS pixels. */
   contentRect(): DOMRect | null {
-    const v = this.current;
+    const v = this.video;
     if (!v) return null;
     const r = v.getBoundingClientRect();
     if (!v.videoWidth || !v.videoHeight) return r;
@@ -77,8 +93,12 @@ export class VideoController {
     return new DOMRect(r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h);
   }
 
+  /** On-screen box of the player (a hidden audio element has none). */
   rect(): DOMRect | null {
-    return this.current?.getBoundingClientRect() ?? null;
+    const m = this.current;
+    if (!m) return null;
+    const r = m.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
   }
 
   progressBarRect(): DOMRect | null {
@@ -91,14 +111,21 @@ export class VideoController {
     return overlaps ? r : null;
   }
 
-  private find(): HTMLVideoElement | null {
+  private find(): HTMLMediaElement | null {
     const preferred = queryVisible<HTMLVideoElement>(this.adapter.videoSelectors, 100);
     if (preferred instanceof HTMLVideoElement && area(preferred) >= MIN_VIDEO_AREA) return preferred;
     let best: HTMLVideoElement | null = null;
     for (const v of document.querySelectorAll('video')) {
       if (isVisible(v) && area(v) >= MIN_VIDEO_AREA && (!best || area(v) > area(best))) best = v;
     }
-    return best;
+    if (best) return best;
+    // No main video: an audio player. Prefer one playing, then one with a source.
+    const audios = this.adapter.audioSelectors.flatMap((sel) => [...document.querySelectorAll<HTMLAudioElement>(sel)]);
+    return (
+      audios.find((a) => !a.paused) ??
+      audios.find((a) => Boolean(a.currentSrc || a.src || a.querySelector('source'))) ??
+      null
+    );
   }
 }
 
@@ -110,4 +137,10 @@ function area(el: Element): number {
 function isVisible(el: Element): boolean {
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0;
+}
+
+/** Audio players are often invisible (custom UI): only videos must be on screen and large enough. */
+function isUsable(media: HTMLMediaElement): boolean {
+  if (media instanceof HTMLAudioElement) return true;
+  return isVisible(media) && area(media) >= MIN_VIDEO_AREA;
 }

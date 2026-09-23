@@ -140,7 +140,7 @@ export class EmptyState {
       { class: 'empty', 'aria-hidden': 'true' },
       h('div', { class: 'empty-art' }, icon('ghost', 28)),
       h('p', { class: 'empty-title' }, 'Prêt à prendre des notes'),
-      h('p', { class: 'empty-text' }, 'Écrivez simplement : chaque nouvelle ligne reçoit l’horodatage de la vidéo.'),
+      h('p', { class: 'empty-text' }, 'Écrivez simplement : chaque nouvelle ligne reçoit l’horodatage de la lecture.'),
       this.list,
     );
   }

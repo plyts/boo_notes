@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { detectVideoContext, noteSlug, readStartTime, timestampUrl } from '../../src/shared/platforms';
+import {
+  detectVideoContext,
+  isDeclaredPlatformHost,
+  noteSlug,
+  readStartTime,
+  timestampUrl,
+} from '../../src/shared/platforms';
 
 describe('detectVideoContext', () => {
   it('recognises YouTube watch pages and drops extra params', () => {
@@ -36,10 +42,57 @@ describe('detectVideoContext', () => {
     expect(ctx?.canonicalUrl).toBe('https://www.coursera.org/learn/machine-learning/lecture/abc12/gradient-descent');
   });
 
-  it('rejects look-alike hosts', () => {
-    expect(detectVideoContext('https://youtube.com.evil.test/watch?v=dQw4w9WgXcQ')).toBeNull();
-    expect(detectVideoContext('https://notudemy.com/course/a/learn/lecture/1')).toBeNull();
+  it('never gives look-alike hosts a course-platform identity', () => {
+    expect(detectVideoContext('https://youtube.com.evil.test/watch?v=dQw4w9WgXcQ')?.platform).toBe('web');
+    expect(detectVideoContext('https://notudemy.com/course/a/learn/lecture/1')?.platform).toBe('web');
+    expect(detectVideoContext('https://notion.so.evil.test/Page-0123456789abcdef0123456789abcdef')?.platform).toBe('web');
     expect(detectVideoContext('not a url')).toBeNull();
+    expect(detectVideoContext('file:///C:/cours/audio.mp3')).toBeNull();
+  });
+
+  it('recognises Notion pages by their id', () => {
+    const id = '0123456789abcdef0123456789abcdef';
+    expect(detectVideoContext(`https://www.notion.so/acme/Cours-React-${id}?pvs=4`)).toEqual({
+      platform: 'notion',
+      videoId: id,
+      noteId: `notion:${id}`,
+      canonicalUrl: `https://www.notion.so/${id}`,
+      requiresMedia: true,
+    });
+    // Peeked page (side peek / centre peek) wins over the database behind it.
+    const peek = 'fedcba9876543210fedcba9876543210';
+    expect(detectVideoContext(`https://www.notion.so/${id}?v=1&p=${peek}&pm=s`)?.noteId).toBe(`notion:${peek}`);
+    // Public pages keep their own origin.
+    expect(detectVideoContext(`https://acme.notion.site/Cours-${id.toUpperCase()}`)?.canonicalUrl).toBe(
+      `https://acme.notion.site/${id}`,
+    );
+    expect(detectVideoContext('https://www.notion.so/')).toBeNull();
+    expect(detectVideoContext('https://www.notion.so/login')).toBeNull();
+  });
+
+  it('keys any other page by URL, without tracking parameters', () => {
+    const ctx = detectVideoContext('https://podcast.example.test/ep/12?utm_source=x&season=2&fbclid=abc#player');
+    expect(ctx).toEqual({
+      platform: 'web',
+      videoId: 'podcast.example.test/ep/12?season=2',
+      noteId: 'web:podcast.example.test/ep/12?season=2',
+      canonicalUrl: 'https://podcast.example.test/ep/12?season=2',
+      requiresMedia: true,
+    });
+    expect(detectVideoContext('https://radio.example.test/live?utm_medium=a')?.canonicalUrl).toBe(
+      'https://radio.example.test/live',
+    );
+  });
+});
+
+describe('isDeclaredPlatformHost', () => {
+  it('matches the manifest content-script hosts only', () => {
+    expect(isDeclaredPlatformHost('www.youtube.com')).toBe(true);
+    expect(isDeclaredPlatformHost('acme.udemy.com')).toBe(true);
+    expect(isDeclaredPlatformHost('www.notion.so')).toBe(true);
+    expect(isDeclaredPlatformHost('acme.notion.site')).toBe(true);
+    expect(isDeclaredPlatformHost('podcast.example.test')).toBe(false);
+    expect(isDeclaredPlatformHost('youtube.com.evil.test')).toBe(false);
   });
 });
 
@@ -63,5 +116,6 @@ describe('noteSlug', () => {
   it('produces file-system safe names', () => {
     expect(noteSlug('youtube:dQw4w9WgXcQ')).toBe('youtube-dQw4w9WgXcQ');
     expect(noteSlug('udemy:react-avancé/123')).toBe('udemy-react-avance-123');
+    expect(noteSlug('web:podcast.example.test/ep/12?season=2')).toBe('web-podcast-example-test-ep-12-season-2');
   });
 });

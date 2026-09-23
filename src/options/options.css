@@ -745,3 +745,52 @@ input[aria-invalid='true'] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Sites always enabled */
+.site-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.site-list li span {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.site-list:empty {
+  display: none;
+}
+
+/* Course tracking progress in the notes list */
+.progress {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font: 600 var(--text-xs) var(--font-mono);
+}
+
+.progress-bar {
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent-strong);
+}

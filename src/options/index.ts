@@ -180,9 +180,38 @@ async function renderData(): Promise<void> {
         {},
         h('span', { class: 'platform' }, PLATFORM_LABELS[n.platform] ?? n.platform),
         h('a', { href: n.url, target: '_blank', rel: 'noopener' }, n.title || n.url),
+        n.progress && n.progress.duration > 0
+          ? h(
+              'span',
+              { class: 'progress', title: 'Progression de la lecture' },
+              (() => {
+                const bar = h('span', { class: 'progress-bar' }, h('span'));
+                (bar.firstChild as HTMLElement).style.width = `${Math.round(Math.min(1, n.progress.position / n.progress.duration) * 100)}%`;
+                return bar;
+              })(),
+              `${Math.round(Math.min(1, n.progress.position / n.progress.duration) * 100)} %`,
+            )
+          : null,
         h('time', { datetime: new Date(n.updatedAt).toISOString() }, dateFmt.format(n.updatedAt)),
       ),
     ),
+  );
+}
+
+async function renderSites(): Promise<void> {
+  const sites = await callBackground({ type: 'sites:list' });
+  const list = document.getElementById('site-list') as HTMLElement;
+  (document.getElementById('site-empty') as HTMLElement).hidden = sites.length > 0;
+  list.replaceChildren(
+    ...sites.map((origin) => {
+      const remove = h('button', { type: 'button', class: 'btn' }, 'Retirer');
+      remove.addEventListener('click', async () => {
+        await callBackground({ type: 'sites:disable', origin });
+        await renderSites();
+        flashSaved('Site retiré');
+      });
+      return h('li', {}, h('span', {}, origin), remove);
+    }),
   );
 }
 
@@ -264,6 +293,7 @@ async function main(): Promise<void> {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'session' && changes['sync:status']) renderStatus(changes['sync:status'].newValue as SyncStatus);
     if (area === 'local' && changes['notes:index']) void renderData();
+    if (area === 'local' && changes['sites:enabled']) void renderSites();
   });
   document.addEventListener('visibilitychange', () => {
     // Shortcuts may have been edited in chrome://extensions/shortcuts meanwhile.
@@ -273,7 +303,7 @@ async function main(): Promise<void> {
   const status = (await chrome.storage.session.get('sync:status'))['sync:status'] as SyncStatus | undefined;
   renderStatus(status);
   callBackground({ type: 'sync:status' }).then(renderStatus, () => undefined);
-  await Promise.all([renderShortcuts(), renderData()]);
+  await Promise.all([renderShortcuts(), renderData(), renderSites()]);
 }
 
 void main();

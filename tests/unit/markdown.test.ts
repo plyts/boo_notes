@@ -3,7 +3,9 @@ import {
   appendBlock,
   captureLine,
   findAssetRefs,
+  findPageRefs,
   findTimestamps,
+  pageRefToken,
   timestampToken,
   toPortableMarkdown,
 } from '../../src/shared/markdown';
@@ -74,3 +76,20 @@ describe('file names', async () => {
     expect(asciiFileName('Vidéo façon « Été »')).toBe('Video facon Ete');
   });
 });
+
+describe('page references', () => {
+  it('finds [p. N] references but not images', () => {
+    const text = 'Voir [p. 12] et [p.3], pas ![p. 4](x.png).';
+    expect(findPageRefs(text, 100)).toEqual([
+      { from: 105, to: 112, page: 12 },
+      { from: 116, to: 121, page: 3 },
+    ]);
+  });
+
+  it('formats page tokens', () => {
+    expect(pageRefToken(7)).toBe('[p. 7]');
+    expect(pageRefToken(0)).toBe('[p. 1]');
+    expect(pageRefToken(3.8)).toBe('[p. 3]');
+  });
+});
+

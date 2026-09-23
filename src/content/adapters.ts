@@ -9,6 +9,8 @@ export interface PlatformAdapter {
   platform: Platform;
   /** Main player <video>, most specific first. */
   videoSelectors: string[];
+  /** Audio players (<audio>), used when the page has no main video. */
+  audioSelectors: string[];
   /** Native progress bar, used to place the timestamp preview marker. */
   progressBarSelectors: string[];
   /** Fixed site header the drawer should sit below (keeps native navigation visible). */
@@ -35,10 +37,17 @@ function cleanDocumentTitle(patterns: RegExp[]): string {
   return t.trim();
 }
 
-const ADAPTERS: Record<Platform, PlatformAdapter> = {
+function metaContent(selector: string): string {
+  return document.querySelector(selector)?.getAttribute('content')?.trim() ?? '';
+}
+
+type PagePlatform = Exclude<Platform, 'local'>;
+
+const ADAPTERS: Record<PagePlatform, PlatformAdapter> = {
   youtube: {
     platform: 'youtube',
     videoSelectors: ['#movie_player video.html5-main-video', 'video.html5-main-video'],
+    audioSelectors: [],
     progressBarSelectors: ['#movie_player .ytp-progress-bar', '.ytp-progress-bar'],
     headerSelectors: ['#masthead-container'],
     playerFocusSelectors: ['#movie_player'],
@@ -50,6 +59,7 @@ const ADAPTERS: Record<Platform, PlatformAdapter> = {
   udemy: {
     platform: 'udemy',
     videoSelectors: ['[data-purpose="video-player"] video', 'video.vjs-tech', 'video'],
+    audioSelectors: ['audio'],
     progressBarSelectors: [
       '[data-purpose="video-progress-bar"]',
       '[class*="progress-bar--slider"]',
@@ -71,6 +81,7 @@ const ADAPTERS: Record<Platform, PlatformAdapter> = {
   coursera: {
     platform: 'coursera',
     videoSelectors: ['video.vjs-tech', '.c-video-player video', 'video'],
+    audioSelectors: ['audio'],
     progressBarSelectors: ['.vjs-progress-holder', '.vjs-progress-control'],
     headerSelectors: [],
     playerFocusSelectors: ['.video-js'],
@@ -78,13 +89,39 @@ const ADAPTERS: Record<Platform, PlatformAdapter> = {
       firstText(['h1.video-name', 'main h1', 'h1']) || cleanDocumentTitle([/\s*\|\s*Coursera$/i]),
     theme: () => null,
   },
+  notion: {
+    // Videos and audio files uploaded in a Notion page (embeds of other sites are cross-origin iframes).
+    platform: 'notion',
+    videoSelectors: ['.notion-video-block video', 'video'],
+    audioSelectors: ['.notion-audio-block audio', 'audio'],
+    progressBarSelectors: [],
+    headerSelectors: [],
+    playerFocusSelectors: [],
+    title: () => cleanDocumentTitle([/\s*\|\s*Notion$/i]) || 'Page Notion',
+    theme: () => (document.body?.classList.contains('notion-dark-theme') ? 'dark' : null),
+  },
+  web: {
+    // Any site the user activated Boo Notes on (podcasts, radio, course platforms…).
+    platform: 'web',
+    videoSelectors: ['video'],
+    audioSelectors: ['audio'],
+    progressBarSelectors: [],
+    headerSelectors: [],
+    playerFocusSelectors: [],
+    title: () => metaContent('meta[property="og:title"]') || document.title.trim() || location.hostname,
+    theme: () => null,
+  },
 };
 
-export function adapterForHost(hostname: string): PlatformAdapter | null {
-  if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) return ADAPTERS.youtube;
-  if (hostname === 'udemy.com' || hostname.endsWith('.udemy.com')) return ADAPTERS.udemy;
-  if (hostname === 'coursera.org' || hostname.endsWith('.coursera.org')) return ADAPTERS.coursera;
-  return null;
+const isHost = (hostname: string, domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
+
+/** Adapter for the page. Hosts without a dedicated adapter get the generic one (on-demand activation). */
+export function adapterForHost(hostname: string): PlatformAdapter {
+  if (isHost(hostname, 'youtube.com')) return ADAPTERS.youtube;
+  if (isHost(hostname, 'udemy.com')) return ADAPTERS.udemy;
+  if (isHost(hostname, 'coursera.org')) return ADAPTERS.coursera;
+  if (isHost(hostname, 'notion.so') || isHost(hostname, 'notion.site')) return ADAPTERS.notion;
+  return ADAPTERS.web;
 }
 
 export function queryVisible<T extends Element>(selectors: string[], minWidth = 1): T | null {

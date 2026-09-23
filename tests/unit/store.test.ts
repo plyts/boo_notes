@@ -65,4 +65,30 @@ describe('NoteStore', () => {
     await store.clearAll();
     expect([...area.data.keys()]).toEqual(['unrelated']);
   });
+
+  it('tracks the playback position of noted media only', async () => {
+    const store = new NoteStore(new MemoryArea());
+    expect(await store.saveProgress('youtube:abcdefghijk', 42, 600)).toBeNull();
+    expect(await store.pendingProgress()).toEqual([]);
+
+    await store.saveNote('youtube:abcdefghijk', { ...meta, kind: 'audio' }, '[00:01] intro');
+    const progress = await store.saveProgress('youtube:abcdefghijk', 42.5, 600);
+    expect(progress).toMatchObject({ position: 42.5, duration: 600 });
+    expect(await store.getProgress('youtube:abcdefghijk')).toEqual(progress);
+    const summary = (await store.listNotes())['youtube:abcdefghijk'];
+    expect(summary).toMatchObject({ kind: 'audio', progress: { position: 42.5, duration: 600 } });
+    expect(await store.pendingProgress()).toEqual(['youtube:abcdefghijk']);
+
+    await store.clearPendingProgress('youtube:abcdefghijk');
+    expect(await store.pendingProgress()).toEqual([]);
+    // Saving the note again keeps its progress in the index.
+    await store.saveNote('youtube:abcdefghijk', meta, '[00:01] intro\n[00:42] suite');
+    expect((await store.listNotes())['youtube:abcdefghijk'].progress?.position).toBe(42.5);
+  });
+
+  it('ignores invalid durations (live streams)', async () => {
+    const store = new NoteStore(new MemoryArea());
+    await store.saveNote('n', meta, 'x');
+    expect(await store.saveProgress('n', -3, Number.POSITIVE_INFINITY)).toMatchObject({ position: 0, duration: 0 });
+  });
 });

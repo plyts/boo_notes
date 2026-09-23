@@ -9,10 +9,10 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "node scripts/build.mjs && playwright test",
+    "test:e2e": "node scripts/build.mjs --e2e && playwright test",
     "mock:desktop": "node tools/mock-desktop/server.mjs",
     "fixtures": "node scripts/make-fixture-video.mjs",
-    "screenshots": "node scripts/build.mjs && SCREENSHOTS=1 playwright test screenshots",
+    "screenshots": "node scripts/build.mjs --e2e && SCREENSHOTS=1 playwright test screenshots",
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {

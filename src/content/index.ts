@@ -18,7 +18,7 @@ import { adapterForHost, detectPageTheme, headerInset, queryVisible, type Platfo
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
 import { Overlay } from './overlay';
-import { VideoController } from './player';
+import { MediaController } from './player';
 
 const PINNED_KEY = 'boo-notes:pinned';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
@@ -46,7 +46,7 @@ function errorMessage(e: unknown): string {
  */
 class ContentApp {
   private readonly abort = new AbortController();
-  private readonly player: VideoController;
+  private readonly player: MediaController;
   private readonly overlay: Overlay;
   private readonly drawer: Drawer;
   private settings: Settings = normalizeSettings(undefined);
@@ -67,11 +67,14 @@ class ContentApp {
   /** Default shortcuts Chrome did not register globally, handled here instead. */
   private pageBindings: InPageBinding[] = inPageBindings([]).filter((b) => b.command === 'replay');
   private readonly seekedFromUrl = new Set<string>();
+  /** Note id announced to the background as a player (Notion / other sites: only once a media exists). */
+  private registeredNoteId: string | null = null;
+  private lastProgressAt = 0;
   private stopSettingsWatch: (() => void) | null = null;
   private dead = false;
 
   constructor(private readonly adapter: PlatformAdapter) {
-    this.player = new VideoController(adapter);
+    this.player = new MediaController(adapter);
     this.overlay = new Overlay(
       {
         videoRect: () => this.player.rect(),
@@ -155,12 +158,17 @@ class ContentApp {
       document.addEventListener(
         type,
         (e) => {
-          if (!(e.target instanceof HTMLVideoElement)) return;
+          if (!(e.target instanceof HTMLMediaElement)) return;
           if (type === 'play') {
             this.player.adopt(e.target);
             this.smartPaused = false;
           }
-          if (e.target === this.player.current) this.broadcastPlayback();
+          if (e.target !== this.player.current) return;
+          this.broadcastPlayback();
+          void this.ensureRegistered();
+          // Course tracking: remember where the user stopped.
+          if (type === 'pause' || type === 'ended') this.reportProgress(true);
+          else if (type === 'seeked') this.reportProgress();
         },
         opts,
       );
@@ -175,6 +183,12 @@ class ContentApp {
     this.stopSettingsWatch = onSettingsChanged((s) => this.applySettings(s));
 
     this.intervals.push(setInterval(() => this.checkUrl(), 750));
+    this.intervals.push(
+      setInterval(() => {
+        if (this.player.playback().playing) this.reportProgress();
+      }, 15_000),
+    );
+    window.addEventListener('pagehide', () => this.reportProgress(true), opts);
     // Periodic resync so the panels' extrapolated clock never drifts.
     this.intervals.push(
       setInterval(() => {
@@ -221,9 +235,14 @@ class ContentApp {
     });
   }
 
-  private readonly onTabMessage = (msg: TabMessage, sender: chrome.runtime.MessageSender): boolean => {
+  private readonly onTabMessage = (
+    msg: TabMessage,
+    sender: chrome.runtime.MessageSender,
+    sendResponse: (response: unknown) => void,
+  ): boolean => {
     if (sender.id !== chrome.runtime.id) return false;
-    if (msg.type === 'command') void this.onCommand(msg.command);
+    if (msg.type === 'ping') sendResponse(true);
+    else if (msg.type === 'command') void this.onCommand(msg.command);
     else if (msg.type === 'popout:closed') this.popoutPort = null;
     return false;
   };
@@ -282,9 +301,10 @@ class ContentApp {
     this.overlay.hideMarker();
     this.title = ctx ? this.adapter.title() : '';
     this.postPanels({ type: 'context', ctx, title: this.title });
+    this.registeredNoteId = null;
     if (ctx) {
       this.watchTitle();
-      await this.bg({ type: 'player:ready', ctx, title: this.title }).catch(() => undefined);
+      await this.ensureRegistered();
     } else {
       if (this.drawer.isOpen) this.closeDrawer();
       await this.bg({ type: 'player:gone' }).catch(() => undefined);
@@ -300,13 +320,43 @@ class ContentApp {
       if (this.ctx && title && title !== this.title) {
         this.title = title;
         this.postPanels({ type: 'context', ctx: this.ctx, title });
-        void this.bg({ type: 'player:ready', ctx: this.ctx, title }).catch(() => undefined);
+        this.registeredNoteId = null;
+        void this.ensureRegistered();
       }
       if (++ticks >= 15 && this.titleWatch) {
         clearInterval(this.titleWatch);
         this.titleWatch = null;
       }
     }, 1000);
+  }
+
+  /**
+   * Announces this tab as a player. Course platforms are identified by URL;
+   * Notion pages and other sites only once they actually contain a media.
+   */
+  private async ensureRegistered(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || this.registeredNoteId === ctx.noteId || (ctx.requiresMedia && !this.player.current)) return;
+    this.registeredNoteId = ctx.noteId;
+    try {
+      await this.bg({ type: 'player:ready', ctx, title: this.title, kind: this.player.kind });
+    } catch {
+      this.registeredNoteId = null;
+    }
+  }
+
+  /** Playback position for course tracking (kept only if the media has a note). */
+  private reportProgress(force = false): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.player.current || this.dead) return;
+    const now = Date.now();
+    if (!force && now - this.lastProgressAt < 10_000) return;
+    this.lastProgressAt = now;
+    const { time, duration } = this.player.playback();
+    if (time <= 0 && duration <= 0) return;
+    void this.bg({ type: 'player:progress', noteId: ctx.noteId, position: time, duration, kind: this.player.kind }).catch(
+      () => undefined,
+    );
   }
 
   /** Opens `URL#t=255` links (the format of copied timestamps) at the right time on every platform. */
@@ -341,10 +391,14 @@ class ContentApp {
   // --- Commands -------------------------------------------------------------------------
 
   private async onCommand(command: CommandId): Promise<void> {
-    if (!this.ctx) {
-      this.overlay.toast('Boo Notes : aucune vidéo détectée sur cette page', 'error');
+    if (!this.ctx || (this.ctx.requiresMedia && !this.player.current)) {
+      const text = this.ctx
+        ? 'Boo Notes : aucune vidéo ni piste audio sur cette page'
+        : 'Boo Notes : aucune vidéo détectée sur cette page';
+      this.overlay.toast(text, 'error');
       return;
     }
+    void this.ensureRegistered();
     this.markInteraction();
     switch (command) {
       case 'toggle-sidebar':
@@ -426,7 +480,7 @@ class ContentApp {
 
   private replay(): void {
     if (!this.player.current) {
-      this.overlay.toast('Aucune vidéo à rembobiner', 'error');
+      this.overlay.toast('Aucun média à rembobiner', 'error');
       return;
     }
     const t = this.player.skip(-this.settings.replaySeconds);
@@ -447,10 +501,11 @@ class ContentApp {
 
   /** Flow 2: frame capture → flash → asset stored → thumbnail line in the note → toast. */
   private async capture(): Promise<void> {
-    const video = this.player.current;
+    const video = this.player.video;
     const ctx = this.ctx;
     if (!ctx || !video) {
-      this.overlay.toast('Aucune vidéo à capturer', 'error');
+      const audio = this.player.current !== null && this.player.kind === 'audio';
+      this.overlay.toast(audio ? 'Capture indisponible : ce média est audio' : 'Aucune vidéo à capturer', 'error');
       return;
     }
     if (this.capturing) return;
@@ -555,7 +610,12 @@ class ContentApp {
   }
 
   private broadcastPlayback(): void {
-    this.postPanels({ type: 'playback', playback: this.player.playback(), hasVideo: this.player.current !== null });
+    this.postPanels({
+      type: 'playback',
+      playback: this.player.playback(),
+      hasVideo: this.player.current !== null,
+      kind: this.player.kind,
+    });
   }
 
   private onPanelMessage(port: Port, msg: PanelToContent): void {
@@ -575,6 +635,7 @@ class ContentApp {
           title: this.title,
           pinned: this.pinned,
           hasVideo: this.player.current !== null,
+          kind: this.player.kind,
           playback: this.player.playback(),
           pageTheme: detectPageTheme(this.adapter),
         } satisfies ContentToPanel);

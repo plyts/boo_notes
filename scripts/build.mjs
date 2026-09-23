@@ -8,6 +8,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const src = join(root, 'src');
 const out = join(root, 'dist');
 const watch = process.argv.includes('--watch');
+// End-to-end builds may inject the content script on test hosts without a permission prompt.
+const e2e = process.argv.includes('--e2e');
 
 const common = {
   bundle: true,
@@ -29,6 +31,7 @@ async function copyStatic() {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const manifest = JSON.parse(await readFile(join(src, 'manifest.json'), 'utf8'));
   manifest.version = pkg.version;
+  if (e2e) manifest.host_permissions.push('*://*.test/*');
   await mkdir(out, { recursive: true });
   await writeFile(join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   for (const rel of ['panel/panel.html', 'panel/panel.css', 'options/options.html', 'options/options.css', 'tokens.css']) {

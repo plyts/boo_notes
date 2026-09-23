@@ -76,6 +76,64 @@ async function setActivePlayer(tabId: number | null): Promise<void> {
   sync.announceActivePlayer(info ? { noteId: info.noteId, title: info.title, url: info.url } : null);
 }
 
+// --- Content script presence / on-demand activation --------------------------------
+
+async function hasContentScript(tabId: number): Promise<boolean> {
+  try {
+    return (await chrome.tabs.sendMessage(tabId, { type: 'ping' } satisfies TabMessage, { frameId: 0 })) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Injects the content script if the tab has none yet, then waits until it answers. */
+async function ensureContentScript(tabId: number): Promise<boolean> {
+  if (await hasContentScript(tabId)) return true;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  } catch {
+    return false; // chrome:// pages, the Web Store, PDF viewer… or no permission.
+  }
+  for (let i = 0; i < 40; i++) {
+    if (await hasContentScript(tabId)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+// --- Sites where Boo Notes is always active -----------------------------------------------
+
+const SITES_KEY = 'sites:enabled';
+const SITES_SCRIPT_ID = 'boo-notes-sites';
+
+async function enabledSites(): Promise<string[]> {
+  return ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] as string[] | undefined) ?? [];
+}
+
+/** Keeps a dynamic content script registered for every always-enabled origin. */
+async function syncSiteScripts(origins: string[]): Promise<void> {
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [SITES_SCRIPT_ID] });
+  if (origins.length === 0) {
+    if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: [SITES_SCRIPT_ID] });
+    return;
+  }
+  const script: chrome.scripting.RegisteredContentScript = {
+    id: SITES_SCRIPT_ID,
+    matches: origins.map((o) => `${o}/*`),
+    js: ['content.js'],
+    runAt: 'document_idle',
+    persistAcrossSessions: true,
+  };
+  if (existing.length) await chrome.scripting.updateContentScripts([script]);
+  else await chrome.scripting.registerContentScripts([script]);
+}
+
+function normalizeOrigin(origin: string): string {
+  const url = new URL(origin);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Site non pris en charge');
+  return url.origin;
+}
+
 // --- Keyboard commands ------------------------------------------------------
 
 /** Commands that bring the notes to the foreground. */
@@ -95,8 +153,11 @@ async function runCommand(command: CommandId, tab?: chrome.tabs.Tab): Promise<vo
     target = (await tabExists(data.activeTab)) ? data.activeTab : null;
   }
   if (target === null) {
-    // No known player: the current tab's content script (if any) explains why.
-    if (tab?.id !== undefined) await sendToTab(tab.id, { type: 'command', command });
+    // No known player. On any web page, pressing a shortcut (or the toolbar icon) activates
+    // Boo Notes there: Chrome grants `activeTab`, which lets us inject the content script.
+    if (tab?.id !== undefined && (await ensureContentScript(tab.id))) {
+      await sendToTab(tab.id, { type: 'command', command });
+    }
     return;
   }
 
@@ -276,6 +337,34 @@ const handlers: Handlers = {
     await store.clearAll();
     await sync.notifyChanged();
   },
+
+  'player:progress': async (msg) => {
+    // Only media that have a note are tracked (watching alone is never recorded).
+    if (await store.saveProgress(msg.noteId, msg.position, msg.duration)) void sync.sendProgress(msg.noteId);
+  },
+
+  'sites:list': () => enabledSites(),
+
+  'sites:enable': async (msg) => {
+    const origin = normalizeOrigin(msg.origin);
+    // The permission itself is requested by the UI (it needs a user gesture).
+    if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) {
+      throw new Error('Autorisation refusée pour ce site');
+    }
+    const sites = [...new Set([...(await enabledSites()), origin])].sort();
+    await chrome.storage.local.set({ [SITES_KEY]: sites });
+    await syncSiteScripts(sites);
+    return sites;
+  },
+
+  'sites:disable': async (msg) => {
+    const origin = normalizeOrigin(msg.origin);
+    const sites = (await enabledSites()).filter((o) => o !== origin);
+    await chrome.storage.local.set({ [SITES_KEY]: sites });
+    await syncSiteScripts(sites);
+    await chrome.permissions.remove({ origins: [`${origin}/*`] }).catch(noop);
+    return sites;
+  },
 };
 
 chrome.runtime.onMessage.addListener((msg: BackgroundRequest, sender, sendResponse) => {
@@ -371,6 +460,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       }
     }
   }
+  await syncSiteScripts(await enabledSites()).catch(noop);
   if (details.reason === 'install') {
     await chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html#bienvenue') });
   }

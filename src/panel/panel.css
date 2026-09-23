@@ -219,6 +219,37 @@ button {
   color: var(--danger);
 }
 
+.site-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: var(--text-s);
+}
+
+.site-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* --- Export menu ---------------------------------------------------------------- */
 
 .menu {

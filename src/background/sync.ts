@@ -149,6 +149,31 @@ export class DesktopSync {
     return res.message ?? 'Export terminé';
   }
 
+  /**
+   * Latest playback position of a noted media. Fire-and-forget: only the last
+   * value matters, so it is simply re-sent after a reconnection.
+   */
+  async sendProgress(noteId: string): Promise<void> {
+    if (!this.connected) {
+      void this.connect();
+      return;
+    }
+    const [note, progress] = await Promise.all([this.opts.store.getNote(noteId), this.opts.store.getProgress(noteId)]);
+    if (!note || !progress) return;
+    this.send({
+      type: 'media.progress',
+      noteId,
+      kind: note.kind ?? 'video',
+      title: note.title,
+      url: note.url,
+      platform: note.platform,
+      position: progress.position,
+      duration: progress.duration,
+      updatedAt: progress.updatedAt,
+    });
+    await this.opts.store.clearPendingProgress(noteId);
+  }
+
   /** Tells the app which video is currently driven by the shortcuts. */
   announceActivePlayer(player: { noteId: string; title: string; url: string } | null): void {
     this.send({ type: 'player.active', player });
@@ -182,6 +207,8 @@ export class DesktopSync {
           await this.opts.store.markSynced(noteId, note.rev);
         }
       } while (this.flushAgain && this.connected);
+      // Positions saved while offline, once their notes are known to the app.
+      for (const noteId of await this.opts.store.pendingProgress()) await this.sendProgress(noteId);
     } catch (e) {
       // A request timed out or the socket dropped: the outbox is kept for the next connection.
       this.error = e instanceof Error ? e.message : String(e);

@@ -6,6 +6,50 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DIST = `${ROOT}dist`;
 const FIXTURES = `${ROOT}tests/e2e/fixtures`;
 
+/** Answers a media request, honouring Range headers (needed for seeking). */
+export async function fulfillMedia(route: Route, buf: Buffer, contentType: string): Promise<void> {
+  const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range ?? '');
+  if (range) {
+    const start = Number(range[1]);
+    const end = range[2] ? Math.min(Number(range[2]), buf.length - 1) : buf.length - 1;
+    await route.fulfill({
+      status: 206,
+      headers: {
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Content-Range': `bytes ${start}-${end}/${buf.length}`,
+        'Content-Length': String(end - start + 1),
+      },
+      body: buf.subarray(start, end + 1),
+    });
+    return;
+  }
+  await route.fulfill({ status: 200, headers: { 'Content-Type': contentType, 'Accept-Ranges': 'bytes' }, body: buf });
+}
+
+export const sampleVideo = () => readFile(`${FIXTURES}/sample.webm`);
+
+/** `seconds` of a quiet 440 Hz tone as an 8 kHz mono 8-bit PCM WAV file. */
+export function makeWav(seconds: number): Buffer {
+  const rate = 8000;
+  const samples = Math.round(rate * seconds);
+  const buf = Buffer.alloc(44 + samples);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + samples, 4);
+  buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16); // fmt chunk size
+  buf.writeUInt16LE(1, 20); // PCM
+  buf.writeUInt16LE(1, 22); // mono
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate, 28); // byte rate
+  buf.writeUInt16LE(1, 32); // block align
+  buf.writeUInt16LE(8, 34); // bits per sample
+  buf.write('data', 36);
+  buf.writeUInt32LE(samples, 40);
+  for (let i = 0; i < samples; i++) buf[44 + i] = 128 + Math.round(8 * Math.sin((2 * Math.PI * 440 * i) / rate));
+  return buf;
+}
+
 /** Serves the fake YouTube watch page and its video (with Range support for seeking). */
 async function serveFakeYouTube(route: Route): Promise<void> {
   const url = new URL(route.request().url());
@@ -14,24 +58,7 @@ async function serveFakeYouTube(route: Route): Promise<void> {
     return;
   }
   if (url.pathname === '/__fixtures/sample.webm') {
-    const buf = await readFile(`${FIXTURES}/sample.webm`);
-    const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range ?? '');
-    if (range) {
-      const start = Number(range[1]);
-      const end = range[2] ? Number(range[2]) : buf.length - 1;
-      await route.fulfill({
-        status: 206,
-        headers: {
-          'Content-Type': 'video/webm',
-          'Accept-Ranges': 'bytes',
-          'Content-Range': `bytes ${start}-${end}/${buf.length}`,
-          'Content-Length': String(end - start + 1),
-        },
-        body: buf.subarray(start, end + 1),
-      });
-      return;
-    }
-    await route.fulfill({ status: 200, headers: { 'Content-Type': 'video/webm', 'Accept-Ranges': 'bytes' }, body: buf });
+    await fulfillMedia(route, await sampleVideo(), 'video/webm');
     return;
   }
   await route.fulfill({ status: 404, body: '' });

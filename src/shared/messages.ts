@@ -1,4 +1,4 @@
-import type { VideoContext } from './platforms';
+import type { MediaKind, VideoContext } from './platforms';
 import type { AssetRecord, Note, NoteMeta, NoteSummary } from './store';
 
 /** Keyboard commands declared in manifest.json (configurable in chrome://extensions/shortcuts). */
@@ -38,9 +38,11 @@ export interface CaptureRect {
 /** Messages sent to the background service worker (chrome.runtime.sendMessage). */
 export type BackgroundRequest =
   | { type: 'hello' }
-  | { type: 'player:ready'; ctx: VideoContext; title: string }
+  | { type: 'player:ready'; ctx: VideoContext; title: string; kind: MediaKind }
   | { type: 'player:gone' }
   | { type: 'player:interaction' }
+  /** Playback position of the active media (course tracking). */
+  | { type: 'player:progress'; noteId: string; position: number; duration: number; kind: MediaKind }
   | { type: 'note:get'; noteId: string; meta: NoteMeta }
   | { type: 'note:save'; noteId: string; meta: NoteMeta; markdown: string; writer: string }
   | { type: 'note:append'; noteId: string; meta: NoteMeta; text: string }
@@ -69,13 +71,18 @@ export type BackgroundRequest =
   | { type: 'sync:status' }
   | { type: 'sync:retry' }
   | { type: 'notes:list' }
-  | { type: 'notes:clear' };
+  | { type: 'notes:clear' }
+  /** Sites where Boo Notes is always active (optional host permission already granted). */
+  | { type: 'sites:list' }
+  | { type: 'sites:enable'; origin: string }
+  | { type: 'sites:disable'; origin: string };
 
 export interface BackgroundResponses {
   hello: { tabId: number };
   'player:ready': void;
   'player:gone': void;
   'player:interaction': void;
+  'player:progress': void;
   'note:get': Note;
   'note:save': Note;
   'note:append': Note;
@@ -90,6 +97,9 @@ export interface BackgroundResponses {
   'sync:retry': SyncStatus;
   'notes:list': Record<string, NoteSummary>;
   'notes:clear': void;
+  'sites:list': string[];
+  'sites:enable': string[];
+  'sites:disable': string[];
 }
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -106,6 +116,8 @@ export async function callBackground<R extends BackgroundRequest>(
 
 /** Messages pushed by the background to a tab's content script. */
 export type TabMessage =
+  /** Presence check before an on-demand injection. */
+  | { type: 'ping' }
   | { type: 'command'; command: CommandId }
   | { type: 'popout:closed' }
   | { type: 'player:active'; active: boolean };
@@ -135,11 +147,13 @@ export type ContentToPanel =
       title: string;
       pinned: boolean;
       hasVideo: boolean;
+      kind: MediaKind;
       playback: PlaybackState;
       pageTheme: PageTheme;
     }
   | { type: 'context'; ctx: VideoContext | null; title: string }
-  | { type: 'playback'; playback: PlaybackState; hasVideo: boolean }
+  /** `hasVideo`: a media (video or audio) is attached; `kind` tells which. */
+  | { type: 'playback'; playback: PlaybackState; hasVideo: boolean; kind: MediaKind }
   | { type: 'insert-timestamp'; seconds: number; focus: boolean }
   | { type: 'insert-block'; text: string }
   | { type: 'focus'; where: 'keep' | 'end' }

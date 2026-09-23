@@ -3,7 +3,7 @@
   "name": "Boo Notes",
   "short_name": "Boo Notes",
   "version": "0.0.0",
-  "description": "Prise de notes horodatées et captures d’écran au clavier sur YouTube, Udemy et Coursera.",
+  "description": "Notes horodatées et captures au clavier sur YouTube, Udemy, Coursera, Notion et tout site vidéo ou audio.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",
@@ -12,7 +12,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Boo Notes — ouvrir / réduire les notes",
+    "default_title": "Boo Notes — ouvrir / réduire les notes (active Boo Notes sur ce site)",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
@@ -34,14 +34,18 @@
   "host_permissions": [
     "*://*.youtube.com/*",
     "*://*.udemy.com/*",
-    "*://*.coursera.org/*"
+    "*://*.coursera.org/*",
+    "*://*.notion.so/*",
+    "*://*.notion.site/*"
   ],
   "content_scripts": [
     {
       "matches": [
         "*://*.youtube.com/*",
         "*://*.udemy.com/*",
-        "*://*.coursera.org/*"
+        "*://*.coursera.org/*",
+        "*://*.notion.so/*",
+        "*://*.notion.site/*"
       ],
       "js": [
         "content.js"
@@ -58,9 +62,7 @@
         "tokens.css"
       ],
       "matches": [
-        "*://*.youtube.com/*",
-        "*://*.udemy.com/*",
-        "*://*.coursera.org/*"
+        "<all_urls>"
       ]
     }
   ],
@@ -96,5 +98,9 @@
     "replay": {
       "description": "Reculer de 5 secondes (Alt+← dans la page par défaut)"
     }
-  }
+  },
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
 }

@@ -35,6 +35,28 @@ export function findTimestamps(text: string, offset = 0): TimestampMatch[] {
   return out;
 }
 
+export interface PageRefMatch {
+  from: number;
+  to: number;
+  page: number;
+}
+
+/** `[p. 12]`: a reference to a page of a PDF (the document equivalent of a timestamp). */
+const PAGE_REF_RE = /(?<!!)\[p\.\s?(\d{1,5})\]/g;
+
+export function findPageRefs(text: string, offset = 0): PageRefMatch[] {
+  const out: PageRefMatch[] = [];
+  for (const m of text.matchAll(PAGE_REF_RE)) {
+    const from = offset + (m.index ?? 0);
+    out.push({ from, to: from + m[0].length, page: Number(m[1]) });
+  }
+  return out;
+}
+
+export function pageRefToken(page: number): string {
+  return `[p. ${Math.max(1, Math.floor(page))}]`;
+}
+
 export function timestampToken(seconds: number): string {
   return `[${formatTimecode(seconds)}]`;
 }

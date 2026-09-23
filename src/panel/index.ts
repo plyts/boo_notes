@@ -12,7 +12,7 @@ import {
   type PlaybackState,
   type SyncStatus,
 } from '../shared/messages';
-import { PLATFORM_LABELS, type VideoContext } from '../shared/platforms';
+import { PLATFORM_LABELS, type MediaKind, type VideoContext } from '../shared/platforms';
 import { loadSettings, normalizeSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
@@ -63,6 +63,8 @@ class PanelApp {
   private saving: Promise<void> = Promise.resolve();
   private playback: PlaybackState = { time: 0, playing: false, rate: 1, duration: 0, at: Date.now() };
   private hasVideo = false;
+  private kind: MediaKind = 'video';
+  private siteHint!: HTMLDivElement;
   private pinned = false;
   private pageTheme: PageTheme | null = null;
   private shortcuts: Record<string, string> = {};
@@ -171,8 +173,10 @@ class PanelApp {
         this.hideBanner();
         this.pinned = msg.pinned;
         this.hasVideo = msg.hasVideo;
+        this.kind = msg.kind;
         this.playback = msg.playback;
         this.pageTheme = msg.pageTheme;
+        this.renderKind();
         this.applyTheme();
         this.renderPin();
         void this.switchContext(msg.ctx, msg.title);
@@ -183,6 +187,10 @@ class PanelApp {
       case 'playback':
         this.playback = msg.playback;
         this.hasVideo = msg.hasVideo;
+        if (msg.kind !== this.kind) {
+          this.kind = msg.kind;
+          this.renderKind();
+        }
         break;
       case 'insert-timestamp':
         void this.loading.then(() => this.note && this.editor.insertTimestamp(msg.seconds, msg.focus));
@@ -247,7 +255,12 @@ class PanelApp {
 
   private meta(): NoteMeta | null {
     if (!this.ctx) return null;
-    return { platform: this.ctx.platform, url: this.ctx.canonicalUrl, title: this.title };
+    return {
+      platform: this.ctx.platform,
+      url: this.ctx.canonicalUrl,
+      title: this.title,
+      ...(this.hasVideo ? { kind: this.kind } : {}),
+    };
   }
 
   /** Serialised: a context switch waits for the previous one (and its save) to finish. */
@@ -383,6 +396,7 @@ class PanelApp {
     this.noticeEl = h('div', { class: 'notice', role: 'status', 'aria-live': 'polite' });
     this.menu = this.buildMenu();
     this.banner = h('div', { class: 'banner', hidden: true, role: 'status' });
+    this.siteHint = this.buildSiteHint();
 
     this.clockEl = h('span', { class: 'clock-now', title: 'Position de la vidéo' }, '--:--');
     this.durationEl = h('span', { class: 'clock-duration', title: 'Durée de la vidéo' });
@@ -403,6 +417,7 @@ class PanelApp {
         h('div', { class: 'toolbar' }, this.statusButton, h('span', { class: 'spacer' }), ...actions),
         this.titleEl,
         h('div', { class: 'meta' }, this.platformEl, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
+        this.siteHint,
         this.menu,
       ),
       this.banner,
@@ -489,9 +504,70 @@ class PanelApp {
     this.titleEl.textContent = title;
     this.titleEl.title = title;
     document.title = `${title} — Boo Notes`;
-    this.platformEl.textContent = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
     this.platformEl.hidden = !this.ctx;
+    this.renderKind();
     this.renderSaveState();
+    void this.renderSiteHint();
+  }
+
+  /** Platform chip (+ « Audio ») and the capture button, which only makes sense for a video. */
+  private renderKind(): void {
+    const audio = this.hasVideo && this.kind === 'audio';
+    const platform = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
+    this.platformEl.textContent = audio ? `${platform} · Audio` : platform;
+    const capture = this.footerButtons?.capture;
+    if (capture) {
+      capture.disabled = audio;
+      capture.title = audio ? 'Capture indisponible pour un média audio' : (capture.getAttribute('aria-label') ?? '');
+    }
+    document.documentElement.dataset.kind = audio ? 'audio' : 'video';
+  }
+
+  /** On a site activated for this tab only: offer to keep Boo Notes active there. */
+  private buildSiteHint(): HTMLDivElement {
+    const button = h('button', { type: 'button', class: 'link-btn' }, 'Toujours activer ici');
+    button.addEventListener('click', () => void this.enableSite());
+    const hint = h('div', { class: 'site-hint', hidden: true }, h('span', { class: 'site-text' }), button);
+    return hint;
+  }
+
+  private siteOrigin(): string | null {
+    if (this.ctx?.platform !== 'web') return null;
+    try {
+      return new URL(this.ctx.canonicalUrl).origin;
+    } catch {
+      return null;
+    }
+  }
+
+  private async renderSiteHint(): Promise<void> {
+    const origin = this.siteOrigin();
+    if (!origin) {
+      this.siteHint.hidden = true;
+      return;
+    }
+    const sites = await callBackground({ type: 'sites:list' }).catch(() => [] as string[]);
+    (this.siteHint.querySelector('.site-text') as HTMLElement).textContent =
+      `Actif sur ${new URL(origin).host} pour cet onglet.`;
+    this.siteHint.hidden = sites.includes(origin);
+  }
+
+  private async enableSite(): Promise<void> {
+    const origin = this.siteOrigin();
+    if (!origin) return;
+    // Needs the click's user gesture: requested here, recorded by the background.
+    const granted = await chrome.permissions.request({ origins: [`${origin}/*`] }).catch(() => false);
+    if (!granted) {
+      this.notify('Autorisation refusée', 'error');
+      return;
+    }
+    try {
+      await callBackground({ type: 'sites:enable', origin });
+      this.siteHint.hidden = true;
+      this.notify(`Boo Notes sera actif à chaque visite de ${new URL(origin).host}`, 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
   }
 
   private saveState: SaveState = 'idle';
@@ -601,6 +677,7 @@ class PanelApp {
     set(this.footerButtons.capture, withKey('Capturer l’image', this.shortcuts['capture-screenshot']));
     set(this.footerButtons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, this.shortcuts.replay));
     set(this.footerButtons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
+    this.renderKind();
   }
 
   // --- Actions -----------------------------------------------------------------------------
