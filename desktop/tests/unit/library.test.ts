@@ -290,6 +290,14 @@ describe('Courses, chapters and notes linked to several resources', () => {
     await lib.placeNote('youtube:abcdefghijk', { courseId: course.id, chapterId: course.chapters[0].id });
     await lib.upsertFromExtension({ ...note(2), course: 'React', chapter: 'Hooks', placedAt: 10 });
     expect(lib.placement('youtube:abcdefghijk')?.chapterId).toBe(course.chapters[0].id);
+
+    // « Retirer du cours » in the browser, later: the note becomes unfiled here too.
+    await lib.upsertFromExtension({ ...note(3), placedAt: Date.now() + 1000 });
+    expect(lib.placement('youtube:abcdefghijk')).toBeNull();
+    // An unfiled note without a filing date is left alone.
+    await lib.placeNote('youtube:abcdefghijk', { courseId: course.id, chapterId: course.chapters[1].id });
+    await lib.upsertFromExtension(note(4));
+    expect(lib.placement('youtube:abcdefghijk')?.chapterId).toBe(course.chapters[1].id);
   });
 
   it('migrates a v1 library: each item becomes a note and a resource', async () => {

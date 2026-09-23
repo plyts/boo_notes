@@ -29,6 +29,8 @@ export type DesktopMessage =
   | { type: 'notion.link'; noteId: string; link: NotionLink }
   /** Titles of the app's library (revision sheets, PDF…), for `[[` completion. */
   | { type: 'library.titles'; titles: string[] }
+  /** Courses of the app's library and their chapters, to file notes from the browser. */
+  | { type: 'library.courses'; courses: Array<{ title: string; emoji?: string; chapters: string[] }> }
   | { type: 'pong' };
 
 interface Waiter {
@@ -51,6 +53,7 @@ export interface DesktopSyncOptions {
   onNotionConfig?(config: SharedNotionConfig | null): void;
   onNotionLink?(noteId: string, link: NotionLink): void;
   onTitles?(titles: string[]): void;
+  onCourses?(courses: Array<{ title: string; emoji?: string; chapters: string[] }>): void;
 }
 
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000];
@@ -315,6 +318,19 @@ export class DesktopSync {
         break;
       case 'library.titles':
         if (Array.isArray(msg.titles)) this.opts.onTitles?.(msg.titles.filter((t) => typeof t === 'string'));
+        break;
+      case 'library.courses':
+        if (Array.isArray(msg.courses)) {
+          this.opts.onCourses?.(
+            msg.courses
+              .filter((c) => c && typeof c.title === 'string')
+              .map((c) => ({
+                title: c.title,
+                emoji: typeof c.emoji === 'string' ? c.emoji : undefined,
+                chapters: Array.isArray(c.chapters) ? c.chapters.filter((t): t is string => typeof t === 'string') : [],
+              })),
+          );
+        }
         break;
       default:
         break;

@@ -7,6 +7,7 @@ import {
   type BackgroundResponses,
   type CommandId,
   type ContentToPanel,
+  type FrameMedia,
   type PanelToContent,
   type TabMessage,
 } from '../shared/messages';
@@ -18,13 +19,15 @@ import { formatTimecode } from '../shared/time';
 import { adapterForHost, detectPageTheme, headerInset, queryVisible, type PlatformAdapter } from './adapters';
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
+import { looksLikePlayer, playerFrames, scanMedia } from './media-scan';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
 import { PageReader } from './reader';
 
 const PINNED_KEY = 'boo-notes:pinned';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
-const MEDIA_EVENTS = ['play', 'playing', 'pause', 'seeked', 'ratechange', 'durationchange', 'loadedmetadata', 'emptied', 'waiting'];
+/** Iframes at least this large may hold a player. */
+const PLAYER_FRAME_AREA = 240 * 135;
 
 type Port = chrome.runtime.Port;
 
@@ -82,9 +85,16 @@ class ContentApp {
   private quoteShortcut = 'Alt+Shift+T';
   private bubbleFrame = 0;
   private lastPassage: string | null = null;
+  /** Embedded players Boo Notes may not read yet (hosts), as last sent to the panels. */
+  private blockedPlayers = '';
+  private shotSeq = 0;
+  private readonly shots = new Map<number, (r: { shot: Shot | null; error: string | null }) => void>();
 
   constructor(private readonly adapter: PlatformAdapter) {
-    this.player = new MediaController(adapter);
+    this.player = new MediaController(adapter, {
+      onEvent: (type, media) => this.onMediaEvent(type, media),
+      send: (frameId, command) => void this.bg({ type: 'frame:command', frameId, command }).catch(() => undefined),
+    });
     this.overlay = new Overlay(
       {
         videoRect: () => this.player.rect(),
@@ -124,7 +134,7 @@ class ContentApp {
    * The course platforms are always about their video, even before it loads.
    */
   private get reading(): boolean {
-    return Boolean(this.ctx?.requiresMedia) && !this.player.current;
+    return Boolean(this.ctx?.requiresMedia) && !this.player.available;
   }
 
   private get kind(): MediaKind {
@@ -150,6 +160,8 @@ class ContentApp {
     this.overlay.setPinned(this.pinned);
     this.overlay.mount();
     this.bindEvents();
+    // Embedded players (sub-frames) the extension may read get their agent.
+    void this.bg({ type: 'frames:inject' }).catch(() => undefined);
     await this.syncContext(true);
     if (this.dead) return;
     if (this.pinned && this.ctx) this.openDrawer(null);
@@ -187,25 +199,10 @@ class ContentApp {
     );
     window.addEventListener('keydown', this.onKeyDown, opts);
     window.addEventListener('pointerdown', () => this.markInteraction(), { ...opts, passive: true });
-    for (const type of MEDIA_EVENTS) {
-      document.addEventListener(
-        type,
-        (e) => {
-          if (!(e.target instanceof HTMLMediaElement)) return;
-          if (type === 'play') {
-            this.player.adopt(e.target);
-            this.smartPaused = false;
-          }
-          if (e.target !== this.player.current) return;
-          this.broadcastPlayback();
-          void this.ensureRegistered();
-          // Course tracking: remember where the user stopped.
-          if (type === 'pause' || type === 'ended') this.reportProgress(true);
-          else if (type === 'seeked') this.reportProgress();
-        },
-        opts,
-      );
-    }
+    // Media of the page, its shadow trees and docked off-DOM players.
+    this.player.listen(this.abort.signal);
+    // Frame agents announce themselves to find their <iframe> element.
+    window.addEventListener('message', this.onFrameHello, { signal: this.abort.signal });
     document.addEventListener('fullscreenchange', this.onFullscreenChange, opts);
     // Reading mode: "Citer" bubble next to the selected text while the notes are open.
     document.addEventListener('selectionchange', () => this.scheduleQuoteBubble(), { signal: this.abort.signal });
@@ -220,6 +217,8 @@ class ContentApp {
     this.stopSettingsWatch = onSettingsChanged((s) => this.applySettings(s));
 
     this.intervals.push(setInterval(() => this.checkUrl(), 750));
+    // Embedded players the extension cannot read yet: offered in the panel.
+    this.intervals.push(setInterval(() => this.checkPlayers(), 3000));
     this.intervals.push(
       setInterval(() => {
         if (this.player.playback().playing) this.reportProgress();
@@ -256,6 +255,59 @@ class ContentApp {
     }
   }
 
+  private onMediaEvent(type: string, media: HTMLMediaElement): void {
+    if (type === 'play') this.smartPaused = false;
+    if (media !== this.player.current) return;
+    this.broadcastPlayback();
+    void this.ensureRegistered();
+    // Course tracking: remember where the user stopped.
+    if (type === 'pause' || type === 'ended') this.reportProgress(true);
+    else if (type === 'seeked') this.reportProgress();
+  }
+
+  /** State of an embedded player's media, relayed by the background. */
+  private onFrameMedia(frameId: number, media: FrameMedia | null): void {
+    const was = this.player.remote?.media.playback.playing;
+    this.player.setRemote(frameId, media);
+    if (this.player.current) return; // A media of the page itself has priority.
+    this.broadcastPlayback();
+    void this.ensureRegistered();
+    if (media) this.maybeSeekFromUrl();
+    if (was && !this.player.remote?.media.playback.playing) this.reportProgress(true);
+    else this.reportProgress();
+    this.checkPlayers();
+  }
+
+  private readonly onFrameHello = (e: MessageEvent): void => {
+    const token = (e.data as { booNotesFrame?: unknown } | null)?.booNotesFrame;
+    if (typeof token !== 'string' || !e.source) return;
+    const frames = [...document.querySelectorAll('iframe'), ...scanMedia(document, 8000).roots.flatMap((r) => [...r.querySelectorAll('iframe')])];
+    const iframe = frames.find((f) => f.contentWindow === e.source);
+    if (iframe) this.player.bindFrame(token, iframe);
+  };
+
+  /** Player-looking iframes without a reporting agent: the panel offers to allow their host. */
+  private checkPlayers(): void {
+    if (!this.ctx || this.dead) return;
+    let hosts: string[] = [];
+    if (!this.player.current && !this.player.remote) {
+      const reporting = this.player.reportingFrames();
+      hosts = [
+        ...new Set(
+          playerFrames(PLAYER_FRAME_AREA)
+            .filter((f) => !reporting.has(f) && f.src && /^https?:/.test(f.src))
+            .filter((f) => looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen|encrypted-media/.test(f.allow))
+            .map((f) => new URL(f.src, location.href).host)
+            .filter((h) => h !== location.host),
+        ),
+      ];
+    }
+    const key = hosts.join(' ');
+    if (key === this.blockedPlayers) return;
+    this.blockedPlayers = key;
+    this.postPanels({ type: 'players', hosts });
+  }
+
   private applySettings(s: Settings): void {
     this.settings = s;
     this.overlay.setEnabled(s.hudEnabled);
@@ -284,6 +336,11 @@ class ContentApp {
     if (msg.type === 'ping') sendResponse(true);
     else if (msg.type === 'command') void this.onCommand(msg.command);
     else if (msg.type === 'popout:closed') this.popoutPort = null;
+    else if (msg.type === 'frame:media') this.onFrameMedia(msg.frameId, msg.media);
+    else if (msg.type === 'frame:shot') {
+      this.shots.get(msg.id)?.({ shot: msg.shot, error: msg.error });
+      this.shots.delete(msg.id);
+    }
     return false;
   };
 
@@ -546,7 +603,8 @@ class ContentApp {
   /** Playback position for course tracking (kept only if the media has a note). */
   private reportProgress(force = false): void {
     const ctx = this.ctx;
-    if (!ctx || !this.player.current || this.dead) return;
+    // A stopwatch is not a position in the media: nothing to resume.
+    if (!ctx || !this.player.available || this.player.source === 'stopwatch' || this.dead) return;
     const now = Date.now();
     if (!force && now - this.lastProgressAt < 10_000) return;
     this.lastProgressAt = now;
@@ -572,6 +630,11 @@ class ContentApp {
       const v = this.player.current;
       if (v && v.readyState >= HTMLMediaElement.HAVE_METADATA) {
         if (Math.abs(v.currentTime - target) > 1.5) this.player.seek(target);
+        return;
+      }
+      // Embedded player: its agent seeks inside the frame.
+      if (!v && this.player.remote && this.player.remote.media.playback.duration > 0) {
+        if (Math.abs(this.player.time() - target) > 1.5) this.player.seek(target);
         return;
       }
       if (++tries < 40 && !this.dead) setTimeout(attempt, 500);
@@ -664,8 +727,7 @@ class ContentApp {
    * the video and gives the keyboard back to the player.
    */
   private async smartPause(): Promise<void> {
-    const video = this.player.current;
-    if (this.smartPaused && video?.paused) {
+    if (this.smartPaused && this.player.available && this.player.paused) {
       this.smartPaused = false;
       this.player.play();
       this.drawer.blurToPage();
@@ -680,7 +742,7 @@ class ContentApp {
   }
 
   private replay(): void {
-    if (!this.player.current) {
+    if (!this.player.available) {
       this.overlay.toast('Aucun média à rembobiner', 'error');
       return;
     }
@@ -704,22 +766,34 @@ class ContentApp {
   private async capture(): Promise<void> {
     const video = this.player.video;
     const ctx = this.ctx;
-    if (!ctx || !video) {
-      const audio = this.player.current !== null && this.player.kind === 'audio';
-      this.overlay.toast(audio ? 'Capture indisponible : ce média est audio' : 'Aucune vidéo à capturer', 'error');
+    const remote = !video && this.player.source === 'frame' && this.player.kind === 'video' ? this.player.remote : null;
+    if (!ctx || (!video && !remote)) {
+      const audio = this.player.available && this.player.kind === 'audio';
+      this.overlay.toast(
+        audio ? 'Capture indisponible : ce média est audio' : this.player.source === 'stopwatch' ? 'Aucune image à capturer (chronomètre)' : 'Aucune vidéo à capturer',
+        'error',
+      );
       return;
     }
     if (this.capturing) return;
     this.capturing = true;
-    const seconds = video.currentTime;
+    const seconds = this.player.time();
     const { captureFormat: mime, captureQuality: quality } = this.settings;
     try {
-      const probe = probeFrame(video);
+      if (remote) {
+        // Embedded player: its agent grabs the frame, else the visible area is captured.
+        const res = await this.frameShot(mime, quality);
+        const shot = res.shot ?? (await this.captureVisibleArea(mime, quality));
+        this.overlay.flash();
+        await this.saveShot(ctx, shot, seconds, '');
+        return;
+      }
+      const probe = probeFrame(video!);
       if (probe === 'not-ready') throw new Error('la vidéo n’est pas encore chargée');
       let shot: Shot;
       let warning = '';
       if (probe === 'ok') {
-        const pending = captureVideoFrame(video, mime, quality); // frame drawn synchronously
+        const pending = captureVideoFrame(video!, mime, quality); // frame drawn synchronously
         this.overlay.flash();
         shot = await pending;
       } else {
@@ -728,40 +802,82 @@ class ContentApp {
           shot = await this.captureVisibleArea(mime, quality);
         } catch (e) {
           if (probe !== 'blank') throw e;
-          shot = await captureVideoFrame(video, mime, quality);
+          shot = await captureVideoFrame(video!, mime, quality);
           warning = ' (image noire : contenu protégé ?)';
         }
         this.overlay.flash();
       }
-      const { path } = await this.bg({
-        type: 'asset:save',
-        noteId: ctx.noteId,
-        dataUrl: shot.dataUrl,
-        mime: shot.mime,
-        width: shot.width,
-        height: shot.height,
-        time: seconds,
-      });
-      const line = captureLine(seconds, path);
-      const port = this.popoutPort ?? this.embeddedPort;
-      if (port && this.ctx?.noteId === ctx.noteId) {
-        port.postMessage({ type: 'insert-block', text: line } satisfies ContentToPanel);
-      } else {
-        await this.bg({
-          type: 'note:append',
-          noteId: ctx.noteId,
-          meta: { platform: ctx.platform, url: ctx.canonicalUrl, title: this.title },
-          text: line,
-        });
-      }
-      this.overlay.toast(`${formatTimecode(seconds)} - Capture sauvegardée${warning}`, warning ? 'error' : 'success', 2000, {
-        thumb: shot.dataUrl,
-      });
+      await this.saveShot(ctx, shot, seconds, warning);
     } catch (e) {
       this.overlay.toast(`Capture impossible : ${errorMessage(e)}`, 'error', 3500);
     } finally {
       this.capturing = false;
     }
+  }
+
+  /** Manual clock for streams no script can read: timestamps follow it. */
+  private onStopwatch(action: 'start' | 'pause' | 'reset'): void {
+    const sw = this.player.stopwatch;
+    if (action === 'start') {
+      if (!sw.active) {
+        // A large frame or video on screen: the notes are about a picture.
+        const big = playerFrames(PLAYER_FRAME_AREA).length > 0 || [...document.querySelectorAll('video')].some((v) => v.getBoundingClientRect().width >= 320);
+        this.player.stopwatchKind = big ? 'video' : 'audio';
+      }
+      sw.start();
+      this.overlay.toast('Chronomètre lancé : vos horodatages le suivent', 'info', 2200, { icon: 'clock' });
+    } else if (action === 'pause') sw.pause();
+    else sw.reset();
+    void this.ensureRegistered(true);
+    this.broadcastPlayback();
+  }
+
+  /** Stores the picture, adds its line to the note, and confirms. */
+  private async saveShot(ctx: VideoContext, shot: Shot, seconds: number, warning: string): Promise<void> {
+    const { path } = await this.bg({
+      type: 'asset:save',
+      noteId: ctx.noteId,
+      dataUrl: shot.dataUrl,
+      mime: shot.mime,
+      width: shot.width,
+      height: shot.height,
+      time: seconds,
+    });
+    const line = captureLine(seconds, path);
+    const port = this.popoutPort ?? this.embeddedPort;
+    if (port && this.ctx?.noteId === ctx.noteId) {
+      port.postMessage({ type: 'insert-block', text: line } satisfies ContentToPanel);
+    } else {
+      await this.bg({
+        type: 'note:append',
+        noteId: ctx.noteId,
+        meta: { platform: ctx.platform, url: ctx.canonicalUrl, title: this.title },
+        text: line,
+      });
+    }
+    this.overlay.toast(`${formatTimecode(seconds)} - Capture sauvegardée${warning}`, warning ? 'error' : 'success', 2000, {
+      thumb: shot.dataUrl,
+    });
+  }
+
+  /** Asks the embedded player's agent for the current frame (null: the page must screenshot it). */
+  private frameShot(mime: string, quality: number): Promise<{ shot: Shot | null; error: string | null }> {
+    const id = ++this.shotSeq;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.shots.delete(id);
+        resolve({ shot: null, error: 'timeout' });
+      }, 4000);
+      this.shots.set(id, (r) => {
+        clearTimeout(timer);
+        resolve(r);
+      });
+      if (!this.player.command({ op: 'capture', id, mime, quality })) {
+        clearTimeout(timer);
+        this.shots.delete(id);
+        resolve({ shot: null, error: 'gone' });
+      }
+    });
   }
 
   private async captureVisibleArea(mime: string, quality: number): Promise<Shot> {
@@ -814,8 +930,9 @@ class ContentApp {
     this.postPanels({
       type: 'playback',
       playback: this.player.playback(),
-      hasVideo: this.player.current !== null,
+      hasVideo: this.player.available,
       kind: this.kind,
+      source: this.player.source,
     });
   }
 
@@ -835,12 +952,14 @@ class ContentApp {
           ctx: this.ctx,
           title: this.title,
           pinned: this.pinned,
-          hasVideo: this.player.current !== null,
+          hasVideo: this.player.available,
           kind: this.kind,
           playback: this.player.playback(),
           pageTheme: detectPageTheme(this.adapter),
+          source: this.player.source,
         } satisfies ContentToPanel);
         if (this.reading) port.postMessage({ type: 'reading', ratio: this.reader.progress, passage: this.lastPassage } satisfies ContentToPanel);
+        if (this.blockedPlayers) port.postMessage({ type: 'players', hosts: this.blockedPlayers.split(' ') } satisfies ContentToPanel);
         return;
       case 'seek':
         this.player.seek(msg.seconds);
@@ -904,6 +1023,13 @@ class ContentApp {
         return;
       case 'reveal':
         if (!this.reader.reveal(msg.url)) this.overlay.toast('Passage introuvable dans cette page (modifiée ?)', 'error', 3000);
+        return;
+      case 'stopwatch':
+        this.onStopwatch(msg.action);
+        return;
+      case 'players:granted':
+        // The agent was injected into the allowed frames: they report within a second.
+        void this.bg({ type: 'frames:inject' }).catch(() => undefined);
         return;
     }
     this.markInteraction();

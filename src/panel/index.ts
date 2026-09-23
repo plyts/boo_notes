@@ -6,6 +6,7 @@ import {
   PANEL_PORT,
   type ContentToPanel,
   type ExportTarget,
+  type MediaSource,
   type NotionStatus,
   type PageTheme,
   type PanelMode,
@@ -15,7 +16,7 @@ import {
 } from '../shared/messages';
 import { PLATFORM_LABELS, type MediaKind, type VideoContext } from '../shared/platforms';
 import { loadSettings, normalizeSettings, type Settings } from '../shared/settings';
-import type { AssetRecord, Note, NoteMeta } from '../shared/store';
+import type { AssetRecord, CourseOption, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
 import { DEFAULT_SHORTCUTS, findBinding, formatShortcut, inPageBindings, type InPageBinding } from '../shared/shortcuts';
 import { formatTimecode } from '../shared/time';
@@ -71,6 +72,16 @@ class PanelApp {
   private playback: PlaybackState = { time: 0, playing: false, rate: 1, duration: 0, at: Date.now() };
   private hasVideo = false;
   private kind: MediaKind = 'video';
+  /** Where the position comes from: the page's media, an embedded player, or the stopwatch. */
+  private source: MediaSource | null = null;
+  private playersHint!: HTMLDivElement;
+  private pendingPlayers: string[] = [];
+  private playersInjected = false;
+  private stopwatchEl!: HTMLSpanElement;
+  private chronoButton!: HTMLButtonElement;
+  /** Filing of the note in a course › chapter of the library. */
+  private placeButton!: HTMLButtonElement;
+  private placeMenu!: HTMLDivElement;
   /** Reading mode: furthest point read and the quoted passage being read. */
   private reading: { ratio: number; passage: string | null } = { ratio: 0, passage: null };
   private wikiTitles: string[] = [];
@@ -198,6 +209,7 @@ class PanelApp {
         this.kind = msg.kind;
         this.playback = msg.playback;
         this.pageTheme = msg.pageTheme;
+        this.source = msg.source;
         this.renderKind();
         this.applyTheme();
         this.renderPin();
@@ -209,10 +221,15 @@ class PanelApp {
       case 'playback':
         this.playback = msg.playback;
         this.hasVideo = msg.hasVideo;
-        if (msg.kind !== this.kind) {
+        if (msg.kind !== this.kind || msg.source !== this.source) {
           this.kind = msg.kind;
+          this.source = msg.source;
           this.renderKind();
         }
+        this.renderSource();
+        break;
+      case 'players':
+        void this.renderPlayers(msg.hosts);
         break;
       case 'insert-timestamp':
         void this.loading.then(() => this.note && this.editor.insertTimestamp(msg.seconds, msg.focus));
@@ -446,12 +463,17 @@ class PanelApp {
 
     this.titleEl = h('h1', { class: 'title' }, 'Boo Notes');
     this.platformEl = h('span', { class: 'platform' });
+    this.placeButton = h('button', { type: 'button', class: 'place', 'aria-haspopup': 'menu', 'aria-expanded': 'false', hidden: true });
+    this.placeButton.addEventListener('click', () => void this.togglePlaceMenu());
+    this.placeMenu = h('div', { class: 'menu place-menu', role: 'menu', hidden: true, 'aria-label': 'Ranger dans un cours' });
+    this.placeMenu.addEventListener('keydown', (e) => this.onPlaceMenuKey(e));
     this.statsEl = h('span', { class: 'stats' });
     this.saveEl = h('span', { class: 'save', 'data-state': 'idle' });
     this.noticeEl = h('div', { class: 'notice', role: 'status', 'aria-live': 'polite' });
     this.menu = this.buildMenu();
     this.banner = h('div', { class: 'banner', hidden: true, role: 'status' });
     this.siteHint = this.buildSiteHint();
+    this.playersHint = this.buildPlayersHint();
 
     this.clockEl = h('span', { class: 'clock-now', title: 'Position de la vidéo' }, '--:--');
     this.durationEl = h('span', { class: 'clock-duration', title: 'Durée de la vidéo' });
@@ -465,6 +487,17 @@ class PanelApp {
     const capture = actionButton('camera', 'Capturer', () => this.post({ type: 'capture' }));
     const replay = iconButton('replay', 'Revoir 5 s', () => this.post({ type: 'replay' }));
     const help = iconButton('keyboard', 'Raccourcis clavier', () => this.sheet.open());
+    // A stream no script can read (protected player, native app, live lecture): a manual clock.
+    this.chronoButton = actionButton('clock', 'Chronomètre', () => this.post({ type: 'stopwatch', action: 'start' }));
+    this.chronoButton.classList.add('chrono');
+    this.chronoButton.title =
+      'Aucun lecteur accessible ? Lancez un chronomètre au début du flux (direct, lecteur protégé, cours en salle) : vos horodatages le suivent.';
+    const swToggle = iconButton('pause', 'Mettre le chronomètre en pause', () =>
+      this.post({ type: 'stopwatch', action: this.playback.playing ? 'pause' : 'start' }),
+    );
+    swToggle.classList.add('sw-toggle');
+    const swReset = iconButton('close', 'Arrêter le chronomètre', () => this.post({ type: 'stopwatch', action: 'reset' }));
+    this.stopwatchEl = h('span', { class: 'stopwatch', hidden: true, role: 'group', 'aria-label': 'Chronomètre' }, swToggle, swReset);
     const link = iconButton('link', 'Lier une fiche ([[)', () => this.editor.insertWikiLink());
     this.footerButtons = { timestamp, capture, replay, help, link };
 
@@ -478,9 +511,11 @@ class PanelApp {
         { class: 'header' },
         h('div', { class: 'toolbar' }, this.statusButton, h('span', { class: 'spacer' }), ...actions),
         this.titleEl,
-        h('div', { class: 'meta' }, this.platformEl, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
+        h('div', { class: 'meta' }, this.platformEl, this.placeButton, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
         this.siteHint,
+        this.playersHint,
         this.menu,
+        this.placeMenu,
       ),
       this.banner,
       editorHost,
@@ -488,8 +523,8 @@ class PanelApp {
         'footer',
         { class: 'footer' },
         // Media-player scrubber: current time · notes timeline · duration.
-        h('div', { class: 'scrubber' }, this.clockEl, this.timeline.el, this.readingBar, this.durationEl),
-        h('div', { class: 'controls' }, timestamp, capture, h('span', { class: 'spacer' }), link, replay, help),
+        h('div', { class: 'scrubber' }, this.clockEl, this.stopwatchEl, this.timeline.el, this.readingBar, this.durationEl),
+        h('div', { class: 'controls' }, timestamp, capture, this.chronoButton, h('span', { class: 'spacer' }), link, replay, help),
       ),
       this.noticeEl,
       this.sheet.el,
@@ -578,6 +613,7 @@ class PanelApp {
     this.titleEl.title = title;
     document.title = `${title} — Boo Notes`;
     this.platformEl.hidden = !this.ctx;
+    this.renderPlace();
     this.renderKind();
     this.renderSaveState();
     void this.renderSiteHint();
@@ -592,8 +628,11 @@ class PanelApp {
     const audio = this.hasVideo && this.kind === 'audio';
     const page = this.kind === 'page';
     const platform = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
-    this.platformEl.textContent = audio ? `${platform} · Audio` : page ? `${platform} · Lecture` : platform;
+    const via = this.source === 'stopwatch' ? ' · Chronomètre' : this.source === 'frame' ? ' · Lecteur intégré' : '';
+    this.platformEl.textContent = (audio ? `${platform} · Audio` : page ? `${platform} · Lecture` : platform) + via;
+    this.renderSource();
     document.documentElement.dataset.kind = page ? 'page' : audio ? 'audio' : 'video';
+    document.documentElement.dataset.source = this.source ?? 'none';
     this.emptyState.setMode(page ? 'page' : 'media');
     if (this.editor) this.scheduleContentRefresh();
     this.timeline.el.hidden = page;
@@ -621,6 +660,190 @@ class PanelApp {
     buttons.replay.hidden = page;
     set(buttons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, keys.replay));
     set(buttons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
+  }
+
+  // --- Course › chapter filing -------------------------------------------------------------
+
+  private renderPlace(): void {
+    if (!this.placeButton) return;
+    const note = this.note;
+    this.placeButton.hidden = !this.ctx || !note;
+    const placed = Boolean(note?.course);
+    this.placeButton.dataset.placed = String(placed);
+    this.placeButton.replaceChildren(
+      icon('course', 13),
+      h('span', { class: 'place-label' }, placed ? `${note!.course} › ${note!.chapter ?? 'Chapitre 1'}` : 'Ranger dans un cours'),
+    );
+    const label = placed ? `Rangée dans ${note!.course} › ${note!.chapter} (changer)` : 'Ranger cette note dans un cours et un chapitre de la bibliothèque';
+    this.placeButton.title = label;
+    this.placeButton.setAttribute('aria-label', label);
+  }
+
+  private async togglePlaceMenu(): Promise<void> {
+    if (!this.placeMenu.hidden) {
+      this.closePlaceMenu(true);
+      return;
+    }
+    this.closeMenu(false);
+    const courses = await callBackground({ type: 'library:courses' }).catch(() => [] as CourseOption[]);
+    this.renderPlaceMenu(courses);
+    this.placeMenu.style.top = `${this.placeButton.offsetTop + this.placeButton.offsetHeight + 6}px`;
+    this.placeMenu.hidden = false;
+    this.placeButton.setAttribute('aria-expanded', 'true');
+    (this.placeMenu.querySelector<HTMLElement>('[aria-checked="true"]') ?? this.placeMenu.querySelector<HTMLElement>('button, input'))?.focus();
+  }
+
+  private closePlaceMenu(refocus: boolean): void {
+    if (this.placeMenu.hidden) return;
+    this.placeMenu.hidden = true;
+    this.placeButton.setAttribute('aria-expanded', 'false');
+    if (refocus) this.placeButton.focus();
+  }
+
+  private renderPlaceMenu(courses: CourseOption[]): void {
+    const current = this.note?.course ? { course: this.note.course, chapter: this.note.chapter ?? '' } : null;
+    const same = (a: string, b: string) => normalizeTitle(a) === normalizeTitle(b);
+    const item = (label: string, place: { course: string; chapter: string } | null, extra: Partial<Record<string, string>> = {}) => {
+      const checked = Boolean(place && current && same(place.course, current.course) && same(place.chapter, current.chapter));
+      const b = h(
+        'button',
+        { type: 'button', role: 'menuitemradio', 'aria-checked': String(checked), ...extra },
+        checked ? icon('check', 14) : h('span', { class: 'menu-check-space' }),
+        h('span', {}, label),
+      );
+      b.addEventListener('click', () => void this.place(place));
+      return b;
+    };
+    const children: HTMLElement[] = [h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Ranger dans')];
+    if (!courses.length) {
+      children.push(h('p', { class: 'place-empty' }, 'Aucun cours pour l’instant : créez-en un ci-dessous (ou dans l’app Desktop).'));
+    }
+    for (const c of courses) {
+      children.push(h('div', { class: 'place-course', 'aria-hidden': 'true' }, `${c.emoji ? `${c.emoji} ` : ''}${c.title}`));
+      const chapters = c.chapters.length ? c.chapters : ['Chapitre 1'];
+      for (const ch of chapters) children.push(item(ch, { course: c.title, chapter: ch }, { class: 'place-chapter' }));
+    }
+    children.push(h('div', { class: 'menu-sep', role: 'separator' }));
+    // New course or chapter: free text, created in the library by the app.
+    const courseInput = h('input', { type: 'text', placeholder: 'Cours', 'aria-label': 'Cours', list: 'boo-courses', value: current?.course ?? '' });
+    const chapterInput = h('input', { type: 'text', placeholder: 'Chapitre', 'aria-label': 'Chapitre', list: 'boo-chapters' });
+    const courseList = h('datalist', { id: 'boo-courses' }, ...courses.map((c) => h('option', { value: c.title })));
+    const chapterList = h('datalist', { id: 'boo-chapters' });
+    const fillChapters = () => {
+      const c = courses.find((x) => same(x.title, courseInput.value));
+      chapterList.replaceChildren(...(c?.chapters ?? []).map((t) => h('option', { value: t })));
+    };
+    courseInput.addEventListener('input', fillChapters);
+    fillChapters();
+    const submit = h('button', { type: 'submit', class: 'place-submit' }, 'Ranger');
+    const form = h('form', { class: 'place-form' }, h('span', { class: 'menu-label' }, 'Nouveau cours ou chapitre'), courseInput, chapterInput, courseList, chapterList, submit);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!courseInput.value.trim()) {
+        courseInput.focus();
+        return;
+      }
+      void this.place({ course: courseInput.value, chapter: chapterInput.value });
+    });
+    children.push(form);
+    if (current) {
+      children.push(h('div', { class: 'menu-sep', role: 'separator' }), item('Retirer du cours', null, { class: 'danger', role: 'menuitem' }));
+    }
+    this.placeMenu.replaceChildren(...children);
+  }
+
+  private async place(place: { course: string; chapter: string } | null): Promise<void> {
+    const ctx = this.ctx;
+    const meta = this.meta();
+    if (!ctx || !meta) return;
+    this.closePlaceMenu(true);
+    try {
+      const note = await callBackground({ type: 'note:place', noteId: ctx.noteId, meta, place });
+      if (this.ctx?.noteId !== ctx.noteId) return;
+      this.knownRev = Math.max(this.knownRev, note.rev);
+      this.note = { ...(this.note ?? note), course: note.course, chapter: note.chapter, placedAt: note.placedAt, rev: note.rev };
+      if (!note.course) delete this.note.course;
+      this.renderPlace();
+      this.notify(note.course ? `Rangée dans ${note.course} › ${note.chapter}` : 'Note retirée du cours', 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+
+  private onPlaceMenuKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closePlaceMenu(true);
+      return;
+    }
+    if (e.target instanceof HTMLInputElement || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    e.preventDefault();
+    const items = [...this.placeMenu.querySelectorAll<HTMLElement>('button[role^="menuitem"], input')];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+
+  /** Stopwatch controls, and the offer to start one when no media is readable. */
+  private renderSource(): void {
+    if (!this.stopwatchEl) return;
+    const sw = this.source === 'stopwatch';
+    this.stopwatchEl.hidden = !sw;
+    this.chronoButton.hidden = this.hasVideo || !this.ctx;
+    const toggle = this.stopwatchEl.querySelector<HTMLButtonElement>('.sw-toggle')!;
+    const label = this.playback.playing ? 'Mettre le chronomètre en pause' : 'Reprendre le chronomètre';
+    if (toggle.dataset.playing !== String(this.playback.playing)) {
+      toggle.dataset.playing = String(this.playback.playing);
+      toggle.replaceChildren(icon(this.playback.playing ? 'pause' : 'play'));
+      toggle.title = label;
+      toggle.setAttribute('aria-label', label);
+    }
+    this.clockEl.title = sw ? 'Chronomètre' : this.kind === 'page' ? 'Lu jusqu’ici' : 'Position de la vidéo';
+  }
+
+  /** Embedded players found in the page that Boo Notes may not read yet: one click allows them. */
+  private buildPlayersHint(): HTMLDivElement {
+    const button = h('button', { type: 'button', class: 'link-btn' }, 'Autoriser');
+    button.addEventListener('click', () => void this.allowPlayers());
+    return h('div', { class: 'players-hint', hidden: true, role: 'status' }, icon('video', 14), h('span', { class: 'site-text' }), button);
+  }
+
+  private async renderPlayers(hosts: string[]): Promise<void> {
+    const missing: string[] = [];
+    for (const host of hosts) {
+      const has = await chrome.permissions.contains({ origins: [`https://${host}/*`] }).catch(() => false);
+      if (!has) missing.push(host);
+    }
+    // Allowed earlier but loaded before: inject the agent now.
+    if (hosts.length > missing.length && !this.playersInjected) {
+      this.playersInjected = true;
+      this.post({ type: 'players:granted' });
+    }
+    this.pendingPlayers = missing;
+    this.playersHint.hidden = missing.length === 0;
+    (this.playersHint.querySelector('.site-text') as HTMLElement).textContent =
+      missing.length === 1
+        ? `Lecteur intégré (${missing[0]}) : autorisez Boo Notes à le suivre pour horodater vos notes.`
+        : `${missing.length} lecteurs intégrés (${missing.join(', ')}) : autorisez Boo Notes à les suivre.`;
+  }
+
+  private async allowPlayers(): Promise<void> {
+    const origins = this.pendingPlayers.map((host) => `https://${host}`);
+    if (!origins.length) return;
+    // Needs the click's user gesture: requested here, recorded by the background.
+    const granted = await chrome.permissions.request({ origins: origins.map((o) => `${o}/*`) }).catch(() => false);
+    if (!granted) {
+      this.notify('Autorisation refusée', 'error');
+      return;
+    }
+    try {
+      await callBackground({ type: 'players:allow', origins, tabId: TAB_ID });
+      this.post({ type: 'players:granted' });
+      this.playersHint.hidden = true;
+      this.notify('Lecteur autorisé : Boo Notes suit sa lecture', 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
   }
 
   /** On a site activated for this tab only: offer to keep Boo Notes active there. */
@@ -869,6 +1092,8 @@ class PanelApp {
       true,
     );
     document.addEventListener('pointerdown', (e) => {
+      const target = e.target as Node;
+      if (!this.placeMenu.hidden && !this.placeMenu.contains(target) && !this.placeButton.contains(target)) this.closePlaceMenu(false);
       if (!this.menu.hidden && !this.menu.contains(e.target as Node) && e.target !== this.exportButton) {
         this.closeMenu(false);
       }
@@ -900,6 +1125,7 @@ class PanelApp {
           this.knownRev = next.rev;
           this.note = next;
           this.editor.replaceContent(next.markdown);
+          this.renderPlace();
         }
       }
     });

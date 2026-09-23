@@ -3,7 +3,7 @@
   "name": "Boo Notes",
   "short_name": "Boo Notes",
   "version": "0.0.0",
-  "description": "Notes horodatées, citations liées et captures au clavier sur YouTube, Udemy, Coursera, Notion et toute page (vidéo, audio ou article), synchronisées avec Notion.",
+  "description": "Notes horodatées, citations liées et captures au clavier sur toute vidéo ou tout audio du web — YouTube, Udemy, Coursera, Notion, lecteurs intégrés, podcasts, radios — et sur tout article, synchronisées avec Notion.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",
@@ -49,9 +49,38 @@
         "*://*.notion.site/*"
       ],
       "js": [
+        "media-bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.udemy.com/*",
+        "*://*.coursera.org/*",
+        "*://*.notion.so/*",
+        "*://*.notion.site/*"
+      ],
+      "js": [
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.udemy.com/*",
+        "*://*.coursera.org/*",
+        "*://*.notion.so/*",
+        "*://*.notion.site/*"
+      ],
+      "js": [
+        "frame.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [

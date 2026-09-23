@@ -219,7 +219,8 @@ button {
   color: var(--danger);
 }
 
-.site-hint {
+.site-hint,
+.players-hint {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -787,4 +788,140 @@ button {
   .action:active {
     transform: none;
   }
+}
+
+/* Embedded players to allow (same look as the site hint). */
+.players-hint svg {
+  flex: none;
+  color: var(--accent);
+}
+
+/* Stopwatch: a manual clock for streams no script can read. */
+.stopwatch {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.stopwatch[hidden],
+.action.chrono[hidden] {
+  display: none;
+}
+
+.stopwatch .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+:root[data-source='stopwatch'] .clock-now {
+  color: var(--warn);
+}
+
+/* Filing in a course › chapter of the library. */
+.place {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 55%;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--glass-control, var(--surface-2));
+  color: var(--muted);
+  font: 600 var(--text-xs) / 1 var(--font-sans);
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.place:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.place[data-placed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.place-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place-menu {
+  left: 10px;
+  right: auto;
+  max-height: min(420px, 70vh);
+  overflow: auto;
+  transform-origin: top left;
+}
+
+.place-course {
+  padding: 8px 10px 2px;
+  color: var(--text);
+  font-weight: 650;
+  font-size: var(--text-s);
+}
+
+.menu button.place-chapter {
+  min-height: 30px;
+  padding-left: 14px;
+}
+
+.menu-check-space {
+  width: 14px;
+  flex: none;
+}
+
+.place-empty {
+  margin: 4px 10px 8px;
+  color: var(--faint);
+  font-size: var(--text-s);
+  line-height: 1.45;
+}
+
+.place-form {
+  display: grid;
+  gap: 6px;
+  padding: 2px 4px 6px;
+}
+
+.place-form .menu-label {
+  padding: 4px 6px 0;
+}
+
+.place-form input {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-s);
+}
+
+.place-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.menu .place-submit {
+  justify-content: center;
+  min-height: 30px;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.menu .place-submit:hover {
+  background: var(--accent-strong);
+  filter: brightness(1.08);
+}
+
+.menu button.danger {
+  color: var(--danger);
 }

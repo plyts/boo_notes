@@ -35,6 +35,18 @@ export interface Note {
   rev: number;
   /** Editor instance that wrote the last revision (to ignore our own echoes). */
   lastWriter?: string;
+  /** Filing in the desktop library: course and chapter titles (created there if missing). */
+  course?: string;
+  chapter?: string;
+  /** When the filing last changed (the latest filing wins, app or browser). */
+  placedAt?: number;
+}
+
+/** A course of the library, as offered to file a note in. */
+export interface CourseOption {
+  title: string;
+  emoji?: string;
+  chapters: string[];
 }
 
 export interface NoteMeta {
@@ -47,6 +59,8 @@ export interface NoteMeta {
 export interface NoteSummary extends NoteMeta {
   updatedAt: number;
   progress?: MediaProgress;
+  course?: string;
+  chapter?: string;
 }
 
 export interface AssetRecord {
@@ -111,11 +125,26 @@ export class NoteStore {
     return this.exclusive(() => this.write(id, meta, (current) => appendBlock(current, block), writer));
   }
 
+  /** Files the note in a course › chapter (null: unfiled). */
+  placeNote(id: string, meta: NoteMeta, place: { course: string; chapter: string } | null): Promise<Note> {
+    const course = place?.course.trim().slice(0, 120);
+    const chapter = place?.chapter.trim().slice(0, 120);
+    if (place && !course) throw new Error('Nom de cours manquant');
+    return this.exclusive(() =>
+      this.write(id, meta, (current) => current, undefined, {
+        course: course || undefined,
+        chapter: course ? chapter || 'Chapitre 1' : undefined,
+        placedAt: Date.now(),
+      }),
+    );
+  }
+
   private async write(
     id: string,
     meta: NoteMeta,
     update: (current: string) => string,
     writer?: string,
+    patch: Partial<Pick<Note, 'course' | 'chapter' | 'placedAt'>> = {},
   ): Promise<Note> {
     const prev = await this.getOrDraft(id, meta);
     const note: Note = {
@@ -129,11 +158,25 @@ export class NoteStore {
       updatedAt: Date.now(),
       rev: prev.rev + 1,
       lastWriter: writer,
+      ...patch,
     };
+    if ('course' in patch && patch.course === undefined) {
+      delete note.course;
+      delete note.chapter;
+    }
     const res = await this.area.get([INDEX, OUTBOX]);
     const index = (res[INDEX] as Record<string, NoteSummary> | undefined) ?? {};
     const outbox = (res[OUTBOX] as Record<string, number> | undefined) ?? {};
-    index[id] = { ...index[id], platform: note.platform, kind: note.kind, url: note.url, title: note.title, updatedAt: note.updatedAt };
+    index[id] = {
+      ...index[id],
+      platform: note.platform,
+      kind: note.kind,
+      url: note.url,
+      title: note.title,
+      updatedAt: note.updatedAt,
+      course: note.course,
+      chapter: note.chapter,
+    };
     outbox[id] = note.rev;
     await this.area.set({ [noteKey(id)]: note, [INDEX]: index, [OUTBOX]: outbox });
     return note;

@@ -785,7 +785,13 @@ export class Library extends EventEmitter<LibraryEvents> {
 
   /** Filing chosen in the browser (course / chapter titles): applied when more recent than the app's. */
   private fileFromExtension(ext: ExtensionNote, existing: Note | undefined): boolean {
-    if (!ext.course?.trim()) return false;
+    if (!ext.course?.trim()) {
+      // Unfiled in the browser (« Retirer du cours »), after the app's last filing.
+      if (!ext.placedAt || (existing?.placedAt && existing.placedAt >= ext.placedAt) || !this.placements.has(ext.id)) return false;
+      this.unplace(ext.id);
+      this.notes[ext.id] = { ...(this.notes[ext.id] ?? ({ id: ext.id } as Note)), placedAt: ext.placedAt };
+      return true;
+    }
     const at = ext.placedAt ?? ext.updatedAt;
     if (existing?.placedAt && existing.placedAt >= at) return false;
     const course =

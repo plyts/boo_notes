@@ -1,6 +1,9 @@
 import {
+  FRAME_PORT,
   isCommand,
   type BackgroundRequest,
+  type BackgroundToFrame,
+  type FrameToBackground,
   type BackgroundResponses,
   type CommandId,
   type NotionStatus,
@@ -11,7 +14,7 @@ import {
 import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
-import { NoteStore } from '../shared/store';
+import { NoteStore, type CourseOption } from '../shared/store';
 import { asciiFileName, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
 import { SessionState } from './session';
@@ -28,6 +31,8 @@ const SYNC_ALARM = 'boo-notes-sync-retry';
 const NOTION_ALARM = 'boo-notes-notion';
 /** Titles of the desktop app's library (revision sheets…), for `[[` completion. */
 const DESKTOP_TITLES = 'desktop:titles';
+/** Courses of the desktop library (title, emoji, chapters), to file notes from the panel. */
+const DESKTOP_COURSES = 'desktop:courses';
 
 const sync: DesktopSync = new DesktopSync({
   store,
@@ -41,6 +46,7 @@ const sync: DesktopSync = new DesktopSync({
   onNotionConfig: (config) => void notion.applyDesktopConfig(config),
   onNotionLink: (noteId, link) => void notion.applyDesktopLink(noteId, link),
   onTitles: (titles) => void chrome.storage.local.set({ [DESKTOP_TITLES]: titles }),
+  onCourses: (courses) => void chrome.storage.local.set({ [DESKTOP_COURSES]: courses }),
 });
 
 const notion: ExtensionNotion = new ExtensionNotion({
@@ -123,6 +129,8 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
   } catch {
     return false; // chrome:// pages, the Web Store, PDF viewer… or no permission.
   }
+  // Off-DOM players started from now on (`new Audio()`) become visible to it.
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['media-bridge.js'], world: 'MAIN' }).catch(noop);
   for (let i = 0; i < 40; i++) {
     if (await hasContentScript(tabId)) return true;
     await new Promise((r) => setTimeout(r, 100));
@@ -130,10 +138,66 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
   return false;
 }
 
+// --- Embedded players (sub-frames) ------------------------------------------------------
+
+/** Frame agents connected, by `tabId:frameId`. */
+const framePorts = new Map<string, chrome.runtime.Port>();
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== FRAME_PORT || port.sender?.id !== chrome.runtime.id) return;
+  const tabId = port.sender.tab?.id;
+  const frameId = port.sender.frameId;
+  if (tabId === undefined || frameId === undefined || frameId === 0) {
+    port.disconnect();
+    return;
+  }
+  const key = `${tabId}:${frameId}`;
+  framePorts.set(key, port);
+  port.onMessage.addListener((msg: FrameToBackground) => {
+    if (msg.type === 'media') void sendToTab(tabId, { type: 'frame:media', frameId, media: msg.media });
+    else if (msg.type === 'gone') void sendToTab(tabId, { type: 'frame:media', frameId, media: null });
+    else if (msg.type === 'shot') void sendToTab(tabId, { type: 'frame:shot', id: msg.id, shot: msg.shot, error: msg.error });
+  });
+  port.onDisconnect.addListener(() => {
+    if (framePorts.get(key) === port) framePorts.delete(key);
+    void sendToTab(tabId, { type: 'frame:media', frameId, media: null });
+  });
+});
+
+/** Frame agent + main-world bridge in every sub-frame of the tab the extension may read. */
+async function injectFrames(tabId: number): Promise<void> {
+  // Frames the extension has no access to are skipped by Chrome.
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['media-bridge.js'], world: 'MAIN' }).catch(noop);
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['frame.js'] }).catch(noop);
+}
+
+const PLAYERS_KEY = 'players:allowed';
+const PLAYERS_SCRIPT_ID = 'boo-notes-players';
+const PLAYERS_BRIDGE_ID = 'boo-notes-players-bridge';
+
+async function allowedPlayers(): Promise<string[]> {
+  return ((await chrome.storage.local.get(PLAYERS_KEY))[PLAYERS_KEY] as string[] | undefined) ?? [];
+}
+
+/** Embedded players the user allowed: their frames get the agent on every site. */
+async function syncPlayerScripts(origins: string[]): Promise<void> {
+  const ids = [PLAYERS_SCRIPT_ID, PLAYERS_BRIDGE_ID];
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+  if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: existing.map((s) => s.id) });
+  if (!origins.length) return;
+  const matches = origins.map((o) => `${o}/*`);
+  await chrome.scripting.registerContentScripts([
+    { id: PLAYERS_BRIDGE_ID, matches, js: ['media-bridge.js'], allFrames: true, runAt: 'document_start', world: 'MAIN', persistAcrossSessions: true },
+    { id: PLAYERS_SCRIPT_ID, matches, js: ['frame.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true },
+  ]);
+}
+
 // --- Sites where Boo Notes is always active -----------------------------------------------
 
 const SITES_KEY = 'sites:enabled';
 const SITES_SCRIPT_ID = 'boo-notes-sites';
+const SITES_BRIDGE_ID = 'boo-notes-sites-bridge';
+const SITES_FRAMES_ID = 'boo-notes-sites-frames';
 
 async function enabledSites(): Promise<string[]> {
   return ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] as string[] | undefined) ?? [];
@@ -141,20 +205,17 @@ async function enabledSites(): Promise<string[]> {
 
 /** Keeps a dynamic content script registered for every always-enabled origin. */
 async function syncSiteScripts(origins: string[]): Promise<void> {
-  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [SITES_SCRIPT_ID] });
-  if (origins.length === 0) {
-    if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: [SITES_SCRIPT_ID] });
-    return;
-  }
-  const script: chrome.scripting.RegisteredContentScript = {
-    id: SITES_SCRIPT_ID,
-    matches: origins.map((o) => `${o}/*`),
-    js: ['content.js'],
-    runAt: 'document_idle',
-    persistAcrossSessions: true,
-  };
-  if (existing.length) await chrome.scripting.updateContentScripts([script]);
-  else await chrome.scripting.registerContentScripts([script]);
+  const ids = [SITES_SCRIPT_ID, SITES_BRIDGE_ID, SITES_FRAMES_ID];
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+  if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: existing.map((s) => s.id) });
+  if (origins.length === 0) return;
+  const matches = origins.map((o) => `${o}/*`);
+  await chrome.scripting.registerContentScripts([
+    // Off-DOM players are docked from the first line of the page's own scripts.
+    { id: SITES_BRIDGE_ID, matches, js: ['media-bridge.js'], allFrames: true, runAt: 'document_start', world: 'MAIN', persistAcrossSessions: true },
+    { id: SITES_SCRIPT_ID, matches, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true },
+    { id: SITES_FRAMES_ID, matches, js: ['frame.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true },
+  ]);
 }
 
 function normalizeOrigin(origin: string): string {
@@ -268,6 +329,28 @@ const handlers: Handlers = {
     void sync.notifyChanged();
     void notion.enqueue(msg.noteId);
     return note;
+  },
+
+  'note:place': async (msg) => {
+    const note = await store.placeNote(msg.noteId, msg.meta, msg.place);
+    void sync.notifyChanged();
+    void notion.enqueue(msg.noteId);
+    return note;
+  },
+
+  'library:courses': async () => {
+    const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_COURSES)]);
+    const courses = new Map<string, CourseOption>();
+    for (const c of (stored[DESKTOP_COURSES] as CourseOption[] | undefined) ?? []) courses.set(normalizeTitle(c.title), { ...c, chapters: [...c.chapters] });
+    // Courses typed in the panel while the app was closed are offered too.
+    for (const n of Object.values(index)) {
+      if (!n.course) continue;
+      const key = normalizeTitle(n.course);
+      const c = courses.get(key) ?? { title: n.course, chapters: [] };
+      if (n.chapter && !c.chapters.some((t) => normalizeTitle(t) === normalizeTitle(n.chapter!))) c.chapters.push(n.chapter);
+      courses.set(key, c);
+    }
+    return [...courses.values()];
   },
 
   'asset:save': async (msg) => {
@@ -392,6 +475,29 @@ const handlers: Handlers = {
       void sync.sendProgress(msg.noteId);
       void notion.enqueue(msg.noteId, 'progress');
     }
+  },
+
+  'frame:command': async (msg, sender) => {
+    const tabId = requireTab(sender).id;
+    framePorts.get(`${tabId}:${msg.frameId}`)?.postMessage({ type: 'command', command: msg.command } satisfies BackgroundToFrame);
+  },
+
+  'frames:inject': async (_msg, sender) => {
+    await injectFrames(requireTab(sender).id);
+  },
+
+  'players:allow': async (msg) => {
+    const granted: string[] = [];
+    for (const o of msg.origins) {
+      const origin = normalizeOrigin(o);
+      // The permission itself is requested by the panel (it needs a user gesture).
+      if (await chrome.permissions.contains({ origins: [`${origin}/*`] })) granted.push(origin);
+    }
+    if (!granted.length) throw new Error('Autorisation refusée pour ce lecteur');
+    const players = [...new Set([...(await allowedPlayers()), ...granted])].sort();
+    await chrome.storage.local.set({ [PLAYERS_KEY]: players });
+    await syncPlayerScripts(players);
+    await injectFrames(msg.tabId);
   },
 
   'sites:list': () => enabledSites(),
@@ -546,14 +652,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Declared content scripts only run on page load: add them to video tabs already open.
   for (const cs of chrome.runtime.getManifest().content_scripts ?? []) {
     if (!cs.matches || !cs.js) continue;
+    const world = (cs as { world?: 'MAIN' | 'ISOLATED' }).world ?? 'ISOLATED';
     const tabs = await chrome.tabs.query({ url: cs.matches });
     for (const t of tabs) {
       if (t.id !== undefined && !t.discarded) {
-        chrome.scripting.executeScript({ target: { tabId: t.id }, files: cs.js }).catch(noop);
+        chrome.scripting.executeScript({ target: { tabId: t.id, allFrames: Boolean(cs.all_frames) }, files: cs.js, world }).catch(noop);
       }
     }
   }
   await syncSiteScripts(await enabledSites()).catch(noop);
+  await syncPlayerScripts(await allowedPlayers()).catch(noop);
   if (details.reason === 'install') {
     await chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html#bienvenue') });
   }

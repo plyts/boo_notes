@@ -83,6 +83,8 @@ export function noteToSyncItem(note: Note, progress: MediaProgress | null): Sync
     nextReview: null,
     body: note.markdown,
     links: linkedTitles(note.markdown),
+    // Filed in the panel: « Cours » and « Chapitre » columns (cleared when unfiled).
+    ...(note.placedAt ? { course: note.course ?? null, chapter: note.chapter ?? null } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import type { MediaKind, VideoContext } from './platforms';
-import type { AssetRecord, Note, NoteMeta, NoteSummary } from './store';
+import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
 
 /** Keyboard commands declared in manifest.json (configurable in chrome://extensions/shortcuts). */
 export const COMMANDS = [
@@ -50,6 +50,49 @@ export interface CaptureRect {
   height: number;
 }
 
+/** Where the playback position comes from. */
+export type MediaSource = 'element' | 'frame' | 'stopwatch';
+
+/**
+ * A media playing inside a sub-frame (embedded player: Vimeo, Kaltura,
+ * Panopto, a YouTube embed…), as reported by the frame agent living there.
+ */
+export interface FrameMedia {
+  kind: 'video' | 'audio';
+  title: string;
+  playback: PlaybackState;
+  /** Player box and displayed picture, in the frame's viewport (CSS px). */
+  box: CaptureRect | null;
+  content: CaptureRect | null;
+  viewport: { width: number; height: number };
+  /** Random id, also posted to the parent window so it can find the <iframe> element. */
+  token: string;
+  href: string;
+}
+
+export type FrameCommand =
+  | { op: 'play' }
+  | { op: 'pause' }
+  | { op: 'seek'; seconds: number }
+  | { op: 'capture'; id: number; mime: string; quality: number };
+
+export interface FrameShot {
+  dataUrl: string;
+  width: number;
+  height: number;
+  mime: string;
+}
+
+/** Port between a frame agent and the background. */
+export const FRAME_PORT = 'boo-notes-frame';
+
+export type FrameToBackground =
+  | { type: 'media'; media: FrameMedia }
+  | { type: 'gone' }
+  | { type: 'shot'; id: number; shot: FrameShot | null; error: string | null };
+
+export type BackgroundToFrame = { type: 'command'; command: FrameCommand };
+
 /** Messages sent to the background service worker (chrome.runtime.sendMessage). */
 export type BackgroundRequest =
   | { type: 'hello' }
@@ -61,6 +104,10 @@ export type BackgroundRequest =
   | { type: 'note:get'; noteId: string; meta: NoteMeta }
   | { type: 'note:save'; noteId: string; meta: NoteMeta; markdown: string; writer: string }
   | { type: 'note:append'; noteId: string; meta: NoteMeta; text: string }
+  /** Files the note in a course › chapter of the library (null: unfiled). */
+  | { type: 'note:place'; noteId: string; meta: NoteMeta; place: { course: string; chapter: string } | null }
+  /** Courses to file a note in: the desktop library's, and those already used here. */
+  | { type: 'library:courses' }
   | {
       type: 'asset:save';
       noteId: string;
@@ -79,6 +126,12 @@ export type BackgroundRequest =
       quality: number;
     }
   | { type: 'export'; noteId: string; target: ExportTarget }
+  /** Drives the media of a sub-frame of the sender's tab. */
+  | { type: 'frame:command'; frameId: number; command: FrameCommand }
+  /** Injects the frame agent into every sub-frame of the sender's tab the extension may read. */
+  | { type: 'frames:inject' }
+  /** Embedded players the user allowed (origins): the agent is injected there from now on. */
+  | { type: 'players:allow'; origins: string[]; tabId: number }
   | { type: 'popout:open'; noteId: string }
   | { type: 'popout:close'; tabId: number }
   | { type: 'options:open' }
@@ -109,9 +162,14 @@ export interface BackgroundResponses {
   'note:get': Note;
   'note:save': Note;
   'note:append': Note;
+  'note:place': Note;
+  'library:courses': CourseOption[];
   'asset:save': Pick<AssetRecord, 'path'>;
   'capture:visible-tab': { dataUrl: string; width: number; height: number };
   export: { message: string };
+  'frame:command': void;
+  'frames:inject': void;
+  'players:allow': void;
   'popout:open': { windowId: number };
   'popout:close': void;
   'options:open': void;
@@ -149,7 +207,10 @@ export type TabMessage =
   | { type: 'ping' }
   | { type: 'command'; command: CommandId }
   | { type: 'popout:closed' }
-  | { type: 'player:active'; active: boolean };
+  | { type: 'player:active'; active: boolean }
+  /** State of the media of a sub-frame (null: gone). */
+  | { type: 'frame:media'; frameId: number; media: FrameMedia | null }
+  | { type: 'frame:shot'; id: number; shot: FrameShot | null; error: string | null };
 
 // --- Panel (iframe / pop-out window) <-> content script port -------------
 
@@ -179,10 +240,13 @@ export type ContentToPanel =
       kind: MediaKind;
       playback: PlaybackState;
       pageTheme: PageTheme;
+      source: MediaSource | null;
     }
   | { type: 'context'; ctx: VideoContext | null; title: string }
   /** `hasVideo`: a media (video or audio) is attached; `kind` tells which. */
-  | { type: 'playback'; playback: PlaybackState; hasVideo: boolean; kind: MediaKind }
+  | { type: 'playback'; playback: PlaybackState; hasVideo: boolean; kind: MediaKind; source: MediaSource | null }
+  /** Embedded players (hosts) found in the page that Boo Notes may not read yet. */
+  | { type: 'players'; hosts: string[] }
   | { type: 'insert-timestamp'; seconds: number; focus: boolean }
   /** Any anchor token prefixed to the line (`[↗ Section](URL#:~:text=…)` in reading mode). */
   | { type: 'insert-anchor'; token: string; focus: boolean }
@@ -217,4 +281,8 @@ export type PanelToContent =
   /** Reading mode: quote the page selection (or anchor the section being read). */
   | { type: 'quote' }
   /** Reading mode: scroll to a quoted passage and flash it. */
-  | { type: 'reveal'; url: string };
+  | { type: 'reveal'; url: string }
+  /** Manual clock, for streams no script can read (DRM, native players, lectures in the room). */
+  | { type: 'stopwatch'; action: 'start' | 'pause' | 'reset' }
+  /** The user allowed embedded players: look for their media again. */
+  | { type: 'players:granted' };

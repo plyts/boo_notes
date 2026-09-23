@@ -22,6 +22,23 @@ describe('NoteStore', () => {
     expect(Object.keys(await store.listNotes())).toEqual(['youtube:abcdefghijk']);
   });
 
+  it('files a note in a course › chapter, then unfiles it, keeping its text', async () => {
+    const store = new NoteStore(new MemoryArea());
+    await store.saveNote('n', meta, 'Résistance');
+    const filed = await store.placeNote('n', meta, { course: '  Physique ', chapter: '' });
+    expect(filed).toMatchObject({ course: 'Physique', chapter: 'Chapitre 1', markdown: 'Résistance', rev: 2 });
+    expect(filed.placedAt).toBeGreaterThan(0);
+    expect((await store.listNotes()).n).toMatchObject({ course: 'Physique', chapter: 'Chapitre 1' });
+    // Later saves keep the filing.
+    expect(await store.saveNote('n', meta, 'Résistance R')).toMatchObject({ course: 'Physique', rev: 3 });
+    const unfiled = await store.placeNote('n', meta, null);
+    expect(unfiled.course).toBeUndefined();
+    expect(unfiled.chapter).toBeUndefined();
+    expect(unfiled.markdown).toBe('Résistance R');
+    expect(await store.getOutbox()).toEqual({ n: 4 });
+    expect(() => store.placeNote('n', meta, { course: ' ', chapter: 'x' })).toThrow(/cours/);
+  });
+
   it('serialises concurrent appends', async () => {
     const store = new NoteStore(new MemoryArea());
     await Promise.all([1, 2, 3].map((i) => store.appendToNote('n', meta, `line ${i}`)));

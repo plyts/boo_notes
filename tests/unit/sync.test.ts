@@ -146,6 +146,7 @@ describe('DesktopSync', () => {
       onNotionConfig: (c) => got.push(['config', c]),
       onNotionLink: (id, l) => got.push(['link', id, l]),
       onTitles: (t) => got.push(['titles', t]),
+      onCourses: (c) => got.push(['courses', c]),
     });
     await store.saveNote('n', meta, 'x');
     await sync.connect();
@@ -162,8 +163,15 @@ describe('DesktopSync', () => {
     socket.receive({ type: 'notion.config', config: null, connected: true });
     socket.receive({ type: 'notion.link', noteId: 'n', link });
     socket.receive({ type: 'library.titles', titles: ['Fiche A', 3, 'Fiche B'] });
+    socket.receive({ type: 'library.courses', courses: [{ title: 'Physique', emoji: '⚡', chapters: ['Ohm', 4] }, { nope: true }] });
     expect(sync.appHandlesNotion).toBe(true);
-    expect(got).toEqual([['config', null], ['config', null], ['link', 'n', link], ['titles', ['Fiche A', 'Fiche B']]]);
+    expect(got).toEqual([
+      ['config', null],
+      ['config', null],
+      ['link', 'n', link],
+      ['titles', ['Fiche A', 'Fiche B']],
+      ['courses', [{ title: 'Physique', emoji: '⚡', chapters: ['Ohm'] }]],
+    ]);
 
     expect(sync.openInApp('Fiche A')).toBe(true);
     expect(socket.sent.at(-1)).toEqual({ type: 'open', title: 'Fiche A' });

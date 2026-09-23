@@ -25,6 +25,9 @@ export const INTER_FILES = ['inter-latin-opsz-normal.woff2', 'inter-latin-ext-op
 const entries = [
   { entryPoints: [join(src, 'background/index.ts')], outfile: join(out, 'background.js'), format: 'esm' },
   { entryPoints: [join(src, 'content/index.ts')], outfile: join(out, 'content.js'), format: 'iife' },
+  // Sub-frames (embedded players) and the page's own world (off-DOM `new Audio()` players).
+  { entryPoints: [join(src, 'content/frame.ts')], outfile: join(out, 'frame.js'), format: 'iife' },
+  { entryPoints: [join(src, 'content/media-bridge.ts')], outfile: join(out, 'media-bridge.js'), format: 'iife' },
   { entryPoints: [join(src, 'panel/index.ts')], outfile: join(out, 'panel/panel.js'), format: 'iife' },
   { entryPoints: [join(src, 'options/index.ts')], outfile: join(out, 'options/options.js'), format: 'iife' },
 ];
