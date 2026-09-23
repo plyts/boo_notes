@@ -8,6 +8,8 @@
 |  +-------------------------------------------+                                   |
 |  | Content script (src/content)              |   runtime.sendMessage             |
 |  |  - MediaController : <video> / <audio>    | --------------------+             |
+|  |  - PageReader : mode lecture (citations,  |                     |             |
+|  |    passages surlignés, % lu)              |                     |             |
 |  |  - Overlay (Shadow DOM) : HUD, toasts,    |                     v             |
 |  |    flash, marqueur de progression         |   +----------------------------+  |
 |  |  - Drawer : conteneur + <iframe> panneau  |   | Service worker             |  |
@@ -18,10 +20,10 @@
 |        v                                         |  - NoteStore (storage)     |  |
 |  +-------------------------------------------+   |  - export / téléchargement |  |
 |  | Panneau (src/panel, page d’extension)     |   |  - DesktopSync (WebSocket) |  |
-|  |  iframe du drawer OU fenêtre pop-out      |   +----------------------------+  |
-|  |  - éditeur CodeMirror 6 (partagé Desktop) | ---- note:save / get ---^   |     |
-|  |  - badge sync, export, pin, pop-out       |                             |     |
-|  +-------------------------------------------+                             |     |
+|  |  iframe du drawer OU fenêtre pop-out      |   |  - ExtensionNotion : API   |  |
+|  |  - éditeur CodeMirror 6 (partagé Desktop) |   |    Notion si app fermée    |  |
+|  |  - badge sync, export, pin, pop-out       |   +----------------------------+  |
+|  +-------------------------------------------+ -- note:save / get --^      |     |
 +----------------------------------------------------------------------------|-----+
                                     WebSocket ws://localhost:43117 + jeton   |
                                                                              v
@@ -39,8 +41,8 @@
 
 | Contexte | Fichier d’entrée | Responsabilités |
 | --- | --- | --- |
-| **Service worker** | `src/background/index.ts` | Reçoit les raccourcis globaux (`chrome.commands`) et le clic sur l’icône ; choisit le lecteur cible ; seul écrivain du stockage (`NoteStore`) ; captures de repli (`captureVisibleTab`) ; export `.md` ; fenêtre pop-out ; synchronisation Desktop (`DesktopSync`). |
-| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes. |
+| **Service worker** | `src/background/index.ts` | Reçoit les raccourcis globaux (`chrome.commands`) et le clic sur l’icône ; choisit le lecteur cible ; seul écrivain du stockage (`NoteStore`) ; captures de repli (`captureVisibleTab`) ; export `.md` ; fenêtre pop-out ; synchronisation Desktop (`DesktopSync`) ; synchronisation Notion directe quand l’application est fermée (`ExtensionNotion`, `src/background/notion.ts`, même moteur que l’application : `src/shared/notion/`) ; ouverture des `[[liens]]`. |
+| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes ; **mode lecture** (`src/content/reader.ts`) pour une page sans média. |
 | **Panneau** | `src/panel/index.ts` | Éditeur de notes ; tourne soit dans l’iframe du drawer, soit dans la fenêtre pop-out. Communique avec le script de contenu de l’onglet vidéo par un *port*. |
 | **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données. |
 
@@ -59,8 +61,24 @@ et les jetons `src/tokens.css`.
 `MediaController` choisit la plus grande `<video>` visible, sinon un `<audio>` (même caché) qui
 joue ou a une source ; une vidéo sans image (`videoWidth = 0`) est traitée comme un audio. Pour un
 audio, la capture est désactivée (message explicite) ; horodatage, auto-pause, saut arrière et
-progression fonctionnent à l’identique. Sur Notion et les sites génériques, une page n’a de note que
-si elle contient un média (`requiresMedia`).
+progression fonctionnent à l’identique.
+
+**Mode lecture.** Sur Notion et les sites génériques (`requiresMedia`), une page **sans** média est
+notée comme un document (`kind: "page"`), dès que l’utilisateur ouvre les notes :
+
+- `Alt+Shift+T` (ou la bulle « Citer » affichée près de la sélection quand les notes sont ouvertes)
+  écrit `> passage [↗](URL#:~:text=début,fin)` ; sans sélection, la ligne est ancrée à la section
+  lue (`[↗ Titre](URL#:~:text=Titre)`) ; `Alt+Shift+S` capture la partie visible de la page.
+- Les passages de la note sont retrouvés dans la page (index du texte sans espaces ni casse,
+  `TreeWalker`, balises en ligne et limites de blocs ignorées) et **surlignés** avec la *CSS Custom
+  Highlight API* : aucun élément de la page n’est modifié, seule une feuille `::highlight()` est
+  ajoutée. Ils sont relus depuis `chrome.storage` (surlignage même panneau fermé, à chaque visite)
+  et réessayés quand l’application affiche son contenu en différé (Notion).
+- Page → note : pendant le défilement, la ligne de la note qui cite le passage lu est surlignée.
+  Note → page : un clic sur `↗` fait défiler jusqu’au passage et le fait clignoter (dans un autre
+  onglet s’il s’agit d’une autre page : le navigateur interprète lui-même `#:~:text=`).
+- La progression est le point le plus loin atteint (`position` 0–100, `duration` 100), mesurée sur
+  le document ou le conteneur défilant principal (Notion ne fait pas défiler le document).
 
 La **progression** (position / durée) d’un média qui a une note est enregistrée à la pause, à la
 fin, après un saut, toutes les 15 s de lecture et à la fermeture de la page, puis envoyée à
@@ -138,9 +156,13 @@ macOS Option).
 | `progress:<noteId>` | dernière position de lecture `{ position, duration, updatedAt }` |
 | `sync:progress` | positions pas encore envoyées à l’application Desktop |
 | `sites:enabled` | origines où Boo Notes s’active à chaque visite |
+| `notion:config` | connexion Notion (secret, tableau, page hub, origine : `desktop` ou `extension`) |
+| `notion:link:<noteId>` | page Notion de la note et empreintes de ses blocs (synchro incrémentale) |
+| `notion:pending` | notes à écrire dans Notion (application fermée) |
+| `desktop:titles` | titres de la bibliothèque Desktop (complétion `[[`) |
 
 `noteId` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<item>`, `notion:<page>`,
-`web:<hôte><chemin>` — une note par vidéo / audio.
+`web:<hôte><chemin>` — une note par vidéo, audio ou page.
 Les écritures passent toutes par le SW et sont sérialisées ; `rev` croît à chaque sauvegarde, ce
 qui permet à un second éditeur (pop-out) d’ignorer ses propres échos et d’appliquer les autres.
 
@@ -168,4 +190,7 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
   explicitement autorisé (« Toujours activer ici », permission révocable dans les réglages).
 - L’adresse Desktop est limitée à `localhost` / `127.0.0.1` ; jeton d’appairage ; l’application doit
   vérifier l’en-tête `Origin: chrome-extension://…` (voir [PROTOCOL.md](PROTOCOL.md)).
+- Notion : seule permission d’hôte ajoutée, `https://api.notion.com/*` (l’API n’accepte pas les
+  requêtes CORS des pages). Le secret n’est lu que par le service worker ; les sites n’ont pas accès à
+  `chrome.storage` de l’extension.
 - Les icônes sont construites en DOM (pas d’`innerHTML`), compatible Trusted Types (YouTube).

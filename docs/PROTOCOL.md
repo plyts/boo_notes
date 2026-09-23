@@ -33,16 +33,25 @@ alarme par minute tant que des notes attendent).
 | type | Champs | Réponse attendue |
 | --- | --- | --- |
 | `asset.put` | `path` (`assets/…`), `noteId`, `mime`, `width`, `height`, `time` (s), `data` (base64) | `asset.ack { path }` |
-| `note.upsert` | `note` (`id`, `platform`, `kind`, `url`, `title`, `markdown`, `createdAt`, `updatedAt`, `rev`), `portableMarkdown` | `ack { noteId, rev }` |
+| `note.upsert` | `note` (`id`, `platform`, `kind`, `url`, `title`, `markdown`, `createdAt`, `updatedAt`, `rev`, `notion?`), `portableMarkdown` | `ack { noteId, rev }` |
 | `media.progress` | `noteId`, `kind`, `title`, `url`, `platform`, `position` (s), `duration` (s), `updatedAt` | — |
 | `export` | `requestId`, `noteId`, `target`: `"local"` \| `"notion"` | `export.result { requestId, ok, message }` |
 | `player.active` | `player`: `{ noteId, title, url }` ou `null` | — |
+| `open` | `title` : titre d’une note (clic sur un `[[lien]]` dans le navigateur) | — (l’application s’affiche sur la note, en créant la fiche si besoin) |
 | `ping` | — (toutes les 20 s) | `pong` |
 
 - `note.id` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<leçon>`,
   `notion:<id de page>` (vidéo / audio déposé dans une page Notion) ou `web:<hôte><chemin>` (tout
   autre site activé). `platform` : `youtube` \| `udemy` \| `coursera` \| `notion` \| `web` ;
-  `kind` : `video` \| `audio` (absent = `video`, versions antérieures).
+  `kind` : `video` \| `audio` \| `page` (page lue sans média, notes = citations liées par
+  fragment de texte `URL#:~:text=…`) ; absent = `video` (versions antérieures).
+- `note.notion` (facultatif) : correspondance Notion de la note quand l’extension l’a écrite
+  elle-même dans Notion (application fermée) — `{ pageId, url, blocks: [{ id, hash }], syncedAt,
+  syncedRev }`. L’application garde la plus récente (`syncedAt`) : les deux côtés mettent à jour la
+  même page au lieu d’en créer une seconde. Une note dont seule la correspondance a changé est
+  renvoyée avec le même `rev`.
+- Pour une page lue (`kind: "page"`), `media.progress` porte le **pourcentage lu** : `position`
+  0–100, `duration` 100 (point le plus loin atteint).
 - `media.progress` n’est envoyé que pour un média **qui a une note** : à la pause, à la fin, après
   un saut et toutes les 15 s pendant la lecture. Il n’attend pas de réponse ; la dernière position
   enregistrée hors-ligne est renvoyée à la connexion suivante (après les notes). L’application peut
@@ -64,6 +73,9 @@ alarme par minute tant que des notes attendent).
 | --- | --- |
 | `asset.request { path }` | L’extension renvoie la capture (`asset.put`). |
 | `resync` | L’extension remet toutes ses notes en file et renvoie tout (envoyé par l’application après un changement de dossier de notes). |
+| `notion.config { config, connected }` | Envoyé après `welcome` et à chaque changement. `connected` : l’application écrit elle-même dans Notion (l’extension lui laisse alors cette tâche). `config` : connexion partagée `{ token, databaseId, databaseUrl, parentId, workspace }` pour que l’extension écrive dans Notion quand l’application est fermée, ou `null` (partage désactivé ou Notion déconnecté). Sans ce message (application plus ancienne), l’extension considère que l’application gère Notion. |
+| `notion.link { noteId, link }` | Correspondance Notion d’une note de l’extension, après une synchronisation par l’application (même forme que `note.notion`). |
+| `library.titles { titles }` | Titres de la bibliothèque (fiches, PDF, textes…), proposés par l’extension après `[[` ; renvoyé quand ils changent. |
 | `error { code, message, requestId? }` | `unauthorized` : jeton refusé (affiché dans le badge). Avec `requestId` : échec d’un export. |
 
 ## Exemple de session
@@ -76,6 +88,10 @@ alarme par minute tant que des notes attendent).
 → note.upsert  youtube:dQw4w9WgXcQ rev 7
 ← ack rev 7
 → media.progress  youtube:dQw4w9WgXcQ 255 / 612 s
+← notion.config { connected: true, config: { token: "…", databaseId: "…" } }
+← library.titles { titles: ["useEffect", "Probabilités — Chapitre 3"] }
 → export  { target: "notion", requestId: "exp-…" }
 ← export.result { ok: true, message: "Envoyé vers Notion" }
+← notion.link  youtube:dQw4w9WgXcQ { pageId: "…", syncedRev: 7 }
+→ open  { title: "useEffect" }
 ```

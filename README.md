@@ -1,18 +1,28 @@
-# Boo Notes — notes horodatées pour vos cours
+# Boo Notes — des notes liées à tout ce que vous étudiez
 
-Prise de notes **au clavier** pendant une vidéo, un audio ou la lecture d’un PDF : chaque ligne est
-horodatée (ou rattachée à sa page), les captures d’écran arrivent en vignette dans la note Markdown,
-la progression de chaque cours est suivie, et tout se synchronise avec **Notion**.
+Prise de notes **au clavier**, quel que soit le support : chaque note reste **liée à son origine**
+— l’instant d’une vidéo ou d’un audio, la page d’un PDF, le passage d’un article ou d’une page
+Notion, le paragraphe d’un texte, le repère posé sur un graphe — et y ramène d’un clic, dans les
+deux sens. Les notes deviennent des **fiches de révision** reliées par `[[liens]]`, et **Notion**
+les garde toutes dans un tableau de votre page.
 
 - **Extension navigateur** (Chrome, Edge, Brave…) : YouTube, Udemy, Coursera, vidéos et audios
-  déposés dans **Notion**, et n’importe quel site vidéo ou audio (podcasts, radios, plateformes
-  de cours) activé d’un clic.
+  déposés dans **Notion**, tout site vidéo ou audio, et **toute page à lire** (article, chapitre de
+  cours, documentation, page Notion) en **mode lecture** : citations liées au passage, surlignées
+  dans la page, progression de lecture.
 - **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : bibliothèque de tous vos
-  cours, lecteur **PDF** annoté (notes par page, surlignage, citations, suivi de lecture), lecteur
-  audio / vidéo local, dossier de notes Markdown, et synchronisation **Notion** : une page par
-  cours avec sa progression ([docs/NOTION.md](docs/NOTION.md)).
+  supports, lecteur **PDF** annoté, **textes** et **images** (graphes, schémas) annotés, audio /
+  vidéo locaux, **fiches de révision** reliées avec révision espacée, dossier de notes Markdown.
+- **Notion** ([docs/NOTION.md](docs/NOTION.md)) : le tableau « Boo Notes — Mes notes » intégré à la
+  page de votre choix, une page par note, les `[[liens]]` en mentions et en relations « Liens » /
+  « Liée depuis » — écrit par l’application, ou directement par l’extension quand elle est fermée.
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
+
+**Mode lecture** — un article : le passage cité est surligné dans la page et relié à sa note ;
+la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie une fiche.
+
+![Mode lecture sur un article](docs/screenshots/reading-mode.png)
 
 | Note vide : le mode d’emploi | Raccourcis (`Ctrl/⌘ + /`) | Toast de capture |
 | --- | --- | --- |
@@ -41,9 +51,10 @@ npm run build        # → dist/
 
 1. Ouvrir `chrome://extensions`, activer le **mode développeur**.
 2. **Charger l’extension non empaquetée** → sélectionner le dossier `dist/`.
-3. Ouvrir une vidéo YouTube, une leçon Udemy ou Coursera, une page Notion contenant une vidéo ou
-   un audio, puis `Alt+Shift+N`. Sur tout autre site (podcast…), cliquer l’icône Boo Notes ou
-   `Alt+Shift+N` active l’extension pour l’onglet ; « Toujours activer ici » la garde pour le site.
+3. Ouvrir une vidéo YouTube, une leçon Udemy ou Coursera, une page Notion, puis `Alt+Shift+N`. Sur
+   tout autre site (podcast, article…), cliquer l’icône Boo Notes ou `Alt+Shift+N` active
+   l’extension pour l’onglet ; « Toujours activer ici » la garde pour le site. Une page sans vidéo
+   ni audio s’ouvre en **mode lecture**.
 
 `npm run watch` reconstruit à chaque modification (recharger l’extension ensuite).
 
@@ -52,8 +63,8 @@ npm run build        # → dist/
 | Action | Défaut | Comportement |
 | --- | --- | --- |
 | Ouvrir / réduire le panneau | `Alt+Shift+N` | Ouvre le panneau et donne le focus à l’éditeur ; `Échap` le referme. |
-| Insérer l’horodatage | `Alt+Shift+T` | Injecte `[MM:SS]` au curseur, sans interrompre la lecture. |
-| Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. |
+| Insérer l’horodatage | `Alt+Shift+T` | Injecte `[MM:SS]` au curseur, sans interrompre la lecture. **Mode lecture** : cite le passage sélectionné (`> texte [↗](URL#:~:text=…)`), ou, sans sélection, ancre la ligne à la section lue (`[↗ Titre](…)`). |
+| Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. **Mode lecture** : capture la partie visible de la page. |
 | Smart Pause | `Alt+Shift+Space` | Pause + focus sur une nouvelle ligne de l’éditeur ; un second appui relance la vidéo et rend le clavier au lecteur. |
 | Saut arrière | `Alt+←` | Recule de 5 s (3 / 5 / 10 / 15 s au choix). |
 | Aide | `Ctrl+/` (`⌘/`) | Dans le panneau : feuille de tous les raccourcis (et `?` hors de l’éditeur). |
@@ -77,7 +88,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Non-intrusivité** | Le lecteur n’est jamais modifié : HUD, toasts, flash et marqueur sont dessinés dans un calque séparé (Shadow DOM) positionné d’après la géométrie de la vidéo. En mode « côte à côte », la page est décalée de la largeur du panneau et le panneau commence sous l’en-tête fixe de YouTube. |
 | **Flow 1** | `Alt+Shift+N` → panneau + focus ; la première lettre tapée sur une ligne vide ajoute `[MM:SS]` (après `- `, `1. `, `## `, `> ` si présents) ; `Échap` ferme ou panneau laissé ouvert. |
 | **Flow 2** | `Alt+Shift+S` → extraction `<canvas>` en résolution native, flash blanc 100 ms, toast `04:15 - Capture sauvegardée`, ligne `[04:15] ![Capture 04:15](assets/…)` rendue en vignette. |
-| **Drawer** | À droite, 300–500 px (360 par défaut, poignée de redimensionnement), badge de synchronisation (vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion via Desktop, `.md` + captures, presse-papier). |
+| **Drawer** | À droite, 300–500 px (360 par défaut, poignée de redimensionnement), badge de synchronisation (vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion — via l’app ou directement —, `.md` + captures, presse-papier). |
 | **Éditeur** | CodeMirror 6 : Markdown rendu sur les lignes inactives (titres, gras, code, citations), horodatages cliquables, vignettes, listes continuées. |
 | **HUD** | `[ 04:15 ]` copie `[04:15](URL#t=255)` ; 📸 capture ; 📌 épingle le panneau ; ⚙️ paramètres. |
 | **Auto-pause (option)** | Pause après 1,5 s de frappe continue, reprise 1 s après la dernière touche — uniquement si c’est l’extension qui a mis en pause. |
@@ -85,18 +96,20 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Toasts** | Bas-gauche du lecteur (au-dessus des contrôles), 2 s, sombre, mono-espace. |
 | **Capture** | `<canvas>` détaché à la résolution de la vidéo ; repli sur une capture de l’onglet recadrée si la source est cross-origin sans CORS. |
 | **Desktop** | WebSocket local `ws://localhost:43117` + jeton d’appairage ; stockage `chrome.storage.local` d’abord, file d’envoi rejouée à la reconnexion. Voir [docs/PROTOCOL.md](docs/PROTOCOL.md). |
-| **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés. |
+| **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés (un média seulement : une page en mode lecture n’est pas pilotée depuis un autre onglet). |
 
-### Formats et sources
+### Formats et sources : chaque note ramène à son origine
 
-| | Extension | Application Desktop |
-| --- | --- | --- |
-| **Vidéo en ligne** | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé | Notes reçues de l’extension, « Reprendre à 21:00 » |
-| **Audio** | Podcasts, radios, audios Notion, tout `<audio>` : notes horodatées, auto-pause, saut arrière (capture désactivée) | MP3, M4A, WAV, OGG, Opus, FLAC… locaux |
-| **Vidéo locale** | — | MP4, WebM, MKV, MOV… avec captures |
-| **PDF** | — | Notes par page `[p. 12]`, surlignage 4 couleurs, citations, suivi de lecture |
-| **Progression** | Dernière position de chaque média noté (page d’options) | Bibliothèque « Reprendre », statut, temps d’étude |
-| **Notion** | Export › Notion (via l’application) | Base « Boo Notes — Cours », une page par cours, synchro automatique |
+| Support | Ancre d’une note | Extension | Application Desktop |
+| --- | --- | --- | --- |
+| **Vidéo** | `[04:15]` → l’instant | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé ; captures | MP4, WebM, MKV, MOV… locaux, captures ; notes du navigateur, « Reprendre à 21:00 » |
+| **Audio** | `[04:15]` | Podcasts, radios, audios Notion, tout `<audio>` (auto-pause, saut arrière) | MP3, M4A, WAV, OGG, Opus, FLAC… |
+| **Page web / page Notion** | `> citation [↗](URL#:~:text=…)`, `[↗ Section](…)` → le passage, surligné | **Mode lecture** : citations, repères de section, passages surlignés dans la page, capture de la page, % lu | Notes reçues, « Rouvrir la page » |
+| **PDF** | `[p. 12]` → la page | — | Notes par page, surlignage 4 couleurs, citations, pastilles de notes dans la marge |
+| **Texte** (.txt, .md) | `[§ 4]` → le paragraphe | — | Paragraphes numérotés, citations |
+| **Image** (graphe, schéma, tableau blanc) | `[pin 3]` → le repère | — | Repères numérotés posés sur l’image, zoom / déplacement |
+| **Fiche de révision** | `[[Titre]]` → une autre note | Liens `[[…]]` (complétion des titres, clic = ouvrir la note) | Fiches reliées, aperçu au survol, « Liée depuis », révision espacée |
+| **Notion** | — | Envoi direct quand l’app est fermée (options › Notion) | Tableau « Boo Notes — Mes notes » dans votre page, synchro automatique |
 
 ### Au-delà du cahier des charges (UX)
 
@@ -123,7 +136,8 @@ l’ouverture sur les trois plateformes (Udemy et Coursera ne gèrent pas ce fra
 L’extension fonctionne entièrement hors-ligne. Quand **Boo Notes Desktop** tourne (zone de
 notification), les notes, captures et positions de lecture lui sont envoyées sur
 `ws://localhost:43117` (badge vert) : elles rejoignent la bibliothèque, le dossier de notes
-Markdown et, si Notion est connecté, la base de cours Notion.
+Markdown et, si Notion est connecté, le tableau Notion. Application fermée, l’extension écrit
+elle-même dans Notion (connexion partagée par l’application ou saisie dans ses options).
 
 - Installation, utilisation, build de l’installeur Windows : [docs/DESKTOP.md](docs/DESKTOP.md)
 - Connexion à Notion en 3 étapes : [docs/NOTION.md](docs/NOTION.md)
@@ -142,7 +156,7 @@ npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 | --- | --- |
 | `npm run build` / `npm run watch` | Bundle esbuild → `dist/` |
 | `npm run typecheck` | TypeScript strict |
-| `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown, auto-stamp, auto-pause, raccourcis, stockage, synchronisation, **contrastes WCAG des tokens** |
+| `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown, auto-stamp, auto-pause, raccourcis, stockage, synchronisation Desktop, passages d’une page, synchronisation Notion directe (API simulée), **contrastes WCAG des tokens** |
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
@@ -156,8 +170,11 @@ disposition flottante, largeur par défaut au double-clic, pop-out puis rattache
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu,
 synchronisation hors-ligne → en ligne avec le mock Desktop, jeton refusé, auto-pause, routage
 multi-onglets, **podcast audio sur un site quelconque** (activation au raccourci, horodatage,
-progression, capture refusée), « Toujours activer ici » et page d’options, page sans média,
-**vidéo déposée dans une page Notion** (note et capture liées à la page).
+progression, capture refusée), « Toujours activer ici » et page d’options, **vidéo déposée dans une
+page Notion** (note et capture liées à la page), **mode lecture** (citation liée au passage,
+surlignage dans la page, retour au passage, bulle « Citer », repère de section, progression de
+lecture), **`[[liens]]`** (complétion sans accents, ouverture de la note liée) et **envoi direct
+vers Notion** sans l’application (connexion dans les options, API Notion simulée).
 
 Côté Desktop : tests unitaires (bibliothèque, serveur WebSocket avec le vrai client de l’extension,
 conversion Markdown → Notion, synchronisation incrémentale contre une API Notion simulée) et tests
@@ -166,8 +183,8 @@ d’interface Playwright + Electron (PDF, audio, vidéo, extension, Notion). La 
 
 ```
 src/
-  background/   service worker : raccourcis, routage multi-onglets, stockage, export, sync Desktop
-  content/      script de contenu : détection de la vidéo, HUD / toasts / flash / marqueur, panneau
+  background/   service worker : raccourcis, routage multi-onglets, stockage, export, sync Desktop, sync Notion directe
+  content/      script de contenu : détection du média, mode lecture, HUD / toasts / flash / marqueur, panneau
   panel/        page du panneau (iframe du drawer + fenêtre pop-out) : éditeur CodeMirror
   options/      page d’options
   shared/       logique pure partagée (testée unitairement)
@@ -197,6 +214,13 @@ docs/         architecture, protocole, design, Desktop, Notion
 - **Noms de fichiers exportés** : si Chrome refuse les caractères accentués (certaines locales
   Linux), le dossier et le fichier sont renommés en ASCII (« Vidéo » → « Video »).
 - **Native Messaging** : non implémenté ; seul le WebSocket local l’est.
+- **Mode lecture** : une citation est retrouvée par son texte ; si la page change ce passage, le
+  lien ouvre la page sans le surligner (« Passage introuvable »). Les longues citations sont liées
+  par leurs 5 premiers et 5 derniers mots (fragments de texte standard, compris par Chrome, Edge et
+  Safari). Dans les pages qui rendent leur contenu dans des iframes, seul le document principal est
+  lu.
+- **Notion depuis l’extension** : le secret de l’intégration est alors conservé dans le stockage
+  local de l’extension (voir [docs/NOTION.md](docs/NOTION.md)).
 - **Vidéos intégrées dans une page** (iframe YouTube dans Notion, lecteur embarqué d’un autre site) :
   le script ne s’exécute que dans la page principale ; ouvrez la vidéo sur son site. Les vidéos et
   audios **déposés** dans Notion (fichiers) sont, eux, pris en charge.

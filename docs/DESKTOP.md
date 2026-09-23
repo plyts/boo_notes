@@ -1,8 +1,9 @@
 # Boo Notes Desktop (Windows)
 
 L’application Desktop réunit tout ce que vous étudiez : les cours pris en notes dans le navigateur
-(YouTube, Udemy, Coursera, vidéos et audios Notion, podcasts…) et vos **fichiers locaux** — PDF,
-audio, vidéo — avec un lecteur annoté, le suivi de progression et la synchronisation **Notion**.
+(YouTube, Udemy, Coursera, pages et vidéos Notion, articles, podcasts…), vos **fichiers locaux** —
+PDF, textes, images (graphes, schémas), audio, vidéo — et vos **fiches de révision**, reliées entre
+elles, avec le suivi de progression, la révision espacée et la synchronisation **Notion**.
 
 ![Bibliothèque](screenshots/desktop-library.png)
 
@@ -38,7 +39,8 @@ Windows demande Windows (ou Wine).
 2. Dans l’extension : **Réglages › App Desktop**, adresse `ws://localhost:43117`, collez le jeton.
    Le point vert « Extension connectée » apparaît dans la barre latérale de l’application et le
    badge du panneau de l’extension passe au vert.
-3. Glissez un PDF, un audio ou une vidéo dans la fenêtre (ou `Ctrl+O`).
+3. Glissez un PDF, un texte, une image, un audio ou une vidéo dans la fenêtre (ou `Ctrl+O`), ou
+   créez une fiche (`Ctrl+N`).
 4. Facultatif : **Réglages › Notion** ([guide](NOTION.md)).
 
 L’application reste dans la **zone de notification** quand on ferme la fenêtre (réglable) afin que
@@ -49,7 +51,8 @@ discrètement à l’ouverture de session.
 
 - **Reprendre** : les cours en cours, les plus récents d’abord, avec leur position.
 - **Tous les cours** : type, plateforme, nombre de notes, progression, statut, état Notion.
-- Filtres latéraux (En cours, Terminés, Vidéos, Audio, PDF), recherche `Ctrl+F`.
+- Filtres latéraux (À réviser, En cours, Terminés, Fiches, Vidéos, Audio, PDF, Images, Textes,
+  Pages web), recherche `Ctrl+F`, **Nouvelle fiche** (`Ctrl+N`).
 - Menu « ⋯ » : envoyer / ouvrir dans Notion, afficher la note `.md`, marquer comme terminé,
   retirer de la bibliothèque.
 - En bas de la barre latérale : état de l’extension (et le cours en lecture dans le navigateur),
@@ -72,6 +75,34 @@ ou choisi à la main dans l’en-tête du cours.
 Le PDF rouvre à la dernière page lue ; la progression (page la plus loin atteinte / nombre de
 pages) et le **temps d’étude** (fenêtre au premier plan et activité récente) sont enregistrés.
 
+## Étudier un texte
+
+Fichiers `.txt` et `.md` : chaque paragraphe est numéroté dans la marge. Une note sur le paragraphe
+lu commence par `[§ 4]` (`Alt+Shift+T` ou « Paragraphe ») ; clic sur une puce `§ 4` = retour au
+paragraphe, qui porte en retour un repère « notes » dans la marge. Sélection › **Citer**
+(`Alt+Shift+Q`). La progression suit le paragraphe le plus loin atteint.
+
+## Étudier une image (graphe, schéma, tableau blanc)
+
+PNG, JPEG, WebP, GIF, SVG, BMP, AVIF. Zoom à la molette, déplacement à la souris, « Ajuster ».
+**Repère** (`Alt+Shift+T`, ou double-clic sur l’image) pose un repère numéroté ① sur le détail
+étudié ; la note qui suit commence par `[pin 1]`. Clic sur le repère = ses notes ; clic sur la
+puce `◉ 1` d’une note = le repère, centré et animé. Les repères se déplacent en les faisant
+glisser ; clic droit › Retirer. Dans Notion, l’image est téléversée en tête de la page.
+
+## Fiches de révision et liens
+
+- **Nouvelle fiche** (`Ctrl+N`) : une note libre, sans support (définition, synthèse, formule…).
+- Dans **toute** note, `[[` propose les titres de la bibliothèque (sans tenir compte des accents) ;
+  `[[Titre]]` devient un lien : survol = aperçu, clic = ouvrir (une fiche qui n’existe pas encore
+  est créée). Un fil d’Ariane permet de revenir en arrière.
+- Le panneau d’une fiche liste ses **liens** et les notes qui la citent (**« Liée depuis »**) ; les
+  mêmes relations apparaissent dans Notion (colonnes « Liens » / « Liée depuis », mentions).
+- **Révision espacée** : « Ajouter aux révisions » ; la fiche revient dans **À réviser** au bon
+  moment (1, 3, 7, 14, 30, 60, 120 jours). À chaque révision (`Alt+Shift+R`) : « À revoir »
+  (demain), « Je sais » (palier suivant), « Facile » (deux paliers). Trois révisions réussies d’affilée =
+  Terminé. La date de la prochaine révision est aussi dans Notion.
+
 ## Étudier un audio ou une vidéo locale
 
 Formats : MP3, M4A, AAC, WAV, OGG, Opus, FLAC, WebM audio ; MP4, M4V, WebM, MKV, MOV, OGV
@@ -86,9 +117,14 @@ ensuite, et le média reprend là où vous l’aviez laissé.
 ## Cours pris en notes dans le navigateur
 
 Les notes de l’extension arrivent automatiquement (dès que l’extension est connectée) avec la
-progression de la vidéo. Elles se lisent dans l’application (les horodatages rouvrent la vidéo au
-bon moment dans le navigateur) et se modifient dans l’extension. « Reprendre à 21:00 » rouvre le
-cours à l’endroit exact.
+progression de la vidéo ou de la lecture. Elles se lisent dans l’application (les horodatages
+rouvrent la vidéo au bon moment, les citations `↗` rouvrent l’article sur le passage) et se
+modifient dans l’extension. « Reprendre à 21:00 » / « Rouvrir la page » ramène au cours.
+
+L’application envoie à l’extension les **titres** de sa bibliothèque (complétion des `[[liens]]`
+dans le navigateur) ; un clic sur un `[[lien]]` dans le navigateur affiche la note dans
+l’application. Elle partage aussi sa **connexion Notion** (réglable) pour que l’extension écrive
+dans Notion quand l’application est fermée ([guide](NOTION.md)).
 
 ## Dossier de notes
 
@@ -99,7 +135,8 @@ Boo Notes/
   React — Les hooks.md            une note par cours : front matter YAML + Markdown
   Probabilités — Chapitre 3.md
   assets/                          captures (extension et vidéos locales)
-  .boo/library.json                progression, surlignages, correspondance Notion
+  useEffect.md                     une fiche de révision
+  .boo/library.json                progression, surlignages, repères, révisions, liens, correspondance Notion
 ```
 
 Les fichiers `.md` s’ouvrent dans n’importe quel éditeur (Obsidian, VS Code…). Les notes de
@@ -128,7 +165,7 @@ desktop/src/
     config.ts      réglages, jeton d’appairage, secret chiffré
   main/          processus principal : fenêtre, zone de notification, IPC, protocole boo://
   preload/       pont typé window.boo (contextBridge)
-  renderer/      interface : bibliothèque, lecteur PDF (pdf.js), lecteur média, réglages
+  renderer/      interface : bibliothèque, lecteurs PDF (pdf.js), texte, image, média, fiches, réglages
   ipc.ts         contrat interface ↔ processus principal
 ```
 
@@ -145,7 +182,7 @@ npm start                    # build + lance l’application
 npm run watch                # rebuild continu (relancer l’app)
 npm run typecheck
 npm test                     # unitaires : bibliothèque, serveur (+ vrai client de l’extension), Markdown → Notion, synchro Notion (API simulée)
-npm run test:ui              # Playwright + Electron : PDF, audio, vidéo, extension, Notion (sous Linux : xvfb-run -a npm run test:ui)
+npm run test:ui              # Playwright + Electron : PDF, audio, vidéo, texte, image, fiches, révisions, extension, Notion (sous Linux : xvfb-run -a npm run test:ui)
 SCREENSHOTS=1 npm run test:ui -- screenshots   # régénère docs/screenshots/desktop-*.png
 npm run icons                # régénère build/icon.ico et les icônes de la zone de notification
 ```

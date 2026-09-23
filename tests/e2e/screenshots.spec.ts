@@ -102,3 +102,57 @@ test('options page', async ({ context, sw }) => {
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${OUT}/options-dark.png` });
 });
+
+test('reading mode on an article', async ({ context, page, sw }) => {
+  await mkdir(OUT, { recursive: true });
+  const filler = (n: number) =>
+    Array.from({ length: n }, () => '<p>Un conducteur ohmique garde une résistance constante quelle que soit la tension appliquée, tant que sa température ne change pas.</p>').join('');
+  await context.route(/^https:\/\/cours\.example\.test\//, (route) =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>La loi d’Ohm — Électricité, chapitre 2</title>
+<style>body{margin:0;background:#fbfaf7;color:#1f1f1f;font:18px/1.7 Georgia,serif}main{max-width:620px;margin:0 auto;padding:40px 32px}
+h1{font:700 30px/1.2 system-ui,sans-serif;margin:0 0 8px}h2{font:650 21px/1.3 system-ui,sans-serif;margin:32px 0 8px}.lead{color:#555}</style></head>
+<body><main><h1>Électricité — chapitre 2</h1><p class="lead">Cours de physique, première année.</p>
+<h2>La loi d’Ohm</h2>
+<p id="p1">La tension U aux bornes d’un conducteur ohmique est proportionnelle à l’intensité I du courant qui le traverse : U = R × I.</p>
+<p>Le coefficient R est la résistance du conducteur, exprimée en ohms (Ω).</p>
+<h2>Associer des résistances</h2>
+<p id="p2">En série, les résistances s’additionnent : R = R1 + R2. En parallèle, ce sont leurs inverses qui s’additionnent.</p>
+${filler(6)}</main></body></html>`,
+    }),
+  );
+  await page.setViewportSize({ width: 1180, height: 660 });
+  await page.goto('https://cours.example.test/ohm');
+  await page.bringToFront();
+  await runCommand(sw, page, 'toggle-sidebar');
+  const p = panel(page);
+  await expect(p.locator('.platform')).toHaveText('Web · Lecture');
+  const select = (id: string, words: number) =>
+    page.evaluate(
+      ({ id, words }) => {
+        const el = document.getElementById(id) as HTMLElement;
+        const text = el.firstChild as Text;
+        const range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, text.data.split(' ').slice(0, words).join(' ').length);
+        getSelection()?.removeAllRanges();
+        getSelection()?.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+      },
+      { id, words },
+    );
+  await p.locator('.cm-content').click();
+  await page.keyboard.type('## Loi d’Ohm');
+  await page.keyboard.press('Enter');
+  await select('p1', 24);
+  await runCommand(sw, page, 'insert-timestamp');
+  await page.waitForTimeout(200);
+  await page.keyboard.type('à connaître par cœur, voir [[Résistance électrique]]');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1200); // saved: the quoted passage is highlighted in the page
+  await select('p2', 8);
+  await expect(page.locator('#boo-notes-overlay .quote-bubble')).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/reading-mode.png` });
+});

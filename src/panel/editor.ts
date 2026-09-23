@@ -585,11 +585,14 @@ export class NotesEditor {
    */
   insertBlock(text: string, at: 'cursor' | 'end' = 'cursor'): void {
     const { state } = this.view;
+    // A quote needs a blank line after it: the next line would otherwise continue the quote.
+    const quote = text.startsWith('>');
     if (at === 'cursor' && this.view.hasFocus) {
       const line = state.doc.lineAt(state.selection.main.head);
       const at = line.length === 0 ? line.from : line.to;
       let insert = (line.length === 0 ? '' : '\n') + text;
-      if (line.number === state.doc.lines) insert += '\n';
+      if (quote) insert += '\n\n';
+      else if (line.number === state.doc.lines) insert += '\n';
       this.view.dispatch({
         changes: { from: at, insert },
         selection: { anchor: at + insert.length },
@@ -601,7 +604,8 @@ export class NotesEditor {
     const doc = state.doc.toString();
     const blank = doc.trim() === '';
     const from = blank ? 0 : doc.length;
-    const insert = blank ? `${text}\n` : `${doc.endsWith('\n') ? '' : '\n'}${text}\n`;
+    const tail = quote ? '\n\n' : '\n';
+    const insert = blank ? `${text}${tail}` : `${doc.endsWith('\n') ? '' : '\n'}${text}${tail}`;
     this.view.dispatch({
       changes: { from, to: doc.length, insert },
       selection: { anchor: from + insert.length },
