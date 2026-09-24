@@ -181,6 +181,9 @@ class PanelApp {
     pinTranscript: () => this.pinTranscript(true),
     listen: (seconds) => void this.listen(seconds),
     notesIn: (start, end) => notesInRange(this.editor.content, start, end).length,
+    showCaptions: () => this.post({ type: 'captions:show' }),
+    setTarget: (lang) => void this.setTarget(lang),
+    playRange: (start, end) => this.post({ type: 'play-range', start, end }),
   });
   private readonly translator = new CueTranslator({
     patch: (patches, lang) => this.annotate(patches, lang),
@@ -204,6 +207,7 @@ class PanelApp {
         this.post(end !== null && end !== undefined ? { type: 'play-range', start: seconds, end } : { type: 'seek', seconds }),
       onMediaClick: (path) => void this.openMedia(path),
       onTranscriptClick: () => this.setView('transcript'),
+      onPassageTranscript: (start, end) => this.showPassageTranscript(start, end),
       onKeystroke: () => this.autoPause.keystroke(),
       onChange: () => this.scheduleSave(),
       onContentChanged: () => this.scheduleContentRefresh(),
@@ -232,6 +236,51 @@ class PanelApp {
     this.transcriptView.setTranslate(this.settings.autoTranslate, this.translateStatus);
     if (this.settings.autoTranslate) void this.setTranslate(true, false);
     setInterval(() => this.tick(), 250);
+    this.watchExtension();
+  }
+
+  // --- Extension reloaded under the panel ----------------------------------------------------
+
+  private orphaned = false;
+
+  /**
+   * Boo Notes was reloaded or updated while this panel was open: every call
+   * to the extension now fails (« Extension context invalidated »). The panel
+   * says so, keeps the text reachable, and asks to reload the page.
+   */
+  private watchExtension(): void {
+    const invalidated = (reason: unknown) => /context invalidated/i.test(reason instanceof Error ? reason.message : String(reason));
+    window.addEventListener('unhandledrejection', (e) => {
+      if (!invalidated(e.reason)) return;
+      e.preventDefault();
+      this.orphan();
+    });
+    window.addEventListener('error', (e) => {
+      if (!invalidated(e.error ?? e.message)) return;
+      e.preventDefault();
+      this.orphan();
+    });
+    setInterval(() => !chrome.runtime?.id && this.orphan(), 2000);
+  }
+
+  private orphan(): void {
+    if (this.orphaned) return;
+    this.orphaned = true;
+    this.editor.setEditable(false);
+    const copy = h('button', { type: 'button', class: 'btn-quiet' }, icon('copy', 15), 'Copier le texte de la note');
+    copy.addEventListener('click', () => {
+      void navigator.clipboard.writeText(this.editor.content).then(
+        () => (copy.lastChild!.textContent = 'Texte copié'),
+        () => (copy.lastChild!.textContent = 'Copie impossible'),
+      );
+    });
+    const card = h(
+      'div',
+      { class: 'orphan', role: 'alertdialog', 'aria-labelledby': 'orphan-title' },
+      h('div', { class: 'orphan-card' }, icon('refresh', 22), h('h2', { id: 'orphan-title' }, 'Boo Notes a été mis à jour'), h('p', {}, `Rechargez la page (${IS_MAC ? '⌘R' : 'F5'}) pour continuer : vos notes enregistrées sont conservées. Ce que vous venez de taper peut être copié avant.`), h('div', { class: 'orphan-actions' }, copy)),
+    );
+    this.root.append(card);
+    copy.focus();
   }
 
   // --- Connection to the video tab ----------------------------------------------------
@@ -363,6 +412,7 @@ class PanelApp {
   }
 
   private tick(): void {
+    if (this.orphaned) return;
     if (this.kind === 'page') {
       const pct = Math.round(this.reading.ratio * 100);
       this.clockEl.textContent = `${pct} %`;
@@ -867,6 +917,22 @@ class PanelApp {
     this.transcriptView.setTranslate(on, this.translator.state);
   }
 
+  /** Direction of the translation, chosen in the tab (anglais → français, français → anglais…): translated at once. */
+  private async setTarget(lang: string): Promise<void> {
+    if (lang === this.settings.translateTo && this.settings.autoTranslate) return;
+    this.settings = await saveSettings({ translateTo: lang, autoTranslate: true });
+    this.transcriptView.setTarget(lang);
+    await this.setTranslate(true, false);
+  }
+
+  /** A passage's card (or extract): its lines, read in the transcript. */
+  private showPassageTranscript(start: number, end: number): void {
+    if (this.kind === 'page' || !this.ctx) return;
+    this.closeMedia();
+    this.setView('transcript');
+    this.transcriptView.showPassage(start, end);
+  }
+
   /** The line being spoken, quoted in the note (with its translation). */
   private pinCue(cue: Cue | null): void {
     if (!this.note) return;
@@ -1001,7 +1067,18 @@ class PanelApp {
     const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer l’extrait', title: 'Fermer (Échap)' }, icon('close', 16));
     close.addEventListener('click', () => this.closeMedia());
     const label = title ?? `${record.kind === 'passage' ? 'Extrait' : 'Son du cours'} ${rangeLabel(record.start, record.end)}`;
-    this.mediaPop.replaceChildren(h('div', { class: 'mp-head' }, icon(isVideo ? 'video' : 'volume', 15), h('span', { class: 'mp-title' }, label), close), player);
+    const head: Node[] = [icon(isVideo ? 'video' : 'volume', 15), h('span', { class: 'mp-title' }, label)];
+    if (record.kind === 'passage') {
+      // Read what is said in the extract.
+      const read = h(
+        'button',
+        { type: 'button', class: 'icon-btn mp-transcript', 'aria-label': 'Lire la transcription du passage', title: 'Lire la transcription du passage' },
+        icon('subtitles', 16),
+      );
+      read.addEventListener('click', () => this.showPassageTranscript(record.start, record.end));
+      head.push(read);
+    }
+    this.mediaPop.replaceChildren(h('div', { class: 'mp-head' }, ...head, close), player);
     this.mediaPop.dataset.kind = isVideo ? 'video' : 'audio';
     this.mediaPop.hidden = false;
     // The course itself pauses while the extract plays.
@@ -1206,8 +1283,27 @@ class PanelApp {
   private buildSiteHint(): HTMLDivElement {
     const button = h('button', { type: 'button', class: 'link-btn' }, 'Toujours activer ici');
     button.addEventListener('click', () => void this.enableSite());
-    const hint = h('div', { class: 'site-hint', hidden: true }, h('span', { class: 'site-text' }), button);
+    const everywhere = h('button', { type: 'button', class: 'link-btn', title: 'Toute vidéo ou tout audio détecté sur tous les sites, lecteurs intégrés compris' }, 'Partout');
+    everywhere.addEventListener('click', () => void this.enableEverywhere());
+    const hint = h('div', { class: 'site-hint', hidden: true }, h('span', { class: 'site-text' }), button, h('span', { class: 'site-sep', 'aria-hidden': 'true' }, '·'), everywhere);
     return hint;
+  }
+
+  /** « Partout »: Boo Notes on every site (every video and audio stream found by itself). */
+  private async enableEverywhere(): Promise<void> {
+    const granted = await chrome.permissions.request({ origins: ['https://*/*', 'http://*/*'] }).catch(() => false);
+    if (!granted) {
+      this.notify('Autorisation refusée', 'error');
+      return;
+    }
+    try {
+      await callBackground({ type: 'sites:all', enabled: true });
+      this.siteHint.hidden = true;
+      this.post({ type: 'players:granted' });
+      this.notify('Boo Notes est actif sur tous les sites', 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
   }
 
   private siteOrigin(): string | null {
@@ -1225,10 +1321,13 @@ class PanelApp {
       this.siteHint.hidden = true;
       return;
     }
-    const sites = await callBackground({ type: 'sites:list' }).catch(() => [] as string[]);
+    const [sites, all] = await Promise.all([
+      callBackground({ type: 'sites:list' }).catch(() => [] as string[]),
+      callBackground({ type: 'sites:all', enabled: null }).catch(() => false),
+    ]);
     (this.siteHint.querySelector('.site-text') as HTMLElement).textContent =
       `Actif sur ${new URL(origin).host} pour cet onglet.`;
-    this.siteHint.hidden = sites.includes(origin);
+    this.siteHint.hidden = all || sites.includes(origin);
   }
 
   private async enableSite(): Promise<void> {

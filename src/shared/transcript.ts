@@ -210,6 +210,163 @@ export function parseYouTubeJson3(json: unknown): Cue[] {
   return sortCues(out);
 }
 
+/** `12.5s`, `1500ms`, `00:01:02.500`, `00:01:02:12` (frames ignored), `90` (seconds). */
+function xmlTime(v: string | undefined): number {
+  if (!v) return NaN;
+  const s = v.trim();
+  const unit = /^([\d.]+)(h|m|s|ms)$/.exec(s);
+  if (unit) return Number(unit[1]) * { h: 3600, m: 60, s: 1, ms: 0.001 }[unit[2] as 'h' | 'm' | 's' | 'ms'];
+  if (s.includes(':')) {
+    const p = s.split(':').map(Number);
+    return p.length >= 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  }
+  return Number(s);
+}
+
+function xmlAttr(attrs: string, name: string): string | undefined {
+  return new RegExp(`(?:^|\\s)(?:[\\w-]+:)?${name}\\s*=\\s*"([^"]*)"`).exec(attrs)?.[1] ?? new RegExp(`(?:^|\\s)(?:[\\w-]+:)?${name}\\s*=\\s*'([^']*)'`).exec(attrs)?.[1];
+}
+
+/**
+ * XML subtitles: YouTube's `srv3` / `srv1` (`<p t="1200" d="2000">`, `<text start="1.2" dur="2">`)
+ * and TTML / DFXP (`<p begin="00:00:01.200" end="…">`), used by many web players.
+ */
+export function parseTimedXml(xml: string): Cue[] {
+  const raw: Array<{ start: number; end: number; text: string }> = [];
+  const re = /<(p|text)\b([^>]*)>([\s\S]*?)<\/\1>/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const attrs = m[2];
+    const body = m[3].replace(/<br\s*\/?>/gi, ' ');
+    let start: number;
+    let end: number;
+    if (xmlAttr(attrs, 't') !== undefined) {
+      start = Number(xmlAttr(attrs, 't')) / 1000;
+      end = start + Number(xmlAttr(attrs, 'd') ?? 2000) / 1000;
+    } else if (xmlAttr(attrs, 'begin') !== undefined) {
+      start = xmlTime(xmlAttr(attrs, 'begin'));
+      const dur = xmlTime(xmlAttr(attrs, 'dur'));
+      end = xmlAttr(attrs, 'end') !== undefined ? xmlTime(xmlAttr(attrs, 'end')) : start + (Number.isFinite(dur) ? dur : 2);
+    } else {
+      start = Number(xmlAttr(attrs, 'start'));
+      end = start + Number(xmlAttr(attrs, 'dur') ?? 2);
+    }
+    if (Number.isFinite(start)) raw.push({ start, end, text: body });
+  }
+  return compactCues(raw);
+}
+
+const ISO3: Record<string, string> = { eng: 'en', fra: 'fr', fre: 'fr', spa: 'es', deu: 'de', ger: 'de', ita: 'it', por: 'pt', nld: 'nl', dut: 'nl', jpn: 'ja', zho: 'zh', chi: 'zh', ara: 'ar', rus: 'ru', kor: 'ko' };
+
+/** `eng` → `en`, `pt_BR` → `pt-BR`; '' when it does not look like a language code. */
+export function normalizeLang(code: string): string {
+  if (!/^[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?$/i.test(code)) return '';
+  const [base, region] = code.replace('_', '-').split('-');
+  const b = ISO3[base.toLowerCase()] ?? base.toLowerCase();
+  return region ? `${b}-${region}` : b;
+}
+
+const START_KEYS = ['start', 'startTime', 'begin', 'from', 'start_time', 'startMs', 'startOffsetMs', 'tStartMs', 'time'];
+const END_KEYS = ['end', 'endTime', 'to', 'end_time', 'endMs'];
+const DUR_KEYS = ['dur', 'duration', 'durationMs', 'dDurationMs'];
+const TEXT_KEYS = ['text', 'content', 'caption', 'value', 'line', 'utf8'];
+
+function jsonTime(v: unknown, ms: boolean): number {
+  if (typeof v === 'number') return ms ? v / 1000 : v;
+  if (typeof v !== 'string') return NaN;
+  if (/^\d+(?:\.\d+)?$/.test(v)) return ms ? Number(v) / 1000 : Number(v);
+  return xmlTime(v);
+}
+
+/** `[{ start, end, text }, …]` (any usual names), or [] when the list is something else. */
+function jsonCueList(list: unknown[]): Cue[] {
+  if (list.length < 2) return [];
+  const raw: Array<{ start: number; end: number; text: string }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    const sk = START_KEYS.find((k) => o[k] !== undefined);
+    const tk = TEXT_KEYS.find((k) => typeof o[k] === 'string');
+    if (!sk || !tk) continue;
+    const start = jsonTime(o[sk], /Ms$/.test(sk));
+    const ek = END_KEYS.find((k) => o[k] !== undefined);
+    const dk = DUR_KEYS.find((k) => o[k] !== undefined);
+    const end = ek ? jsonTime(o[ek], /Ms$/.test(ek)) : dk ? start + jsonTime(o[dk], /Ms$/.test(dk)) : start + 2;
+    if (Number.isFinite(start)) raw.push({ start, end: Number.isFinite(end) ? end : start + 2, text: o[tk] as string });
+  }
+  return raw.length >= list.length * 0.8 ? compactCues(raw) : [];
+}
+
+/**
+ * Subtitles inside a JSON document: YouTube json3, a WebVTT / SubRip text in a
+ * field (Wistia, Brightcove… `{ language: 'eng', text: 'WEBVTT…' }`), or a
+ * list of `{ start, end, text }`.
+ */
+export function parseCaptionJson(json: unknown): { cues: Cue[]; lang: string } {
+  const j3 = parseYouTubeJson3(json);
+  if (j3.length) return { cues: j3, lang: '' };
+  let found: { cues: Cue[]; lang: string } = { cues: [], lang: '' };
+  let budget = 200_000;
+  const visit = (node: unknown, lang: string): void => {
+    if (found.cues.length || budget-- <= 0) return;
+    if (typeof node === 'string') {
+      if (node.includes('-->')) {
+        const cues = parseVtt(node);
+        if (cues.length) found = { cues, lang };
+      }
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      const cues = jsonCueList(node);
+      if (cues.length) {
+        found = { cues, lang };
+        return;
+      }
+      for (const n of node) visit(n, lang);
+      return;
+    }
+    const o = node as Record<string, unknown>;
+    const here = [o.language, o.lang, o.srclang, o.languageCode, o.locale].find((v): v is string => typeof v === 'string' && normalizeLang(v) !== '');
+    for (const v of Object.values(o)) visit(v, here ?? lang);
+  };
+  visit(json, '');
+  return { cues: found.cues, lang: normalizeLang(found.lang) };
+}
+
+/**
+ * Any subtitles file a player downloads — WebVTT, SubRip, TTML, YouTube json3 /
+ * srv3, subtitles in JSON — as cues, with the language it names (JSON);
+ * no cues when the body is none of these.
+ */
+export function readCaptionFile(body: string): { cues: Cue[]; lang: string } {
+  const text = body.replace(/^\uFEFF/, '').trimStart();
+  if (!text) return { cues: [], lang: '' };
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return parseCaptionJson(JSON.parse(text));
+    } catch {
+      return { cues: [], lang: '' };
+    }
+  }
+  if (text.startsWith('<')) return { cues: parseTimedXml(text), lang: '' };
+  if (text.startsWith('WEBVTT') || /\d{2}:\d{2}[.,]\d{1,3}\s+-->/.test(text.slice(0, 2000))) return { cues: parseVtt(text), lang: '' };
+  return { cues: [], lang: '' };
+}
+
+export function parseCaptionFile(body: string): Cue[] {
+  return readCaptionFile(body).cues;
+}
+
+/**
+ * Cues that read like speech: not a thumbnails map (`sprite.jpg#xywh=…`), a list
+ * of chapters or metadata some players also ship as WebVTT.
+ */
+export function looksLikeSubtitles(cues: Cue[]): boolean {
+  if (!cues.length) return false;
+  const odd = cues.filter((c) => /#xywh=|^\S+\.(?:jpe?g|png|webp|gif)(?:[?#]\S*)?$|^https?:\/\/\S+$|^\{.*\}$/.test(c.text)).length;
+  return odd / cues.length < 0.3;
+}
+
 /** A user edit of one cue: `null` (or blank) clears the field. */
 export interface CuePatch {
   id: string;

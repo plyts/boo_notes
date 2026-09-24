@@ -85,7 +85,24 @@ export function ReviewMenu({ note }: { note: Note }) {
 }
 
 /** A recorded extract (or the kept sound of the course) played over the notes. */
-function MediaPop({ path, offset, title, video, onClose }: { path: string; offset: number; title: string; video: boolean; onClose(): void }) {
+function MediaPop({
+  path,
+  offset,
+  title,
+  video,
+  range,
+  onClose,
+  onTranscript,
+}: {
+  path: string;
+  offset: number;
+  title: string;
+  video: boolean;
+  /** Passage the extract comes from: its transcript can be read. */
+  range?: { start: number; end: number };
+  onClose(): void;
+  onTranscript?(start: number, end: number): void;
+}) {
   const src = `boo://app/__vault/${path.split('/').map(encodeURIComponent).join('/')}`;
   const start = (e: React.SyntheticEvent<HTMLMediaElement>) => {
     const m = e.currentTarget;
@@ -97,6 +114,9 @@ function MediaPop({ path, offset, title, video, onClose }: { path: string; offse
       <div className="mp-head">
         <Icon name={video ? 'video' : 'volume'} size={15} />
         <span className="mp-title">{title}</span>
+        {range && onTranscript ? (
+          <IconButton icon="subtitles" size="s" className="mp-transcript" label="Lire la transcription du passage" onPress={() => onTranscript(range.start, range.end)} />
+        ) : null}
         <IconButton icon="close" size="s" label="Fermer l’extrait" onPress={onClose} />
       </div>
       {video ? <video src={src} controls playsInline onLoadedMetadata={start} /> : <audio src={src} controls onLoadedMetadata={start} />}
@@ -136,7 +156,9 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   const [notesWidth, setNotesWidth] = useState(() => Number(localStorage.getItem('boo.notesWidth')) || 460);
   // Transcript (subtitles) next to the notes, passages, recorded extracts.
   const [pane, setPane] = useState<'notes' | 'transcript'>('notes');
-  const [mediaPop, setMediaPop] = useState<{ path: string; offset: number; title: string; video: boolean } | null>(null);
+  const [mediaPop, setMediaPop] = useState<{ path: string; offset: number; title: string; video: boolean; range?: { start: number; end: number } } | null>(null);
+  /** Passage read in the transcript (from its card or its extract). */
+  const [focusRange, setFocusRange] = useState<{ start: number; end: number; at: number } | null>(null);
   const [passageStart, setPassageStart] = useState<number | null>(null);
   const passageIn = useRef<{ start: number; poster: string | null; recording: Recording | null; off(): void } | null>(null);
   const cuesRef = useRef<Cue[]>([]);
@@ -285,6 +307,13 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
     } catch (e) {
       toast(`Copie impossible : ${errorMessage(e)}`, 'error');
     }
+  };
+
+  /** A passage (its card, its extract): its lines, read in the transcript. */
+  const showPassageTranscript = (start: number, end: number) => {
+    setMediaPop(null);
+    setPane('transcript');
+    setFocusRange({ start, end, at: Date.now() });
   };
 
   const listen = (seconds: number) => {
@@ -697,9 +726,11 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                       offset: 0,
                       title: entry ? `Extrait ${rangeLabel(entry.start, entry.end)}` : 'Extrait',
                       video: entry ? entry.mime.startsWith('video/') : !/-audio-/.test(path),
+                      ...(entry ? { range: { start: entry.start, end: entry.end } } : {}),
                     });
                   },
                   onTranscriptClick: () => setPane('transcript'),
+                  onPassageTranscript: (start, end) => showPassageTranscript(start, end),
                   onAnchorClick: (k, n, r) => showAnchor(k, n, r),
                   resourceBadge: (r) => {
                     if (linked.length < 2) return null;
@@ -745,6 +776,11 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                   onLoaded={(t) => {
                     cuesRef.current = t?.cues ?? [];
                   }}
+                  focus={focusRange}
+                  playRange={(start, end) => {
+                    if (viewerRef.current?.playRange) viewerRef.current.playRange(start, end);
+                    else showAnchor('time', start, null);
+                  }}
                 />
               ) : null}
               {liveCue && pane === 'notes' ? (
@@ -761,7 +797,7 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                   ) : null}
                 </div>
               ) : null}
-              {mediaPop ? <MediaPop {...mediaPop} onClose={() => setMediaPop(null)} /> : null}
+              {mediaPop ? <MediaPop {...mediaPop} onClose={() => setMediaPop(null)} onTranscript={showTranscript ? showPassageTranscript : undefined} /> : null}
               {!readOnly ? (
                 <footer className="notes-actions">
                   {actions().map((a) => (

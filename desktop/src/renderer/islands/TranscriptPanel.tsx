@@ -22,6 +22,22 @@ export interface TranscriptPanelProps {
   listen(seconds: number): void;
   notesIn(start: number, end: number): number;
   onLoaded?(t: Transcript | null): void;
+  /** Passage to show (its card or extract was clicked): its lines highlighted. */
+  focus?: { start: number; end: number; at: number } | null;
+  /** Plays [start, end] and stops there. */
+  playRange?(start: number, end: number): void;
+}
+
+const TARGET_KEY = 'boo:translateTo';
+
+/** Language translations are written in, chosen in the tab (anglais → français, français → anglais…). */
+function savedTarget(): string {
+  try {
+    const v = localStorage.getItem(TARGET_KEY);
+    return v && /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(v) ? v : 'fr';
+  } catch {
+    return 'fr';
+  }
 }
 
 /**
@@ -36,6 +52,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
   const viewRef = useRef<TranscriptView | null>(null);
   const tRef = useRef<Transcript | null>(null);
   const translating = useRef(false);
+  const target = useRef(savedTarget());
 
   useEffect(() => {
     if (!host.current) return;
@@ -50,7 +67,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
     const annotate = (patches: CuePatch[], lang?: string) => {
       const t = tRef.current;
       if (!t || cbs.current.readOnly) return;
-      void window.boo.library.annotateTranscript(noteId, patches, { lang, target: 'fr' }).then(
+      void window.boo.library.annotateTranscript(noteId, patches, { lang, target: target.current }).then(
         (next) => set(next),
         (e: unknown) => toast(`Transcription non enregistrée : ${errorMessage(e)}`, 'error'),
       );
@@ -69,10 +86,23 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
       },
       toggleTranslate: (on) => {
         translating.current = on;
-        if (on) void translator.enable('fr');
+        if (on) void translator.enable(target.current);
         else translator.disable();
         view.setTranslate(on, translator.state);
       },
+      setTarget: (lang) => {
+        target.current = lang;
+        try {
+          localStorage.setItem(TARGET_KEY, lang);
+        } catch {
+          // Kept for this session only.
+        }
+        view.setTarget(lang);
+        translating.current = true;
+        void translator.enable(lang);
+        view.setTranslate(true, translator.state);
+      },
+      playRange: (start, end) => cbs.current.playRange?.(start, end),
       pinTranscript: () => {
         const t = tRef.current;
         if (t?.cues.length) cbs.current.pinTranscript(t);
@@ -91,6 +121,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
         ),
     });
     viewRef.current = view;
+    view.setTarget(target.current);
     host.current.replaceChildren(view.el);
     view.setReadOnly(props.readOnly);
     view.setEmptyText(
@@ -137,6 +168,14 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
   useEffect(() => {
     viewRef.current?.setCoverage(props.coverage);
   }, [props.coverage]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const f = props.focus;
+    if (!view || !f) return;
+    view.show(true);
+    view.showPassage(f.start, f.end);
+  }, [props.focus]);
 
   useEffect(() => {
     if (props.visible) viewRef.current?.show(true);

@@ -1,11 +1,17 @@
+import type { CaptionFilePayload } from '../shared/caption-bridge';
 import type { CaptionState } from '../shared/messages';
 import type { Platform } from '../shared/platforms';
 import {
   applyLiveSample,
+  cleanCueText,
   compactCues,
   cueIndexAt,
   languageName,
+  looksLikeSubtitles,
+  mergeCues,
+  readCaptionFile,
   parseYouTubeJson3,
+  sortCues,
   type Cue,
   type TranscriptSource,
 } from '../shared/transcript';
@@ -15,8 +21,13 @@ import type { TranscriptInfo } from '../shared/transcript-store';
  * Collects the subtitles of the media being watched, in the background,
  * without ever touching the notes. Sources, best first:
  * 1. the player's subtitle tracks (`video.textTracks`, WebVTT): the whole file;
- * 2. the platform's caption list (YouTube): the whole file;
- * 3. the subtitles displayed on screen, captured as they appear (any player).
+ * 2. the subtitle files the player downloads (seen by the main-world bridge:
+ *    YouTube's captions, WebVTT / SubRip / TTML of any player), the whole file
+ *    or, for streams (HLS), piece by piece;
+ * 3. the platform's caption list (YouTube: its captions, else the transcript
+ *    of the video, as its « Afficher la transcription » panel reads it);
+ * 4. the subtitles displayed on screen, captured as they appear (any player,
+ *    embedded players included: their frame agent reads the lines).
  * The cues are handed to the service worker (see TranscriptStore); the line
  * being spoken goes to the notes panel (live subtitle strip).
  */
@@ -40,10 +51,46 @@ const LIVE_LINES = [
   '[class*="subtitle-line" i]',
 ];
 
-/** Player buttons telling that subtitles exist but are hidden. */
-const CAPTIONS_OFF = ['.ytp-subtitles-button[aria-pressed="false"]', '[data-purpose="captions-dropdown-button"]'];
+/** Player buttons telling that subtitles exist but are hidden (a click shows them). */
+const CAPTIONS_OFF = [
+  '.ytp-subtitles-button[aria-pressed="false"]',
+  '.plyr__controls [data-plyr="captions"][aria-pressed="false"]',
+  '[data-purpose="captions-dropdown-button"]',
+];
+/** Of these, the ones a click switches on (the others open a menu); then any « CC » toggle of other players. */
+const CAPTIONS_TOGGLES = [
+  '.ytp-subtitles-button[aria-pressed="false"]',
+  '.plyr__controls [data-plyr="captions"][aria-pressed="false"]',
+  'button[aria-pressed="false"]:is([aria-label*="sous-titre" i], [aria-label*="subtitle" i], [aria-label*="caption" i], [aria-label="CC" i], [title*="sous-titre" i], [title*="subtitle" i], [title*="caption" i])',
+];
+
+/** Elements some other players draw their subtitles in (checked against the video's box). */
+const GENERIC_LINES = '[class*="caption" i], [class*="subtitle" i], [class*="texttrack" i], [class*="text-track" i]';
+/** Words of class names that are controls, not subtitles (`captions-toggle`, `subtitlesMenu`…). */
+const NOT_LINES = new Set(['button', 'btn', 'menu', 'menuitem', 'settings', 'setting', 'toggle', 'control', 'controls', 'icon', 'label', 'select', 'selector', 'picker', 'switch', 'option', 'options', 'tooltip', 'dropdown', 'panel', 'list', 'title', 'toolbar', 'badge']);
+const isControlClass = (cls: string): boolean =>
+  cls
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .some((w) => NOT_LINES.has(w));
 
 const FLUSH_LIVE_MS = 2000;
+/** Storage refused (no note yet, panel closed): tried again this late, or as soon as the panel opens. */
+const RETRY_REFUSED_MS = 5000;
+
+/** Subtitles found in a file (downloaded by the player, or read in an embedded player). */
+export interface FoundCaptions {
+  cues: Cue[];
+  lang: string;
+  label: string;
+  /** `platform`: YouTube's own captions; `track`: a player's subtitles file. */
+  source: 'platform' | 'track';
+  /** Covers the whole media (else a piece of a stream, merged with the others). */
+  complete: boolean;
+  /** YouTube's machine translation of another track (`tlang`): never replaces the original. */
+  translated?: boolean;
+}
 
 export class SubtitleCollector {
   private noteId: string | null = null;
@@ -59,11 +106,18 @@ export class SubtitleCollector {
   private track: TextTrack | null = null;
   private trackCount = -1;
   private platformTried: string | null = null;
+  /** The platform says this media has no subtitles at all. */
+  private none = false;
+  /** Subtitle files of the player, by language (streams send theirs piece by piece). */
+  private files = new Map<string, Cue[]>();
+  /** Lines displayed by the embedded player now playing (its frame agent reads them). */
+  private remoteLines: string[] | null = null;
   /** Continuous stretch watched with captions shown (live capture). */
   private cover: { from: number; to: number } | null = null;
   private pendingCover: [number, number] | null = null;
   private last: { time: number; at: number } | null = null;
   private lastFlush = 0;
+  private refused = false;
   private flushing = false;
   private stateKey = '';
   private status: CaptionState['status'] = 'searching';
@@ -81,9 +135,13 @@ export class SubtitleCollector {
     this.fullPending = false;
     this.track = null;
     this.trackCount = -1;
+    this.none = false;
+    this.files.clear();
+    this.remoteLines = null;
     this.cover = null;
     this.pendingCover = null;
     this.last = null;
+    this.refused = false;
     this.stateKey = '';
     this.status = 'searching';
   }
@@ -97,17 +155,30 @@ export class SubtitleCollector {
     return this.cues.length;
   }
 
-  /** Called a few times per second with the media and its clock. */
-  tick(media: HTMLMediaElement | null, time: number, playing: boolean, duration: number, engaged: boolean): void {
+  /**
+   * Called a few times per second with the media and its clock. `media` is null
+   * when it plays in an embedded player (its lines come through `setRemoteLines`).
+   */
+  tick(media: HTMLMediaElement | null, time: number, playing: boolean, duration: number, engaged: boolean, remote = false): void {
     if (!this.enabled || !this.noteId) {
       this.emit(null);
       return;
     }
     if (duration > 0) this.info.duration = duration;
-    if (this.source !== 'track' && media) this.readTracks(media);
+    // The track is read again as it grows (streams add their subtitles as they load).
+    if (media && (this.source !== 'track' || this.track)) this.readTracks(media);
     if (!this.source && this.platform === 'youtube' && this.platformTried !== this.noteId) void this.loadYouTube(this.noteId);
-    if (!this.source || this.source === 'live') this.sampleLive(time, playing);
-    this.status = this.source === 'track' || this.source === 'platform' ? 'complete' : this.source === 'live' ? 'capturing' : this.captionsHidden() ? 'captions-off' : 'searching';
+    if (!this.source || this.source === 'live') this.sampleLive(remote ? this.remoteLines : readLiveLines(document, media), time, playing);
+    this.status =
+      this.source === 'track' || this.source === 'platform'
+        ? 'complete'
+        : this.source === 'live'
+          ? 'capturing'
+          : !remote && this.captionsHidden()
+            ? 'captions-off'
+            : this.none
+              ? 'none'
+              : 'searching';
 
     let cue: Cue | null = null;
     const i = cueIndexAt(this.cues, time);
@@ -120,6 +191,48 @@ export class SubtitleCollector {
   async flushNow(engaged: boolean): Promise<void> {
     this.closeCover();
     await this.flush(engaged);
+  }
+
+  /** « Afficher les sous-titres »: switches the player's captions on (the player then downloads them). */
+  static showCaptions(): boolean {
+    for (const sel of CAPTIONS_TOGGLES) {
+      const button = document.querySelector<HTMLElement>(sel);
+      if (button) {
+        button.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Lines shown by the embedded player (null: no subtitles displayed there). */
+  setRemoteLines(lines: string[] | null): void {
+    this.remoteLines = lines;
+  }
+
+  /** A subtitles file downloaded by the player (or read in an embedded player). */
+  offerFile(found: FoundCaptions): void {
+    if (!this.noteId || !found.cues.length) return;
+    // The player's own track already gives everything.
+    if (this.source === 'track' && this.track) return;
+    // The original subtitles stay the transcript (translations are the user's, in the tab).
+    if (found.translated && this.source === 'platform' && !this.info.label.includes('traduction')) return;
+    let cues: Cue[];
+    if (found.source === 'platform' || found.complete) {
+      cues = sortCues(found.cues.map((c) => ({ ...c })));
+      this.files.set(found.lang, cues);
+    } else {
+      // A piece of a stream: added to the pieces already seen in that language.
+      cues = mergeCues(this.files.get(found.lang) ?? [], found.cues);
+      this.files.set(found.lang, cues);
+    }
+    const complete = found.complete || (this.info.duration > 0 && (cues.at(-1)?.end ?? 0) >= this.info.duration * 0.9);
+    if (this.source === found.source && this.info.lang === found.lang && this.cues.length === cues.length && this.cues.every((c, i) => c.id === cues[i].id && c.text === cues[i].text)) return;
+    this.cues = cues;
+    this.source = found.source;
+    this.info = { ...this.info, lang: found.lang, source: found.source, complete, label: found.label };
+    this.dirty.clear();
+    this.fullPending = true;
   }
 
   private emit(cue: Cue | null): void {
@@ -135,66 +248,43 @@ export class SubtitleCollector {
   // --- 1. Tracks of the player ------------------------------------------------------------
 
   private readTracks(media: HTMLMediaElement): void {
-    const tracks = [...media.textTracks].filter((t) => t.kind === 'subtitles' || t.kind === 'captions');
-    if (!tracks.length) return;
-    const pageLang = document.documentElement.lang.split('-')[0];
-    const track =
-      tracks.find((t) => t.mode === 'showing') ??
-      (this.track && tracks.includes(this.track) ? this.track : null) ??
-      tracks.find((t) => t.language && t.language.split('-')[0] === pageLang) ??
-      tracks[0];
-    // A disabled track loads its cues once hidden (never shown by us).
-    if (track.mode === 'disabled') track.mode = 'hidden';
-    if (track !== this.track) {
-      this.track = track;
-      this.trackCount = -1;
-    }
-    const list = track.cues;
-    if (!list || list.length === 0 || list.length === this.trackCount) return;
-    this.trackCount = list.length;
-    const raw: Array<{ start: number; end: number; text: string }> = [];
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i] as TextTrackCue & { text?: string };
-      if (typeof c.text === 'string') raw.push({ start: c.startTime, end: c.endTime, text: c.text });
-    }
-    const cues = compactCues(raw);
-    if (!cues.length) return;
-    this.cues = cues;
+    const read = readTextTrack(media, this.track, this.trackCount);
+    if (!read) return;
+    this.track = read.track;
+    this.trackCount = read.count;
+    if (!read.cues.length) return;
+    this.cues = read.cues;
     this.source = 'track';
-    const lang = track.language || '';
-    this.info = {
-      ...this.info,
-      lang,
-      source: 'track',
-      complete: true,
-      label: `Sous-titres du lecteur · ${track.label || (lang ? languageName(lang) : 'langue inconnue')}`,
-    };
+    this.info = { ...this.info, lang: read.lang, source: 'track', complete: true, label: read.label };
     this.dirty.clear();
     this.fullPending = true;
   }
 
-  // --- 2. Caption list of the platform ------------------------------------------------------
+  // --- 3. Caption list of the platform ------------------------------------------------------
 
   private async loadYouTube(noteId: string): Promise<void> {
     this.platformTried = noteId;
     const videoId = noteId.replace(/^youtube:/, '');
     try {
       const found = await youtubeCaptions(videoId);
-      if (!found || this.noteId !== noteId || this.source === 'track') return;
+      if (!found || this.noteId !== noteId || this.source === 'track' || this.source === 'platform') return;
+      if ('none' in found) {
+        this.none = true;
+        return;
+      }
       this.cues = found.cues;
       this.source = 'platform';
       this.info = { ...this.info, lang: found.lang, source: 'platform', complete: true, label: found.label };
       this.dirty.clear();
       this.fullPending = true;
     } catch {
-      // Not available (no captions, format changed): the live capture takes over.
+      // Not available (no captions, format changed): the player's download or the live capture takes over.
     }
   }
 
-  // --- 3. Subtitles displayed on screen ----------------------------------------------------------
+  // --- 4. Subtitles displayed on screen ----------------------------------------------------------
 
-  private sampleLive(time: number, playing: boolean): void {
-    const lines = readLiveLines();
+  private sampleLive(lines: string[] | null, time: number, playing: boolean): void {
     const now = Date.now();
     const jumped = this.last ? Math.abs(time - (this.last.time + (playing ? (now - this.last.at) / 1000 : 0))) > 1.5 : true;
     this.last = { time, at: now };
@@ -228,6 +318,8 @@ export class SubtitleCollector {
 
   private maybeFlush(engaged: boolean): void {
     const now = Date.now();
+    // Not kept yet (no note, panel closed): no use sending everything again and again.
+    if (this.refused && !engaged && now - this.lastFlush < RETRY_REFUSED_MS) return;
     if (this.fullPending) {
       if (now - this.lastFlush > 500) void this.flush(engaged);
       return;
@@ -263,7 +355,9 @@ export class SubtitleCollector {
     } finally {
       this.flushing = false;
     }
-    if (stored || this.noteId !== noteId) return;
+    if (this.noteId !== noteId) return;
+    this.refused = !stored;
+    if (stored) return;
     // Not kept (no note yet): everything is sent again once the user takes notes.
     if (replace) this.fullPending = true;
     else {
@@ -273,15 +367,121 @@ export class SubtitleCollector {
   }
 }
 
-/** Text of the subtitle lines on screen; null when no subtitles are displayed. */
-export function readLiveLines(root: ParentNode = document): string[] | null {
+// --- Player tracks --------------------------------------------------------------------------
+
+/**
+ * The subtitles of the media's text tracks (the one shown, else the page's
+ * language, else the first); null when unchanged since `count` cues were read.
+ */
+export function readTextTrack(
+  media: HTMLMediaElement,
+  current: TextTrack | null,
+  count: number,
+): { track: TextTrack; count: number; cues: Cue[]; lang: string; label: string } | null {
+  let tracks: TextTrack[];
+  try {
+    tracks = [...media.textTracks].filter((t) => t.kind === 'subtitles' || t.kind === 'captions');
+  } catch {
+    return null;
+  }
+  if (!tracks.length) return null;
+  const pageLang = document.documentElement.lang.split('-')[0];
+  const track =
+    tracks.find((t) => t.mode === 'showing') ??
+    (current && tracks.includes(current) ? current : null) ??
+    tracks.find((t) => t.language && t.language.split('-')[0] === pageLang) ??
+    tracks[0];
+  // A disabled track loads its cues once hidden (never shown by us).
+  if (track.mode === 'disabled') track.mode = 'hidden';
+  const list = track.cues;
+  const n = list?.length ?? 0;
+  if (!list || n === 0 || (track === current && n === count)) return track === current ? null : { track, count: -1, cues: [], lang: '', label: '' };
+  const raw: Array<{ start: number; end: number; text: string }> = [];
+  for (let i = 0; i < n; i++) {
+    const c = list[i] as TextTrackCue & { text?: string };
+    if (typeof c.text === 'string') raw.push({ start: c.startTime, end: c.endTime, text: c.text });
+  }
+  const cues = compactCues(raw);
+  if (!looksLikeSubtitles(cues)) return { track, count: n, cues: [], lang: '', label: '' };
+  const lang = track.language || '';
+  return { track, count: n, cues, lang, label: `Sous-titres du lecteur · ${track.label || (lang ? languageName(lang) : 'langue inconnue')}` };
+}
+
+// --- Subtitle files downloaded by the player ---------------------------------------------------
+
+/** Language named in a subtitles URL: `lang=`, `srclang=`, `…_en.vtt`, `/fr-FR/…`. */
+function urlLanguage(url: URL | null): string {
+  if (!url) return '';
+  const q = url.searchParams;
+  const param = q.get('tlang') || q.get('lang') || q.get('language') || q.get('srclang') || q.get('locale');
+  if (param && /^[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?$/i.test(param)) return param.replace('_', '-');
+  const m =
+    /(?:^|[/._-])([a-z]{2}(?:[-_][A-Z]{2})?)(?:[/._-](?:auto|cc|sdh|forced))?\.(?:vtt|webvtt|srt|ttml|dfxp)$/.exec(url.pathname) ??
+    /[/._-]([a-z]{2}(?:-[A-Z]{2})?)\//.exec(url.pathname);
+  const code = m ? m[1].replace('_', '-') : '';
+  // Only real languages (« us », « hd » in a path are not).
+  return code && languageName(code) !== code ? code : '';
+}
+
+/** A file handed by the main-world bridge, as subtitles; null when it holds none. */
+export function captionFile(p: CaptionFilePayload, base = location.href): FoundCaptions | null {
+  const read = readCaptionFile(p.body);
+  const cues = read.cues;
+  if (!cues.length || !looksLikeSubtitles(cues)) return null;
+  let url: URL | null = null;
+  try {
+    url = new URL(p.url, base);
+  } catch {
+    url = null;
+  }
+  const lang = read.lang || urlLanguage(url);
+  const name = lang ? languageName(lang) : 'langue inconnue';
+  if (url && /(?:^|\.)youtube(?:-nocookie)?\.com$/.test(url.hostname) && url.pathname.endsWith('/api/timedtext')) {
+    const auto = url.searchParams.get('kind') === 'asr' ? ' (automatiques)' : '';
+    const translated = url.searchParams.get('tlang') ? ' (traduction YouTube)' : '';
+    return { cues, lang, source: 'platform', complete: true, label: `Sous-titres YouTube · ${name}${auto}${translated}`, ...(translated ? { translated: true } : {}) };
+  }
+  // A stream's subtitles come in pieces of a few seconds (HLS): each one is short.
+  const span = (cues.at(-1)?.end ?? 0) - cues[0].start;
+  return { cues, lang, source: 'track', complete: span > 120 || cues.length > 40, label: `Sous-titres du lecteur · ${name}` };
+}
+
+// --- Subtitles on screen ---------------------------------------------------------------------
+
+/**
+ * Text of the subtitle lines on screen; null when no subtitles are displayed.
+ * Known players first; else (with `media`) the caption-looking elements drawn
+ * over the video.
+ */
+export function readLiveLines(root: ParentNode = document, media: HTMLMediaElement | null = null): string[] | null {
   for (const sel of LIVE_LINES) {
     const els = [...root.querySelectorAll<HTMLElement>(sel)];
     if (!els.length) continue;
     const visible = els.filter((el) => el.getClientRects().length > 0);
     return visible.map((el) => el.textContent ?? '').filter((t) => t.trim());
   }
-  return null;
+  return media instanceof HTMLVideoElement ? genericLines(media) : null;
+}
+
+/** Subtitles of an unknown player: short texts over the video, in elements named like captions. */
+function genericLines(video: HTMLVideoElement): string[] | null {
+  const box = video.getBoundingClientRect();
+  if (box.width < 160 || box.height < 90) return null;
+  const scope = video.closest('[class*="player" i], [id*="player" i]') ?? video.parentElement?.parentElement ?? null;
+  if (!scope) return null;
+  const found = [...scope.querySelectorAll<HTMLElement>(GENERIC_LINES)].filter((el) => {
+    const cls = typeof el.className === 'string' ? el.className : '';
+    if (isControlClass(cls) || el.closest('button, [role="button"], [role="menu"], [role="menuitem"], [role="dialog"], [role="slider"], select')) return false;
+    if (el.querySelector('button, input, select, svg, [role="button"], [role="menu"]')) return false;
+    const r = el.getBoundingClientRect();
+    if (!el.getClientRects().length) return false;
+    // Over the picture, its lower two thirds (where subtitles are drawn).
+    return r.bottom > box.top + box.height / 3 && r.top < box.bottom && r.right > box.left && r.left < box.right;
+  });
+  if (!found.length) return null;
+  const leaves = found.filter((el) => !found.some((o) => o !== el && el.contains(o)));
+  const lines = leaves.flatMap((el) => (el.innerText || el.textContent || '').split('\n')).map(cleanCueText).filter((t) => t && t.length <= 300);
+  return lines;
 }
 
 // --- YouTube -----------------------------------------------------------------------------
@@ -332,21 +532,116 @@ export function pickYouTubeTrack(tracks: YouTubeTrack[]): YouTubeTrack | null {
   return manual[0] ?? null;
 }
 
-async function youtubeCaptions(videoId: string): Promise<{ cues: Cue[]; lang: string; label: string } | null> {
+const trackName = (t: YouTubeTrack): string => t.name?.simpleText ?? t.name?.runs?.map((r) => r.text).join('') ?? '';
+
+/**
+ * The transcript of a video as YouTube's « Afficher la transcription » panel
+ * gets it (`/youtubei/v1/get_transcript`): segments, and the language selected.
+ */
+export function parseYouTubeTranscript(json: unknown): { cues: Cue[]; language: string } {
+  const raw: Array<{ start: number; end: number; text: string }> = [];
+  let language = '';
+  const text = (v: unknown): string => {
+    const o = v as { simpleText?: string; runs?: Array<{ text?: string }> } | null;
+    return o?.simpleText ?? o?.runs?.map((r) => r.text ?? '').join('') ?? '';
+  };
+  let budget = 500_000;
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object' || budget-- <= 0) return;
+    if (Array.isArray(node)) {
+      for (const n of node) walk(n);
+      return;
+    }
+    const o = node as Record<string, unknown>;
+    const seg = o.transcriptSegmentRenderer as { startMs?: string; endMs?: string; snippet?: unknown } | undefined;
+    if (seg) {
+      const start = Number(seg.startMs) / 1000;
+      const end = Number(seg.endMs) / 1000;
+      if (Number.isFinite(start)) raw.push({ start, end: Number.isFinite(end) ? end : start + 2, text: text(seg.snippet) });
+      return;
+    }
+    const cue = o.transcriptCueRenderer as { cue?: unknown; startOffsetMs?: string; durationMs?: string } | undefined;
+    if (cue) {
+      const start = Number(cue.startOffsetMs) / 1000;
+      if (Number.isFinite(start)) raw.push({ start, end: start + (Number(cue.durationMs) || 2000) / 1000, text: text(cue.cue) });
+      return;
+    }
+    if (Array.isArray(o.subMenuItems)) {
+      const selected = (o.subMenuItems as Array<{ title?: string; selected?: boolean }>).find((i) => i.selected);
+      if (selected?.title) language = selected.title;
+    }
+    for (const v of Object.values(o)) walk(v);
+  };
+  walk(json);
+  return { cues: compactCues(raw), language };
+}
+
+/** A string of the page's JSON (`"…\\u0026…"`) decoded. */
+function jsonString(raw: string): string {
+  try {
+    return JSON.parse(`"${raw}"`) as string;
+  } catch {
+    return raw;
+  }
+}
+
+const lowerFirst = (s: string) => s.charAt(0).toLocaleLowerCase('fr') + s.slice(1);
+
+type YouTubeFound = { cues: Cue[]; lang: string; label: string } | { none: true };
+
+async function youtubeCaptions(videoId: string): Promise<YouTubeFound | null> {
   const page = await fetch(`/watch?v=${encodeURIComponent(videoId)}`, { credentials: 'include' });
   if (!page.ok) return null;
-  const tracks = (extractJsonArray(await page.text(), '"captionTracks":') ?? []) as YouTubeTrack[];
-  const track = pickYouTubeTrack(tracks.filter((t) => typeof t?.baseUrl === 'string'));
+  const html = await page.text();
+  const tracks = ((extractJsonArray(html, '"captionTracks":') ?? []) as YouTubeTrack[]).filter((t) => typeof t?.baseUrl === 'string');
+  if (!tracks.length) return /ytInitialPlayerResponse/.test(html) && /"playabilityStatus":\{"status":"OK"/.test(html) ? { none: true } : null;
+  const track = pickYouTubeTrack(tracks);
   if (!track) return null;
-  const url = new URL(track.baseUrl, location.origin);
-  if (url.origin !== location.origin) return null;
-  url.searchParams.set('fmt', 'json3');
-  const res = await fetch(url, { credentials: 'include' });
-  const body = res.ok ? await res.text() : '';
-  if (!body.trim()) return null;
-  const cues = parseYouTubeJson3(JSON.parse(body));
-  if (!cues.length) return null;
   const lang = track.languageCode ?? '';
-  const name = track.name?.simpleText ?? track.name?.runs?.map((r) => r.text).join('') ?? (lang ? languageName(lang) : '');
-  return { cues, lang, label: `Sous-titres YouTube · ${name}${track.kind === 'asr' && !/auto/i.test(name) ? ' (automatiques)' : ''}` };
+  const name = trackName(track) || (lang ? languageName(lang) : '');
+  const auto = track.kind === 'asr' && !/auto/i.test(name) ? ' (automatiques)' : '';
+
+  // 1. The captions file (served without the player's token for a few videos only).
+  try {
+    const url = new URL(track.baseUrl, location.origin);
+    if (url.origin === location.origin) {
+      url.searchParams.set('fmt', 'json3');
+      const res = await fetch(url, { credentials: 'include' });
+      const body = res.ok ? await res.text() : '';
+      const cues = body.trim() ? parseYouTubeJson3(JSON.parse(body)) : [];
+      if (cues.length) return { cues, lang, label: `Sous-titres YouTube · ${name}${auto}` };
+    }
+  } catch {
+    // Next way.
+  }
+
+  // 2. The transcript of the video (its « Afficher la transcription » panel).
+  const params = /"getTranscriptEndpoint":\{"params":"([^"]+)"/.exec(html)?.[1];
+  if (!params) return null;
+  const version = /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/.exec(html)?.[1] ?? '2.20250101.00.00';
+  const visitor = /"VISITOR_DATA":"([^"]+)"/.exec(html)?.[1];
+  const hl = /"INNERTUBE_CONTEXT_HL":"([^"]+)"/.exec(html)?.[1] ?? 'fr';
+  const key = /"INNERTUBE_API_KEY":"([^"]+)"/.exec(html)?.[1];
+  const body = JSON.stringify({
+    context: { client: { clientName: 'WEB', clientVersion: version, hl, ...(visitor ? { visitorData: jsonString(visitor) } : {}) } },
+    params: jsonString(params),
+  });
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'x-youtube-client-name': '1', 'x-youtube-client-version': version };
+  if (visitor) headers['x-goog-visitor-id'] = jsonString(visitor);
+  for (const credentials of ['include', 'omit'] as const) {
+    try {
+      const res = await fetch(`/youtubei/v1/get_transcript?prettyPrint=false${key ? `&key=${encodeURIComponent(key)}` : ''}`, { method: 'POST', credentials, headers, body });
+      if (!res.ok) continue;
+      const found = parseYouTubeTranscript(await res.json());
+      if (!found.cues.length) continue;
+      // The language shown by the panel, matched to the caption tracks.
+      const picked = tracks.find((t) => found.language && trackName(t) === found.language) ?? (found.language ? null : track);
+      const code = picked?.languageCode ?? (/auto/i.test(found.language) ? (tracks.find((t) => t.kind === 'asr')?.languageCode ?? '') : '');
+      const label = found.language ? lowerFirst(found.language) : name;
+      return { cues: found.cues, lang: code, label: `Sous-titres YouTube · ${label}${picked?.kind === 'asr' && !/auto/i.test(label) ? ' (automatiques)' : ''}` };
+    } catch {
+      // Next attempt.
+    }
+  }
+  return null;
 }

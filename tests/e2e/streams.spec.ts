@@ -14,6 +14,20 @@ function html(title: string, body: string, script = ''): string {
 </head><body><main>${body}</main>${script ? `<script>${script}</script>` : ''}</body></html>`;
 }
 
+const SUBS = `WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+Airflow orchestrates your data pipelines.
+
+00:00:03.000 --> 00:00:06.000
+A DAG is a directed acyclic graph.
+`;
+
+const transcriptOf = (sw: Worker, path: string) =>
+  sw.evaluate(async (key) => (await chrome.storage.local.get(key))[key], `transcript:web:school.example.test${path}`) as Promise<
+    { source: string; lang: string; label: string; cues: Array<{ text: string; start: number }> } | undefined
+  >;
+
 test.beforeEach(async ({ context }) => {
   const video = await sampleVideo();
   const wav = makeWav(40);
@@ -21,6 +35,7 @@ test.beforeEach(async ({ context }) => {
     const url = new URL(route.request().url());
     const host = url.hostname;
     if (url.pathname.endsWith('.webm')) return fulfillMedia(route, video, 'video/webm');
+    if (url.pathname.endsWith('.vtt')) return route.fulfill({ contentType: 'text/vtt; charset=utf-8', body: SUBS });
     if (url.pathname.endsWith('.wav')) return fulfillMedia(route, wav, 'audio/wav');
     const page = (title: string, body: string, script = '') =>
       route.fulfill({ contentType: 'text/html; charset=utf-8', body: html(title, body, script) });
@@ -57,6 +72,40 @@ test.beforeEach(async ({ context }) => {
       return page(
         'Cours 8 — Hébergé ailleurs',
         '<h1>Cours 8</h1><iframe src="https://player.vimeo.com/video/123" allow="autoplay; fullscreen"></iframe>',
+      );
+    // Players with subtitles: a track inside an embedded player; a file the embedded player
+    // downloads when it starts; a player of the page drawing its own subtitles.
+    if (host === 'school.example.test' && url.pathname === '/course-cc')
+      return page('Cours 9 — Sous-titres', '<h1>Cours 9</h1><iframe src="https://player.example.test/embed/cc" allow="autoplay; fullscreen"></iframe>');
+    if (host === 'player.example.test' && url.pathname === '/embed/cc')
+      return page(
+        'Vidéo 9',
+        '<video muted preload="auto" src="/v/9.webm" style="position:fixed;inset:0;width:100%;height:100%"><track kind="subtitles" srclang="en" label="English" src="/cc/en.vtt"></video>',
+      );
+    if (host === 'school.example.test' && url.pathname === '/course-fetch')
+      return page('Cours 10 — Lecteur maison', '<h1>Cours 10</h1><iframe src="https://player.example.test/embed/fetch" allow="autoplay; fullscreen"></iframe>');
+    if (host === 'player.example.test' && url.pathname === '/embed/fetch')
+      return page(
+        'Vidéo 10',
+        '<video muted preload="auto" src="/v/10.webm" style="position:fixed;inset:0;width:100%;height:100%"></video>',
+        `const v = document.querySelector('video');
+         v.addEventListener('play', () => fetch('/captions/lesson_fr.vtt').then((r) => r.text()), { once: true });`,
+      );
+    if (host === 'school.example.test' && url.pathname === '/own-player')
+      return page(
+        'Cours 11 — Lecteur maison',
+        `<h1>Cours 11</h1><div class="lesson-player" style="position:relative;width:640px;height:360px">
+           <video muted preload="auto" src="/v/11.webm" style="width:640px;height:360px"></video>
+           <div class="cc-overlay" style="position:absolute;left:0;right:0;bottom:30px;text-align:center;color:#fff"><span class="subtitle-text"></span></div>
+           <button class="subtitles-toggle" style="position:absolute;right:8px;bottom:4px">CC</button>
+         </div>`,
+        `const v = document.querySelector('video');
+         const line = document.querySelector('.subtitle-text');
+         const script = [[0, 2, 'bienvenue dans ce cours'], [2, 4, 'les DAG sont des graphes'], [4, 7, 'sans cycle']];
+         setInterval(() => {
+           const s = script.find(([a, b]) => v.currentTime >= a && v.currentTime < b);
+           line.textContent = s ? s[2] : '';
+         }, 100);`,
       );
     if (host === 'school.example.test' && url.pathname === '/live')
       return page('Amphi en direct', '<h1>Amphi en direct</h1><canvas width="640" height="360"></canvas>');
@@ -188,5 +237,41 @@ test.describe('Tout flux, toute plateforme', () => {
     const t1 = await notes.locator('.clock-now').textContent();
     await page.waitForTimeout(1300);
     await expect(notes.locator('.clock-now')).toHaveText(t1 ?? '');
+  });
+
+  test('lecteur intégré : ses sous-titres (piste du lecteur) arrivent dans la transcription de la page', async ({ page, sw }) => {
+    await open(page, '/course-cc');
+    await openNotes(sw, page);
+    await seekFrame(playerFrame(page), 2);
+    await expect.poll(async () => (await transcriptOf(sw, '/course-cc'))?.cues.map((c) => c.text), { timeout: 10_000 }).toEqual([
+      'Airflow orchestrates your data pipelines.',
+      'A DAG is a directed acyclic graph.',
+    ]);
+    expect(await transcriptOf(sw, '/course-cc')).toMatchObject({ source: 'track', lang: 'en', label: 'Sous-titres du lecteur · English' });
+    const p = panel(page);
+    await expect(p.locator('#tab-transcript .tab-count')).toHaveText('2');
+    // The line being said, under the notes, follows the embedded player.
+    await expect(p.locator('.live-caption .lc-text')).toHaveText('Airflow orchestrates your data pipelines.');
+  });
+
+  test('lecteur intégré : le fichier de sous-titres qu’il télécharge devient la transcription', async ({ page, sw }) => {
+    await open(page, '/course-fetch');
+    await openNotes(sw, page);
+    const frame = playerFrame(page);
+    await frame.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+    await frame.evaluate(() => (document.querySelector('video') as HTMLVideoElement).play());
+    await expect.poll(async () => (await transcriptOf(sw, '/course-fetch'))?.cues.length, { timeout: 10_000 }).toBe(2);
+    expect(await transcriptOf(sw, '/course-fetch')).toMatchObject({ source: 'track', lang: 'fr', label: 'Sous-titres du lecteur · français' });
+  });
+
+  test('lecteur inconnu qui dessine ses sous-titres : capture en direct', async ({ page, sw }) => {
+    await open(page, '/own-player');
+    await openNotes(sw, page);
+    await page.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+    await page.evaluate(() => document.querySelector('video')!.play());
+    await expect
+      .poll(async () => (await transcriptOf(sw, '/own-player'))?.cues.map((c) => c.text), { timeout: 15_000 })
+      .toEqual(['bienvenue dans ce cours', 'les DAG sont des graphes', 'sans cycle']);
+    expect(await transcriptOf(sw, '/own-player')).toMatchObject({ source: 'live' });
   });
 });

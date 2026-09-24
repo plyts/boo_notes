@@ -161,6 +161,42 @@
   color: var(--on-accent);
 }
 
+/* « Transcription » icon of a passage card (top right): its lines in the transcript. */
+.cm-boo-img-tx {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(10, 10, 12, 0.62);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+
+.cm-boo-img-tx:hover {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  transform: scale(1.06);
+}
+
+.cm-boo-img-tx span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.cm-boo-passage .cm-boo-img-title {
+  right: 40px;
+}
+
 /* Recorded extract of a passage: « 🔊 Extrait ». */
 .cm-boo-media {
   display: inline-block;

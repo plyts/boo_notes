@@ -78,6 +78,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, { noteId: string; rev: nu
         onTimestampClick: (s, r, end) => h().onTimestampClick(s, r, end),
         onMediaClick: (path, start) => h().onMediaClick?.(path, start),
         onTranscriptClick: (path) => h().onTranscriptClick?.(path),
+        onPassageTranscript: (start, end) => h().onPassageTranscript?.(start, end),
         onAnchorClick: (k, n, r) => h().onAnchorClick?.(k, n, r),
         resourceBadge: (r) => h().resourceBadge?.(r) ?? null,
         onWikiLinkClick: (t) => h().onWikiLinkClick?.(t),

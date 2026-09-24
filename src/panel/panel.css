@@ -1131,3 +1131,53 @@ button {
     animation: none !important;
   }
 }
+
+/* --- Extension reloaded under the panel --------------------------------------------- */
+
+.orphan {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.orphan-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 300px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.orphan-card > svg {
+  color: var(--accent);
+}
+
+.orphan-card h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.orphan-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.orphan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}

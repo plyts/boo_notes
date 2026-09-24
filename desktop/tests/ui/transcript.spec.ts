@@ -102,6 +102,17 @@ test('sous-titres à côté de la vidéo : transcription, commentaire, épingle,
   await page.getByRole('button', { name: 'Épingler la transcription à la note' }).click();
   await expect.poll(() => noteText(ctx.vault, 'Cours 7')).toMatch(/📄 \[Transcription — anglais → français · 4 répliques\]\(transcripts\/[^)]+\.md\)\n?$/);
 
+  // The passage card's « Transcription » icon: its lines, highlighted in the transcript.
+  await page.getByRole('tab', { name: 'Notes' }).click();
+  await page.getByRole('button', { name: 'Lire la transcription du passage 00:03–00:09' }).click();
+  await expect(page.getByRole('tab', { name: /Transcription/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.cue.in-passage')).toHaveCount(2);
+  await expect(page.locator('.tx-bar-text')).toHaveText('Passage 00:03–00:09 · 2 répliques');
+  await page.locator('.tx-bar').getByRole('button', { name: 'Fermer' }).click();
+  await expect(page.locator('.cue.in-passage')).toHaveCount(0);
+  // The translation goes the way the user likes.
+  await expect(page.getByRole('combobox', { name: 'Langue de la traduction' })).toHaveValue('fr');
+
   // Alt+I / Alt+O while the video plays: the passage and its recorded extract.
   await page.getByRole('tab', { name: 'Notes' }).click();
   await editor(page).click();

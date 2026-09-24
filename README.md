@@ -15,10 +15,14 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
   dans la page). Chaque note se range dans un cours › chapitre depuis le panneau.
 - **Transcription** ([docs/TRANSCRIPTION.md](docs/TRANSCRIPTION.md)) : pendant la lecture, les
   **sous-titres horodatés** sont recopiés en arrière-plan dans une transcription à part (onglet
-  **Transcription**), **traduits en français** sur l’appareil ou à la main, **commentés**, une
-  réplique s’**épingle** dans la note d’un geste ; les **passages** (`Alt+I` → `Alt+O`, ex.
-  02:05 → 06:07) gardent leur image, leur son, leurs sous-titres et les notes prises pendant eux ;
+  **Transcription**), **traduits** sur l’appareil ou à la main (anglais → français, français →
+  anglais… au choix), **commentés**, une réplique s’**épingle** dans la note d’un geste ; les
+  **passages** (`Alt+I` → `Alt+O`, ex. 02:05 → 06:07) gardent leur image, leur son, leurs
+  sous-titres et les notes prises pendant eux (l’icône de leur carte ouvre leur transcription) ;
   le **son du cours** peut être conservé. La transcription est épinglée à la note à la fin.
+  Sous-titres lus dans le lecteur, dans les fichiers qu’il télécharge (YouTube compris), dans les
+  lecteurs intégrés ou à l’écran ; option **Activer sur tous les sites** pour que toute vidéo soit
+  détectée sans clic.
 - **Copier la note « tout compris »** : captures, images et cartes des passages **intégrées**,
   horodatages liés à l’instant, transcription — à coller dans **Obsidian**, **Notion**, Google Docs,
   Word… (Markdown et HTML à la fois) ; **Télécharger** ajoute les extraits vidéo et la transcription.

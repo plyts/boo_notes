@@ -43,10 +43,10 @@ Deux principes :
 ├──────────────────────────────────────────┤
 │ 02:05  Définition de la circulation      │  vos notes (inchangées)
 │ ┌──────────────────────────────────────┐ │
-│ │ Théorème de Stokes · 4 min           │ │  carte « passage » : première image,
+│ │ Théorème de Stokes · 4 min        [≣]│ │  carte « passage » : première image,
 │ │               ▶                      │ │  titre (votre première note du passage,
-│ │ 02:05–06:07        ▶ Revoir le passage│ │  sinon la première réplique), durée
-│ └──────────────────────────────────────┘ │
+│ │ 02:05–06:07        ▶ Revoir le passage│ │  sinon la première réplique), durée ;
+│ └──────────────────────────────────────┘ │  [≣] : lire sa transcription
 │ 🔊 Extrait                                │  l’extrait enregistré, lu dans le panneau
 ├──────────────────────────────────────────┤
 │ 04:12 the curl of F through S…        ⊕  │  bandeau de sous-titre en direct
@@ -68,10 +68,19 @@ Deux principes :
   et l’enregistre ; vous continuez d’écrire).
 - **Suivre la lecture** : la réplique en cours reste visible ; si vous faites défiler, le suivi se
   met en pause (**↓ Revenir à 04:12**).
-- **Traduire en français** (interrupteur) : traduction **sur l’appareil** (Chrome 138 et plus,
-  aucun envoi à un service tiers), réplique par réplique à mesure qu’elles arrivent, en commençant
-  par le moment regardé ; la langue des sous-titres est détectée si besoin. Chaque traduction reste
-  modifiable (clic dessus). Sans traduction automatique, 文A traduit une réplique à la main.
+- **Traduire** (interrupteur) **vers** la langue de votre choix (liste à côté : français,
+  anglais, espagnol…) : anglais → français, français → anglais… à votre convenance. Traduction
+  **sur l’appareil** (Chrome 138 et plus, aucun envoi à un service tiers), réplique par réplique à
+  mesure qu’elles arrivent, en commençant par le moment regardé ; la langue des sous-titres est
+  détectée si besoin. Des sous-titres **déjà** dans la langue choisie ? L’onglet propose l’autre
+  sens en un clic (« Traduire en anglais »). Changer de langue retraduit tout. Chaque traduction
+  reste modifiable (clic dessus). Sans traduction automatique, 文A traduit une réplique à la main.
+- **Lire la transcription d’un passage** : l’icône [≣] en haut à droite de la carte d’un passage
+  (et celle du lecteur de l’extrait) ouvre l’onglet sur ses répliques, surlignées, avec
+  **▶ Lire le passage** (la vidéo le rejoue et s’arrête à sa fin).
+- **Aucun sous-titre encore ?** L’onglet l’explique et propose **Afficher les sous-titres** : le
+  bouton CC du lecteur est activé pour vous, et le fichier que le lecteur télécharge alors devient
+  la transcription complète.
 - **Recherche** (🔍) dans le texte, les traductions et les commentaires ; **📌** épingle la
   transcription à la note tout de suite.
 - **Capture en direct** : la part de la vidéo regardée avec les sous-titres affichés
@@ -95,10 +104,17 @@ Par ordre de préférence, sans configuration :
 
 | Source | Plateformes | Couverture |
 | --- | --- | --- |
-| **Pistes de sous-titres du lecteur** (`video.textTracks`, WebVTT) | Coursera, lecteurs video.js / Plyr / JW, la plupart des plateformes d’école, vidéos Notion | Toute la vidéo, dès le début |
-| **Liste de sous-titres de la plateforme** | YouTube (sous-titres manuels, sinon automatiques de la langue parlée) | Toute la vidéo |
-| **Capture en direct** des sous-titres affichés | YouTube, Udemy, video.js, Plyr, JW, Shaka, MediaElement… | Ce qui est joué sous-titres affichés (« 38 % capturé ») |
+| **Pistes de sous-titres du lecteur** (`video.textTracks`, WebVTT) | Coursera, lecteurs video.js / Plyr / JW / hls.js, la plupart des plateformes d’école, vidéos Notion — **y compris dans un lecteur intégré** (iframe) | Toute la vidéo, dès le début (les flux HLS : au fil du chargement) |
+| **Fichiers de sous-titres téléchargés par le lecteur** (WebVTT, SubRip, TTML, YouTube json3 / srv3, sous-titres en JSON type Wistia) | YouTube (avec le jeton du lecteur), Vimeo, Wistia, lecteurs HLS / DASH, lecteurs maison — dans la page ou dans un lecteur intégré | Toute la vidéo (ou morceau par morceau pour un flux) |
+| **Liste de sous-titres de la plateforme** | YouTube : le fichier de sous-titres, sinon la transcription de la vidéo (panneau « Afficher la transcription ») — manuels, sinon automatiques de la langue parlée | Toute la vidéo |
+| **Capture en direct** des sous-titres affichés | YouTube, Udemy, video.js, Plyr, JW, Shaka, MediaElement… et tout lecteur qui dessine ses sous-titres par-dessus la vidéo (reconnus à leur place et à leur nom), lecteurs intégrés compris | Ce qui est joué sous-titres affichés (« 38 % capturé ») |
 | **Fichier** `.vtt` / `.srt` | Application : fichier voisin de la vidéo, ou **＋ Ajouter des sous-titres** | Tout le fichier |
+
+**YouTube** refuse désormais son fichier de sous-titres sans le jeton que seul son lecteur possède :
+Boo Notes lit donc (1) le fichier que le lecteur télécharge lui-même quand les sous-titres sont
+affichés — même avant l’ouverture du panneau —, (2) sinon la transcription de la vidéo (comme le
+panneau « Afficher la transcription » de YouTube), (3) sinon ce qui s’affiche à l’écran. Une
+vidéo sans aucun sous-titre est signalée comme telle.
 
 Une meilleure source remplace la précédente en gardant vos traductions et commentaires ; une
 capture en direct n’écrase jamais un fichier de sous-titres. Rien n’est gardé pour une vidéo
@@ -187,16 +203,24 @@ glissé dans un coffre Obsidian, tout s’affiche et se lit.
 | Réglage | Par défaut |
 | --- | --- |
 | Transcrire les sous-titres en arrière-plan | activé |
-| Traduire en français | désactivé (l’interrupteur de l’onglet le mémorise) |
+| Traduire les sous-titres | désactivé (l’interrupteur de l’onglet le mémorise) |
+| Traduire vers | français (anglais, espagnol, allemand… ; se change aussi dans l’onglet) |
 | Enregistrer l’extrait des passages | activé |
 | Conserver l’audio du cours | désactivé |
+| Sites › **Activer sur tous les sites** | désactivé : toute vidéo, tout audio (lecteurs intégrés compris) est détecté sans clic ni autorisation par lecteur |
 
 ## 8. Limites connues
 
-- Les sous-titres d’un **lecteur intégré dans une iframe d’un autre site** (Vimeo, Kaltura…) ne
-  sont recopiés que s’ils s’affichent dans la page elle-même ; son horloge, elle, est suivie.
-- La liste de sous-titres de YouTube peut être refusée (jeton de lecture) : la capture en direct
-  prend alors le relais — activez les sous-titres (CC).
+- Un **lecteur intégré** d’un autre site (Vimeo, Wistia, Kaltura…) doit être autorisé une fois
+  (« Autoriser » dans le panneau), ou Boo Notes activé sur tous les sites ; ses sous-titres
+  arrivent alors dans la transcription de la page comme son horloge. Un fichier téléchargé avant
+  l’autorisation est manqué : la piste du lecteur ou la capture en direct prend le relais.
+- Une vidéo **sans aucun sous-titre** (ni fichier, ni sous-titres automatiques) n’a pas de
+  transcription : pas de reconnaissance vocale pour l’instant.
+- Boo Notes **mis à jour ou rechargé** pendant qu’une page est ouverte : sur les sites déclarés
+  ou toujours actifs, il redémarre seul ; ailleurs, une carte « Boo Notes a été mis à jour —
+  Recharger » s’affiche (au lieu de l’erreur « Extension context invalidated »), vos notes
+  enregistrées sont conservées.
 - La traduction automatique demande Chrome 138+ (modèle téléchargé une fois sur l’appareil) ;
   l’application Desktop propose la traduction à la main.
 
@@ -204,7 +228,9 @@ glissé dans un coffre Obsidian, tout s’affiche et se lit.
 
 | Élément | Fichier |
 | --- | --- |
-| Modèle (répliques, VTT / SRT / YouTube json3, capture en direct, passages, lignes de note) | `src/shared/transcript.ts` |
+| Modèle (répliques, VTT / SRT / TTML / YouTube json3 / srv3 / JSON, capture en direct, passages, lignes de note) | `src/shared/transcript.ts` |
+| Fichiers de sous-titres vus par le lecteur (monde de la page → script de contenu) | `src/content/media-bridge.ts`, `src/shared/caption-bridge.ts` |
+| Sous-titres d’un lecteur intégré (piste, fichiers, lignes affichées) | `src/content/frame.ts` |
 | Stockage de l’extension (fusion des sources, traductions et commentaires) | `src/shared/transcript-store.ts` |
 | Extraits et son conservé (IndexedDB) | `src/shared/media-db.ts` |
 | Collecte dans la page | `src/content/subtitles.ts` |

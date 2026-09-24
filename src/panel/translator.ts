@@ -58,6 +58,8 @@ export class CueTranslator {
   private startAt = 0;
   /** Cues already sent to the translator (never twice, even before the store echoes them). */
   private readonly done = new Set<string>();
+  /** Translations written in another language than the one now chosen: translated again. */
+  private stale = new Set<string>();
   private status: TranslateStatus = { state: 'off' };
 
   constructor(private readonly hooks: TranslatorHooks) {}
@@ -77,8 +79,10 @@ export class CueTranslator {
 
   /** Switched on by the user (a click: model downloads need that gesture). */
   async enable(target: string): Promise<void> {
+    if (target !== this.target) this.done.clear();
     this.enabled = true;
     this.target = target;
+    this.markStale();
     if (!CueTranslator.supported) {
       this.setStatus({ state: 'unsupported' });
       return;
@@ -106,9 +110,16 @@ export class CueTranslator {
         this.pair = '';
       }
     }
+    const other = t?.noteId !== this.transcript?.noteId;
     this.transcript = t;
+    if (other) this.markStale();
     if (currentTime !== null) this.startAt = currentTime;
     if (this.enabled) this.run();
+  }
+
+  private markStale(): void {
+    const t = this.transcript;
+    this.stale = new Set(t && t.target && base(t.target) !== base(this.target) ? t.cues.filter((c) => c.tr).map((c) => c.id) : []);
   }
 
   private async prepare(): Promise<boolean> {
@@ -181,7 +192,7 @@ export class CueTranslator {
           if (!(await this.prepare())) break;
           const t = this.transcript;
           if (!t) break;
-          const todo = t.cues.filter((c) => !c.tr && !this.done.has(c.id));
+          const todo = t.cues.filter((c) => (!c.tr || this.stale.has(c.id)) && !this.done.has(c.id));
           if (!todo.length) {
             this.setStatus({ state: 'ready' });
             break;

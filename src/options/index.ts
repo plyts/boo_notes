@@ -50,6 +50,7 @@ function renderSettings(s: Settings): void {
   for (const key of ['autoTimestamp', 'autoPause', 'pageShortcuts', 'hudEnabled', 'transcribe', 'autoTranslate', 'recordPassages', 'keepAudio'] as const) {
     field(key)[0].checked = s[key];
   }
+  field<HTMLSelectElement>('translateTo')[0].value = s.translateTo;
   checkRadio('layout', s.layout);
   checkRadio('theme', s.theme);
   checkRadio('replaySeconds', String(s.replaySeconds));
@@ -90,6 +91,7 @@ function readPatch(target: HTMLInputElement | HTMLSelectElement): Partial<Settin
     case 'layout':
     case 'theme':
     case 'captureFormat':
+    case 'translateTo':
       return { [name]: target.value } as Partial<Settings>;
     case 'desktopUrl': {
       const value = target.value.trim();
@@ -243,6 +245,35 @@ async function renderData(): Promise<void> {
   );
 }
 
+/** « Activer sur tous les sites »: every page may be read (optional permission), scripts registered everywhere. */
+async function renderAllSites(): Promise<void> {
+  const box = document.getElementById('all-sites') as HTMLInputElement;
+  box.checked = await callBackground({ type: 'sites:all', enabled: null });
+}
+
+async function toggleAllSites(box: HTMLInputElement): Promise<void> {
+  const origins = ['https://*/*', 'http://*/*'];
+  try {
+    if (box.checked) {
+      // Needs this click's user gesture.
+      const granted = await chrome.permissions.request({ origins });
+      if (!granted) {
+        box.checked = false;
+        flashSaved('Autorisation refusée', false);
+        return;
+      }
+      await callBackground({ type: 'sites:all', enabled: true });
+      flashSaved('Boo Notes est actif sur tous les sites');
+    } else {
+      await callBackground({ type: 'sites:all', enabled: false });
+      flashSaved('Boo Notes ne s’active plus que sur vos sites');
+    }
+  } catch (e) {
+    box.checked = !box.checked;
+    flashSaved(e instanceof Error ? e.message : String(e), false);
+  }
+}
+
 async function renderSites(): Promise<void> {
   const sites = await callBackground({ type: 'sites:list' });
   const list = document.getElementById('site-list') as HTMLElement;
@@ -387,7 +418,9 @@ async function main(): Promise<void> {
   callBackground({ type: 'sync:status' }).then(renderStatus, () => undefined);
   renderNotion(undefined);
   callBackground({ type: 'notion:status' }).then(renderNotion, () => undefined);
-  await Promise.all([renderShortcuts(), renderData(), renderSites()]);
+  const allSites = document.getElementById('all-sites') as HTMLInputElement;
+  allSites.addEventListener('change', () => void toggleAllSites(allSites));
+  await Promise.all([renderShortcuts(), renderData(), renderSites(), renderAllSites()]);
 }
 
 void main();

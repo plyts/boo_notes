@@ -171,6 +171,7 @@ chrome.runtime.onConnect.addListener((port) => {
     if (msg.type === 'media') void sendToTab(tabId, { type: 'frame:media', frameId, media: msg.media });
     else if (msg.type === 'gone') void sendToTab(tabId, { type: 'frame:media', frameId, media: null });
     else if (msg.type === 'shot') void sendToTab(tabId, { type: 'frame:shot', id: msg.id, shot: msg.shot, error: msg.error });
+    else if (msg.type === 'captions') void sendToTab(tabId, { type: 'frame:captions', frameId, captions: msg.captions });
   });
   port.onDisconnect.addListener(() => {
     if (framePorts.get(key) === port) framePorts.delete(key);
@@ -230,6 +231,49 @@ async function syncSiteScripts(origins: string[]): Promise<void> {
     { id: SITES_SCRIPT_ID, matches, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true },
     { id: SITES_FRAMES_ID, matches, js: ['frame.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true },
   ]);
+}
+
+// --- Every site (« Activer sur tous les sites ») ------------------------------------------------
+
+const ALL_KEY = 'sites:all';
+const ALL_ORIGINS = ['https://*/*', 'http://*/*'];
+const ALL_IDS = { bridge: 'boo-notes-all-bridge', content: 'boo-notes-all', frames: 'boo-notes-all-frames' };
+
+async function allSitesEnabled(): Promise<boolean> {
+  const on = (await chrome.storage.local.get(ALL_KEY))[ALL_KEY] === true;
+  return on && (await chrome.permissions.contains({ origins: ALL_ORIGINS }).catch(() => false));
+}
+
+/** Content scripts on every web page (the sites declared in the manifest keep theirs). */
+async function syncAllSites(enabled: boolean): Promise<void> {
+  const ids = Object.values(ALL_IDS);
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+  if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: existing.map((s) => s.id) });
+  if (!enabled) return;
+  const declared = [...new Set((chrome.runtime.getManifest().content_scripts ?? []).flatMap((cs) => cs.matches ?? []))];
+  const common = { matches: ALL_ORIGINS, excludeMatches: declared, persistAcrossSessions: true };
+  await chrome.scripting.registerContentScripts([
+    { ...common, id: ALL_IDS.bridge, js: ['media-bridge.js'], allFrames: true, runAt: 'document_start', world: 'MAIN' },
+    { ...common, id: ALL_IDS.content, js: ['content.js'], runAt: 'document_idle' },
+    { ...common, id: ALL_IDS.frames, js: ['frame.js'], allFrames: true, runAt: 'document_idle' },
+  ]);
+}
+
+/** `*://*.youtube.com/*`-style match pattern against a URL (scheme and host; any path). */
+function matchesPattern(pattern: string, url: string): boolean {
+  const m = /^(\*|https?):\/\/(\*|\*\.[^/]+|[^/*]+)\//.exec(pattern);
+  if (!m) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (m[1] !== '*' && `${m[1]}:` !== u.protocol) return false;
+  const host = m[2];
+  if (host === '*') return true;
+  if (host.startsWith('*.')) return u.hostname === host.slice(2) || u.hostname.endsWith(host.slice(1));
+  return u.hostname === host;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -586,6 +630,33 @@ const handlers: Handlers = {
     return sites;
   },
 
+  'sites:all': async (msg) => {
+    if (msg.enabled === null) return allSitesEnabled();
+    if (msg.enabled) {
+      // The permission itself is requested by the options page (it needs a user gesture).
+      if (!(await chrome.permissions.contains({ origins: ALL_ORIGINS }))) throw new Error('Autorisation refusée pour tous les sites');
+      await chrome.storage.local.set({ [ALL_KEY]: true });
+      await syncAllSites(true);
+      // Pages already open with a video or audio: active now, without reloading them.
+      const tabs = await chrome.tabs.query({ url: ALL_ORIGINS }).catch(() => [] as chrome.tabs.Tab[]);
+      for (const t of tabs) {
+        if (t.id === undefined || t.discarded || !t.audible) continue;
+        const tabId = t.id;
+        void ensureContentScript(tabId).then(async (ok) => {
+          if (ok) await injectFrames(tabId);
+        });
+      }
+      return true;
+    }
+    await chrome.storage.local.set({ [ALL_KEY]: false });
+    await syncAllSites(false);
+    // The broad permission goes too, unless it also covers sites and players allowed one by one.
+    if (!(await enabledSites()).length && !(await allowedPlayers()).length) {
+      await chrome.permissions.remove({ origins: ALL_ORIGINS }).catch(noop);
+    }
+    return false;
+  },
+
   'sites:disable': async (msg) => {
     const origin = normalizeOrigin(msg.origin);
     const sites = (await enabledSites()).filter((o) => o !== origin);
@@ -739,8 +810,25 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       }
     }
   }
-  await syncSiteScripts(await enabledSites()).catch(noop);
+  const sites = await enabledSites();
+  const everywhere = await allSitesEnabled();
+  await syncSiteScripts(sites).catch(noop);
+  await syncAllSites(everywhere).catch(noop);
   await syncPlayerScripts(await allowedPlayers()).catch(noop);
+  // Sites always active (dynamic scripts): their open tabs get the new version too, as the declared ones.
+  if (sites.length || everywhere) {
+    const declared = (chrome.runtime.getManifest().content_scripts ?? []).flatMap((cs) => cs.matches ?? []);
+    const tabs = (await chrome.tabs.query({ url: everywhere ? ALL_ORIGINS : sites.map((o) => `${o}/*`) }).catch(() => [] as chrome.tabs.Tab[]))
+      // Declared sites already got theirs above.
+      .filter((t) => !(everywhere && t.url && declared.some((m) => matchesPattern(m, t.url!))));
+    for (const t of tabs) {
+      if (t.id === undefined || t.discarded) continue;
+      const target = { tabId: t.id, allFrames: true };
+      chrome.scripting.executeScript({ target, files: ['media-bridge.js'], world: 'MAIN' }).catch(noop);
+      chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['content.js'] }).catch(noop);
+      chrome.scripting.executeScript({ target, files: ['frame.js'] }).catch(noop);
+    }
+  }
   if (details.reason === 'install') {
     await chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html#bienvenue') });
   }

@@ -78,7 +78,9 @@ export type FrameCommand =
   | { op: 'play' }
   | { op: 'pause' }
   | { op: 'seek'; seconds: number }
-  | { op: 'capture'; id: number; mime: string; quality: number };
+  | { op: 'capture'; id: number; mime: string; quality: number }
+  /** Switches the player's captions on. */
+  | { op: 'captions' };
 
 export interface FrameShot {
   dataUrl: string;
@@ -90,10 +92,19 @@ export interface FrameShot {
 /** Port between a frame agent and the background. */
 export const FRAME_PORT = 'boo-notes-frame';
 
+/**
+ * Subtitles read in an embedded player: a whole file (its track, or a file its
+ * player downloaded), and the lines it displays now (null: none displayed).
+ */
+export type FrameCaptions =
+  | { kind: 'file'; cues: Cue[]; lang: string; label: string; source: 'platform' | 'track'; complete: boolean }
+  | { kind: 'lines'; lines: string[] | null };
+
 export type FrameToBackground =
   | { type: 'media'; media: FrameMedia }
   | { type: 'gone' }
-  | { type: 'shot'; id: number; shot: FrameShot | null; error: string | null };
+  | { type: 'shot'; id: number; shot: FrameShot | null; error: string | null }
+  | { type: 'captions'; captions: FrameCaptions };
 
 export type BackgroundToFrame = { type: 'command'; command: FrameCommand };
 
@@ -148,6 +159,8 @@ export type BackgroundRequest =
   | { type: 'sites:list' }
   | { type: 'sites:enable'; origin: string }
   | { type: 'sites:disable'; origin: string }
+  /** « Activer sur tous les sites »: `null` reads the state. */
+  | { type: 'sites:all'; enabled: boolean | null }
   /** Titles of every known note (extension + desktop library), for `[[` completion. */
   | { type: 'wiki:titles' }
   /** Opens the note titled `title`: in the desktop app, else its page, else in Notion. */
@@ -186,9 +199,9 @@ export interface CaptionState {
   /**
    * `off`: disabled in the options; `searching`: no subtitles found yet; `captions-off`: the
    * player can show some (turn them on to capture them); `capturing`: captured as they are shown;
-   * `complete`: the whole subtitles file is known.
+   * `complete`: the whole subtitles file is known; `none`: the platform says the media has none.
    */
-  status: 'off' | 'searching' | 'captions-off' | 'capturing' | 'complete';
+  status: 'off' | 'searching' | 'captions-off' | 'capturing' | 'complete' | 'none';
   source: TranscriptSource | null;
   label: string;
 }
@@ -221,6 +234,7 @@ export interface BackgroundResponses {
   'sites:list': string[];
   'sites:enable': string[];
   'sites:disable': string[];
+  'sites:all': boolean;
   'wiki:titles': string[];
   'wiki:open': { message: string };
   'notion:status': NotionStatus;
@@ -256,7 +270,8 @@ export type TabMessage =
   | { type: 'player:active'; active: boolean }
   /** State of the media of a sub-frame (null: gone). */
   | { type: 'frame:media'; frameId: number; media: FrameMedia | null }
-  | { type: 'frame:shot'; id: number; shot: FrameShot | null; error: string | null };
+  | { type: 'frame:shot'; id: number; shot: FrameShot | null; error: string | null }
+  | { type: 'frame:captions'; frameId: number; captions: FrameCaptions };
 
 // --- Panel (iframe / pop-out window) <-> content script port -------------
 
@@ -350,4 +365,6 @@ export type PanelToContent =
   /** A passage chosen afterwards (transcript selection): its card is added to the note; `record`: replay and record it. */
   | { type: 'passage:create'; start: number; end: number; record: boolean }
   /** Replays a passage of the note and records its extract. */
-  | { type: 'passage:record'; start: number; end: number };
+  | { type: 'passage:record'; start: number; end: number }
+  /** « Afficher les sous-titres »: the player's captions are switched on (then collected). */
+  | { type: 'captions:show' };

@@ -94,6 +94,8 @@ export interface EditorHooks {
   onMediaClick?(path: string, start: number | null): void;
   /** Click on the transcript attachment line (`📄 [Transcription …](transcripts/…)`). */
   onTranscriptClick?(path: string): void;
+  /** Click on the « Transcription » button of a passage card: its lines, in the transcript. */
+  onPassageTranscript?(start: number, end: number): void;
   /** Text of an empty note. */
   placeholderText?: string;
 }
@@ -213,7 +215,16 @@ class ImageWidget extends WidgetType {
         const length = end - seconds;
         const duration = length < 60 ? `${Math.max(1, Math.round(length))} s` : `${Math.round(length / 60)} min`;
         info.textContent = `${passage[3]?.trim() || 'Passage'} · ${duration}`;
-        wrap.append(info);
+        // Its lines, in the transcript (subtitles said during the passage, translations, comments).
+        const tx = document.createElement('span');
+        tx.className = 'cm-boo-img-tx';
+        tx.setAttribute('role', 'button');
+        tx.dataset.passageTx = `${seconds}-${end}`;
+        tx.title = `Lire la transcription du passage ${passage[1]}–${passage[2]}`;
+        tx.setAttribute('aria-label', tx.title);
+        tx.innerHTML =
+          '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 10.5h4M13 10.5h4M7 14.5h7M16 14.5h1"/></svg><span>Transcription</span>';
+        wrap.append(info, tx);
       }
     }
     this.load(this.path).then(
@@ -564,6 +575,13 @@ export class NotesEditor {
       }),
       EditorView.domEventHandlers({
         mousedown: (e) => {
+          const tx = (e.target as Element | null)?.closest?.('.cm-boo-img-tx');
+          if (tx && e.button === 0) {
+            e.preventDefault();
+            const [start, end] = (tx.getAttribute('data-passage-tx') ?? '').split('-').map(Number);
+            if (Number.isFinite(start) && Number.isFinite(end)) hooks.onPassageTranscript?.(start, end);
+            return true;
+          }
           const target = (e.target as Element | null)?.closest?.(
             '.cm-boo-ts, .cm-boo-img[data-t], .cm-boo-wiki, .cm-boo-media, .cm-boo-transcript',
           );

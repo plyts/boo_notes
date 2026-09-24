@@ -1,7 +1,9 @@
+import { CAPTIONS_EVENT, CAPTIONS_REQUEST_EVENT, readCaptionPayload } from '../shared/caption-bridge';
 import {
   FRAME_PORT,
   type BackgroundToFrame,
   type CaptureRect,
+  type FrameCaptions,
   type FrameCommand,
   type FrameMedia,
   type FrameToBackground,
@@ -9,13 +11,16 @@ import {
 import { adapterForHost } from './adapters';
 import { captureVideoFrame, probeFrame } from './capture';
 import { MediaController } from './player';
+import { captionFile, readLiveLines, readTextTrack, SubtitleCollector } from './subtitles';
 
 /**
  * Frame agent: runs inside the sub-frames of a page (embedded players —
  * Vimeo, Kaltura, Panopto, Wistia, a YouTube embed, a school's own player…).
  * It has no UI: it reports the state of the frame's media to the page's
  * Boo Notes (through the background) and executes its commands, so notes,
- * timestamps and captures work as if the media were in the page itself.
+ * timestamps and captures work as if the media were in the page itself. It
+ * also reads the player's subtitles (its tracks, the files it downloads, the
+ * lines it displays) for the page's transcript.
  */
 class FrameAgent {
   private readonly abort = new AbortController();
@@ -26,6 +31,11 @@ class FrameAgent {
   private lastSent = '';
   private lastSentAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private track: TextTrack | null = null;
+  private trackCount = -1;
+  /** Last subtitles file found, sent again whenever the media is announced again. */
+  private file: Extract<FrameCaptions, { kind: 'file' }> | null = null;
+  private lines = '';
 
   constructor() {
     this.player = new MediaController(adapterForHost(location.hostname), {
@@ -40,7 +50,42 @@ class FrameAgent {
     const beat = setInterval(() => this.report(), 2000);
     this.abort.signal.addEventListener('abort', () => clearInterval(beat));
     window.addEventListener('pagehide', () => this.post({ type: 'gone' }), { signal: this.abort.signal });
+    // Subtitles: the files the player downloads (main-world bridge), its tracks and the lines it shows.
+    document.addEventListener(
+      CAPTIONS_EVENT,
+      (e) => {
+        const payload = readCaptionPayload((e as CustomEvent<unknown>).detail);
+        const found = payload ? captionFile(payload) : null;
+        if (found) this.setFile({ kind: 'file', ...found });
+      },
+      { signal: this.abort.signal },
+    );
+    document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
+    const captions = setInterval(() => this.sampleCaptions(), 400);
+    this.abort.signal.addEventListener('abort', () => clearInterval(captions));
     this.report();
+  }
+
+  private setFile(file: Extract<FrameCaptions, { kind: 'file' }>): void {
+    this.file = file;
+    if (this.announced) this.post({ type: 'captions', captions: file });
+  }
+
+  private sampleCaptions(): void {
+    const media = this.player.current;
+    if (!media || !this.announced) return;
+    const read = readTextTrack(media, this.track, this.trackCount);
+    if (read) {
+      this.track = read.track;
+      this.trackCount = read.count;
+      if (read.cues.length) this.setFile({ kind: 'file', cues: read.cues, lang: read.lang, label: read.label, source: 'track', complete: true });
+    }
+    // Lines on screen (subtitles drawn by the player), as they change.
+    const lines = readLiveLines(document, media);
+    const key = JSON.stringify(lines);
+    if (key === this.lines) return;
+    this.lines = key;
+    this.post({ type: 'captions', captions: { kind: 'lines', lines } });
   }
 
   private schedule(delay: number): void {
@@ -80,8 +125,10 @@ class FrameAgent {
     if (key === this.lastSent && now - this.lastSentAt < 6000) return;
     this.lastSent = key;
     this.lastSentAt = now;
+    const first = !this.announced;
     this.announced = true;
     this.post({ type: 'media', media: state });
+    if (first && this.file) this.post({ type: 'captions', captions: this.file });
     // Lets the parent page find the <iframe> element holding this media.
     try {
       window.parent.postMessage({ booNotesFrame: this.token }, '*');
@@ -98,8 +145,10 @@ class FrameAgent {
         this.port.onDisconnect.addListener(() => {
           void chrome.runtime.lastError;
           this.port = null;
-          // The service worker restarted: announce the media again.
+          // The service worker restarted: announce the media (and its subtitles) again.
           this.lastSent = '';
+          this.announced = false;
+          this.lines = '';
         });
       }
       this.port.postMessage(msg);
@@ -125,6 +174,9 @@ class FrameAgent {
         return;
       case 'seek':
         this.player.seek(c.seconds);
+        return;
+      case 'captions':
+        SubtitleCollector.showCaptions();
         return;
       case 'capture': {
         const video = this.player.video;

@@ -139,10 +139,31 @@
             </label>
             <label class="row">
               <span class="row-text">
-                <span class="row-label">Traduire en français</span>
+                <span class="row-label">Traduire les sous-titres</span>
                 <span class="row-desc">Sur l’appareil (Chrome 138 et plus), réplique par réplique ; chaque traduction reste modifiable.</span>
               </span>
               <input type="checkbox" role="switch" class="switch" name="autoTranslate" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Traduire vers</span>
+                <span class="row-desc">
+                  Anglais → français, français → anglais… à votre convenance : la langue des sous-titres est reconnue
+                  toute seule. Se change aussi dans l’onglet Transcription.
+                </span>
+              </span>
+              <select name="translateTo" class="select">
+                <option value="fr">français</option>
+                <option value="en">anglais</option>
+                <option value="es">espagnol</option>
+                <option value="de">allemand</option>
+                <option value="it">italien</option>
+                <option value="pt">portugais</option>
+                <option value="nl">néerlandais</option>
+                <option value="ar">arabe</option>
+                <option value="zh">chinois</option>
+                <option value="ja">japonais</option>
+              </select>
             </label>
             <label class="row">
               <span class="row-text">
@@ -250,6 +271,19 @@
               « Toujours activer ici » ajoute le site à cette liste.
             </p>
           </header>
+          <div class="card rows">
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Activer sur tous les sites</span>
+                <span class="row-desc">
+                  Toute vidéo ou tout audio est détecté tout seul, lecteurs intégrés compris (Vimeo, Wistia, Kaltura,
+                  plateformes de cours…), avec ses sous-titres : plus besoin de cliquer sur l’icône ni d’autoriser
+                  chaque lecteur. Boo Notes reste invisible tant que vous ne prenez pas de notes.
+                </span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" id="all-sites" />
+            </label>
+          </div>
           <div class="card">
             <ul id="site-list" class="site-list"></ul>
             <p id="site-empty" class="data-summary">Aucun site ajouté pour l’instant.</p>

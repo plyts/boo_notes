@@ -1,3 +1,4 @@
+import { CAPTIONS_EVENT, CAPTIONS_REQUEST_EVENT, readCaptionPayload } from '../shared/caption-bridge';
 import { bytesToBase64 } from '../shared/encoding';
 import { captureLine, findFragmentLinks } from '../shared/markdown';
 import {
@@ -9,6 +10,7 @@ import {
   type CaptionState,
   type CommandId,
   type ContentToPanel,
+  type FrameCaptions,
   type FrameMedia,
   type MediaMeta,
   type PanelToContent,
@@ -30,12 +32,22 @@ import { Overlay } from './overlay';
 import { MediaController } from './player';
 import { PageReader } from './reader';
 import { passageCard, recordBlocker, Recording } from './recorder';
-import { SubtitleCollector } from './subtitles';
+import { showReloadNotice } from './reload-notice';
+import { captionFile, SubtitleCollector } from './subtitles';
 
 const PINNED_KEY = 'boo-notes:pinned';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
+/** A copy cut off from the extension asks whether a newer one runs in the page; it answers. */
+const ALIVE_QUESTION = 'boo-notes:alive?';
+const ALIVE_ANSWER = 'boo-notes:alive!';
 /** Iframes at least this large may hold a player. */
 const PLAYER_FRAME_AREA = 240 * 135;
+
+/** A frame the size of a lesson's video (course platforms embedding their content): offered too. */
+function isLargeFrame(f: HTMLIFrameElement): boolean {
+  const r = f.getBoundingClientRect();
+  return r.width >= 480 && r.height >= 270;
+}
 
 type Port = chrome.runtime.Port;
 
@@ -100,6 +112,12 @@ class ContentApp {
   /** Subtitles of the media, collected in the background. */
   private readonly subtitles: SubtitleCollector;
   private caption: { cue: Cue | null; state: CaptionState } = { cue: null, state: { status: 'searching', source: null, label: '' } };
+  /** Subtitles read in embedded players, by frame. */
+  private readonly frameLines = new Map<number, string[] | null>();
+  private readonly frameFiles = new Map<number, Extract<FrameCaptions, { kind: 'file' }>>();
+  private frameFileUsed: Extract<FrameCaptions, { kind: 'file' }> | null = null;
+  /** When the current media page started (subtitle files replayed from before are left out). */
+  private contextSince = 0;
   /** Passage started with « Début du passage » (Alt+I), recording its picture and sound when possible. */
   private passage: { noteId: string; start: number; poster: Shot | null; recording: Recording | null; what: 'video' | 'audio' } | null = null;
   /** Passage replayed to record its extract. */
@@ -206,6 +224,8 @@ class ContentApp {
     void this.bg({ type: 'frames:inject' }).catch(() => undefined);
     await this.syncContext(true);
     if (this.dead) return;
+    // Those the player downloaded before this script started are sent again.
+    document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
     if (this.pinned && this.ctx) this.openDrawer(null);
   }
 
@@ -245,6 +265,8 @@ class ContentApp {
     this.player.listen(this.abort.signal);
     // Frame agents announce themselves to find their <iframe> element.
     window.addEventListener('message', this.onFrameHello, { signal: this.abort.signal });
+    // Subtitle files downloaded by the page's player (main-world bridge).
+    document.addEventListener(CAPTIONS_EVENT, this.onCaptionFile, { signal: this.abort.signal });
     document.addEventListener('fullscreenchange', this.onFullscreenChange, opts);
     // Reading mode: "Citer" bubble next to the selected text while the notes are open.
     document.addEventListener('selectionchange', () => this.scheduleQuoteBubble(), { signal: this.abort.signal });
@@ -259,6 +281,9 @@ class ContentApp {
     this.stopSettingsWatch = onSettingsChanged((s) => this.applySettings(s));
 
     this.intervals.push(setInterval(() => this.checkUrl(), 750));
+    // The extension reloaded or updated under this page: this copy is orphaned.
+    this.intervals.push(setInterval(() => !chrome.runtime?.id && this.orphan(), 2000));
+    document.addEventListener(ALIVE_QUESTION, () => document.dispatchEvent(new CustomEvent(ALIVE_ANSWER)), { signal: this.abort.signal });
     // Embedded players the extension cannot read yet: offered in the panel.
     this.intervals.push(setInterval(() => this.checkPlayers(), 3000));
     this.intervals.push(
@@ -325,6 +350,10 @@ class ContentApp {
 
   /** State of an embedded player's media, relayed by the background. */
   private onFrameMedia(frameId: number, media: FrameMedia | null): void {
+    if (!media) {
+      this.frameLines.delete(frameId);
+      this.frameFiles.delete(frameId);
+    }
     const was = this.player.remote?.media.playback.playing;
     this.player.setRemote(frameId, media);
     if (this.player.current) return; // A media of the page itself has priority.
@@ -334,6 +363,24 @@ class ContentApp {
     if (was && !this.player.remote?.media.playback.playing) this.reportProgress(true);
     else this.reportProgress();
     this.checkPlayers();
+  }
+
+  /** A subtitles file downloaded by the page's player. */
+  private readonly onCaptionFile = (e: Event): void => {
+    const payload = readCaptionPayload((e as CustomEvent<unknown>).detail);
+    const ctx = this.ctx;
+    if (!payload || !ctx || this.dead || payload.at < this.contextSince - 3000) return;
+    // YouTube names the video its captions belong to: another video's are left out.
+    const video = /[?&]v=([\w-]{11})/.exec(payload.url)?.[1];
+    if (ctx.platform === 'youtube' && video && `youtube:${video}` !== ctx.noteId) return;
+    const found = captionFile(payload);
+    if (found) this.subtitles.offerFile(found);
+  };
+
+  /** Subtitles read in an embedded player: used while it is the media followed. */
+  private onFrameCaptions(frameId: number, captions: FrameCaptions): void {
+    if (captions.kind === 'lines') this.frameLines.set(frameId, captions.lines);
+    else this.frameFiles.set(frameId, captions);
   }
 
   private readonly onFrameHello = (e: MessageEvent): void => {
@@ -354,7 +401,7 @@ class ContentApp {
         ...new Set(
           playerFrames(PLAYER_FRAME_AREA)
             .filter((f) => !reporting.has(f) && f.src && /^https?:/.test(f.src))
-            .filter((f) => looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen|encrypted-media/.test(f.allow))
+            .filter((f) => looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen|encrypted-media/.test(f.allow) || isLargeFrame(f))
             .map((f) => new URL(f.src, location.href).host)
             .filter((h) => h !== location.host),
         ),
@@ -378,13 +425,34 @@ class ContentApp {
   private bg<R extends BackgroundRequest>(request: R): Promise<BackgroundResponses[R['type']]> {
     if (!chrome.runtime?.id) {
       // The extension was reloaded / updated: this copy of the script is orphaned.
-      this.destroy();
+      this.orphan();
       return Promise.reject(new Error('Extension rechargée'));
     }
     return callBackground(request).catch((e: unknown) => {
-      if (/context invalidated/i.test(errorMessage(e))) this.destroy();
+      if (/context invalidated/i.test(errorMessage(e))) this.orphan();
       throw e;
     });
+  }
+
+  /**
+   * Cut off from the extension (reloaded, updated): this copy stops. The new
+   * version restarts itself in the page when it may; otherwise the user is
+   * asked to reload the page, instead of a silent « Extension context invalidated ».
+   */
+  private orphan(): void {
+    if (this.dead) return;
+    // Only where Boo Notes was in use: notes open, or a media followed.
+    const inUse = this.drawer.isOpen || this.popoutPort !== null || this.registeredNoteId !== null;
+    this.destroy();
+    if (!inUse) return;
+    let answered = false;
+    const onAnswer = () => (answered = true);
+    document.addEventListener(ALIVE_ANSWER, onAnswer);
+    setTimeout(() => {
+      document.dispatchEvent(new CustomEvent(ALIVE_QUESTION));
+      document.removeEventListener(ALIVE_ANSWER, onAnswer);
+      if (!answered) showReloadNotice();
+    }, 1500);
   }
 
   private readonly onTabMessage = (
@@ -397,6 +465,7 @@ class ContentApp {
     else if (msg.type === 'command') void this.onCommand(msg.command);
     else if (msg.type === 'popout:closed') this.popoutPort = null;
     else if (msg.type === 'frame:media') this.onFrameMedia(msg.frameId, msg.media);
+    else if (msg.type === 'frame:captions') this.onFrameCaptions(msg.frameId, msg.captions);
     else if (msg.type === 'frame:shot') {
       this.shots.get(msg.id)?.({ shot: msg.shot, error: msg.error });
       this.shots.delete(msg.id);
@@ -457,6 +526,11 @@ class ContentApp {
 
     if (prev) void this.leaveMedia(prev.noteId);
     this.subtitles.reset(ctx?.noteId ?? null, ctx?.platform ?? null);
+    this.frameFileUsed = null;
+    // Files of the first media page all count; after a navigation, only the new ones.
+    this.contextSince = prev ? Date.now() : 0;
+    // The player may have downloaded the new media's subtitles already.
+    if (prev) document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
     this.player.reset();
     this.overlay.hideMarker();
     this.overlay.hideQuoteButton();
@@ -992,9 +1066,31 @@ class ContentApp {
   private tickMedia(): void {
     if (!this.ctx || this.dead || this.reading) return;
     const p = this.player.playback();
-    this.subtitles.tick(this.player.current, p.time, p.playing, p.duration, this.engaged);
+    // An embedded player: its subtitles come from its frame agent.
+    const remote = this.player.current ? null : this.player.remote;
+    if (remote) {
+      this.subtitles.setRemoteLines(this.frameLines.get(remote.frameId) ?? null);
+      const file = this.frameFiles.get(remote.frameId);
+      if (file && file !== this.frameFileUsed) {
+        this.frameFileUsed = file;
+        this.subtitles.offerFile(file);
+      }
+    }
+    this.subtitles.tick(this.player.current, p.time, p.playing, p.duration, this.engaged, remote !== null);
     this.followRange(p);
     this.followTrace(p);
+  }
+
+  /** « Afficher les sous-titres » (Transcription tab): the player shows them, and downloads them for the transcript. */
+  private showCaptions(): void {
+    const remote = this.player.current ? null : this.player.remote;
+    if (remote) {
+      void this.bg({ type: 'frame:command', frameId: remote.frameId, command: { op: 'captions' } }).catch(() => undefined);
+      return;
+    }
+    if (!SubtitleCollector.showCaptions()) {
+      this.overlay.toast('Activez les sous-titres dans le lecteur (bouton CC)', 'info', 3500, { icon: 'subtitles' });
+    }
   }
 
   /** The media ended: the transcript is pinned at the end of the note. */
@@ -1428,6 +1524,9 @@ class ContentApp {
         break;
       case 'passage:record':
         void this.recordRange(msg.start, msg.end, false);
+        break;
+      case 'captions:show':
+        this.showCaptions();
         break;
     }
     this.markInteraction();

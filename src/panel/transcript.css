@@ -81,7 +81,12 @@
 }
 
 .tx-chip svg {
+  flex: none;
   color: var(--accent);
+}
+
+.tx-chip {
+  white-space: nowrap;
 }
 
 .tx-translate::after {
@@ -96,6 +101,34 @@
 
 .tx-translate[aria-checked='true']::after {
   background: var(--accent) radial-gradient(circle 5px at 15.5px 50%, #fff 98%, transparent) no-repeat;
+}
+
+/* Language of the translation, next to its switch. */
+.tx-target {
+  height: 28px;
+  max-width: 116px;
+  margin-left: 4px;
+  padding: 0 22px 0 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")
+    no-repeat right 8px center;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  appearance: none;
+  cursor: pointer;
+}
+
+.tx-target:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tx-status .tx-flip {
+  font-size: inherit;
 }
 
 .tx-search input {
@@ -147,6 +180,12 @@
 
 .cue.selected {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Lines of a passage opened from its card: a bar on the left, a light tint. */
+.cue.in-passage {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .cue-time {
@@ -423,7 +462,8 @@
   cursor: default;
 }
 
-.tx-empty .tx-import {
+.tx-empty .tx-import,
+.tx-empty .tx-show-cc {
   pointer-events: auto;
 }
 

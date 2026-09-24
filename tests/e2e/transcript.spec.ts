@@ -38,15 +38,31 @@ type StoredTranscript = {
 const transcript = (sw: Worker, noteId = NOTE_ID) =>
   sw.evaluate(async (key) => (await chrome.storage.local.get(key))[key], `transcript:${noteId}`) as Promise<StoredTranscript | undefined>;
 
-/** Adds a WebVTT subtitles track to the fixture player. */
-async function addTrack(page: Page): Promise<void> {
-  await page.evaluate(() => {
+/** Adds a WebVTT subtitles track to the fixture player (English, or French). */
+async function addTrack(page: Page, lang: 'en' | 'fr' = 'en'): Promise<void> {
+  await page.evaluate((lang) => {
     const t = document.createElement('track');
     t.kind = 'subtitles';
-    t.srclang = 'en';
-    t.label = 'English';
-    t.src = '/__fixtures/lesson.vtt';
+    t.srclang = lang;
+    t.label = lang === 'en' ? 'English' : 'Français';
+    t.src = lang === 'en' ? '/__fixtures/lesson.vtt' : '/__fixtures/lecon.vtt';
     document.querySelector('video')!.append(t);
+  }, lang);
+}
+
+/** Chrome's on-device translator, stubbed in the panel (the real one needs a model download). */
+async function stubTranslator(context: import('@playwright/test').BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    if (location.protocol !== 'chrome-extension:') return;
+    const fr: Record<string, string> = { 'hello everyone': 'bonjour à tous', 'today we study Stokes': 'aujourd’hui, nous étudions Stokes' };
+    Object.assign(globalThis, {
+      Translator: {
+        availability: async () => 'available',
+        create: async (o: { targetLanguage: string }) => ({
+          translate: async (text: string) => (o.targetLanguage === 'fr' ? (fr[text] ?? `[fr] ${text}`) : `[${o.targetLanguage}] ${text}`),
+        }),
+      },
+    });
   });
 }
 
@@ -66,10 +82,48 @@ async function mediaRecords(sw: Worker): Promise<Array<{ path: string; kind: str
   );
 }
 
+const VTT_FR = `WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+Bonjour à tous.
+
+00:00:03.000 --> 00:00:06.000
+La circulation le long du bord.
+`;
+
 test.beforeEach(async ({ context }) => {
   await context.route('https://www.youtube.com/__fixtures/lesson.vtt', (route) =>
     route.fulfill({ contentType: 'text/vtt; charset=utf-8', body: VTT }),
   );
+  await context.route('https://www.youtube.com/__fixtures/lecon.vtt', (route) =>
+    route.fulfill({ contentType: 'text/vtt; charset=utf-8', body: VTT_FR }),
+  );
+});
+
+/** The watch page, with its player's caption list (and more, like the real page). */
+async function routeWatch(context: import('@playwright/test').BrowserContext, extra = '', body = ''): Promise<void> {
+  const watch = await readFile(fileURLToPath(new URL('./fixtures/watch.html', import.meta.url)), 'utf8');
+  const tracks = JSON.stringify([
+    { baseUrl: '/api/timedtext?v=e2eTest0001&lang=en&kind=asr', languageCode: 'en', kind: 'asr', name: { simpleText: 'anglais (générés automatiquement)' } },
+  ]);
+  await context.route(/^https:\/\/www\.youtube\.com\/watch/, (route) =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: watch
+        .replace('<div class="ytp-progress-bar"></div>', `<div class="ytp-progress-bar"></div>${body}`)
+        .replace(
+          '</body>',
+          `<script>var ytcfg = {"INNERTUBE_CLIENT_VERSION":"2.20250901.00.00","VISITOR_DATA":"Cgt2aXNpdG9y"}; var ytInitialPlayerResponse = {"playabilityStatus":{"status":"OK"},"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":${tracks}}}};${extra}</script></body>`,
+        ),
+    }),
+  );
+}
+
+const JSON3 = JSON.stringify({
+  events: [
+    { tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: 'hello ' }, { utf8: 'everyone' }] },
+    { tStartMs: 3000, dDurationMs: 3000, segs: [{ utf8: 'today we study Stokes' }] },
+  ],
 });
 
 test.describe('Transcription', () => {
@@ -201,17 +255,7 @@ test.describe('Transcription', () => {
         }),
       }),
     );
-    // Chrome's on-device translator, stubbed in the panel (the real one needs a model download).
-    await context.addInitScript(() => {
-      if (location.protocol !== 'chrome-extension:') return;
-      const fr: Record<string, string> = { 'hello everyone': 'bonjour à tous', 'today we study Stokes': 'aujourd’hui, nous étudions Stokes' };
-      Object.assign(globalThis, {
-        Translator: {
-          availability: async () => 'available',
-          create: async () => ({ translate: async (text: string) => fr[text] ?? `[fr] ${text}` }),
-        },
-      });
-    });
+    await stubTranslator(context);
     await openWatch(page);
     await setVideo(page, 1.5);
     await openNotes(sw, page);
@@ -228,6 +272,108 @@ test.describe('Transcription', () => {
     // The live strip shows the translation under the line.
     await page.keyboard.press('Alt+T');
     await expect(p.locator('.live-caption .lc-tr')).toHaveText('bonjour à tous');
+
+    // Another language, as the user likes: everything is translated again.
+    await page.keyboard.press('Alt+T');
+    await p.getByRole('combobox', { name: 'Langue de la traduction' }).selectOption('es');
+    await expect(p.getByRole('switch', { name: /Traduire en espagnol/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.poll(async () => (await transcript(sw))?.cues.map((c) => c.tr)).toEqual(['[es] hello everyone', '[es] today we study Stokes']);
+    expect(await sw.evaluate(async () => ((await chrome.storage.sync.get('settings')).settings as { translateTo: string }).translateTo)).toBe('es');
+  });
+
+  test('traduction français → anglais : les sous-titres déjà en français se traduisent dans l’autre sens', async ({ context, page, sw }) => {
+    await stubTranslator(context);
+    await openWatch(page);
+    await addTrack(page, 'fr');
+    await setVideo(page, 1.5);
+    await openNotes(sw, page);
+    await expect.poll(async () => (await transcript(sw))?.lang).toBe('fr');
+    const p = panel(page);
+    await page.keyboard.press('Alt+T');
+    await p.getByRole('switch', { name: /Traduire en français/ }).click();
+    await expect(p.locator('.tx-status')).toContainText('Les sous-titres sont déjà en français.');
+    await p.locator('.tx-status').getByRole('button', { name: 'Traduire en anglais' }).click();
+    await expect(p.getByRole('switch', { name: /Traduire en anglais/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(p.locator('.cue', { hasText: 'Bonjour à tous.' }).locator('.cue-tr')).toHaveText('[en] Bonjour à tous.');
+    await expect.poll(async () => (await transcript(sw))?.cues.map((c) => c.tr)).toEqual(['[en] Bonjour à tous.', '[en] La circulation le long du bord.']);
+    await expect(p.locator('.tx-label')).toHaveAttribute('title', /français → anglais/);
+  });
+
+  test('YouTube : sous-titres refusés sans le jeton du lecteur → « Afficher les sous-titres » les récupère', async ({ context, page, sw }) => {
+    // Like YouTube today: the captions file is empty unless the player's token (pot) is in the URL.
+    await context.route(/^https:\/\/www\.youtube\.com\/api\/timedtext/, (route) =>
+      route.fulfill({ contentType: 'application/json', body: new URL(route.request().url()).searchParams.has('pot') ? JSON3 : '' }),
+    );
+    // The player's CC button: shows the captions, downloading them with its token.
+    await routeWatch(
+      context,
+      `document.querySelector('.ytp-subtitles-button').addEventListener('click', (e) => {
+         e.currentTarget.setAttribute('aria-pressed', 'true');
+         fetch('/api/timedtext?v=e2eTest0001&lang=en&kind=asr&pot=PLAYER-TOKEN&fmt=json3').then((r) => r.json());
+       });`,
+      '<button class="ytp-subtitles-button" aria-pressed="false">CC</button>',
+    );
+    await openWatch(page);
+    await setVideo(page, 1.5);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await page.keyboard.press('Alt+T');
+    await expect(p.locator('.tx-empty')).toContainText('Activez les sous-titres du lecteur (CC)');
+    await p.getByRole('button', { name: 'Afficher les sous-titres' }).click();
+    await expect(p.locator('.cue')).toHaveCount(2);
+    await expect(p.locator('.tx-label')).toHaveText('Sous-titres YouTube · anglais (automatiques)');
+    expect(await transcript(sw)).toMatchObject({ source: 'platform', lang: 'en', complete: true });
+    expect(await page.locator('.ytp-subtitles-button').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('YouTube : sous-titres déjà affichés à l’ouverture de la page (téléchargés avant Boo Notes)', async ({ context, page, sw }) => {
+    await context.route(/^https:\/\/www\.youtube\.com\/api\/timedtext/, (route) =>
+      route.fulfill({ contentType: 'application/json', body: new URL(route.request().url()).searchParams.has('pot') ? JSON3 : '' }),
+    );
+    // The player downloads them while the page loads, long before the content script starts.
+    await routeWatch(context, `fetch('/api/timedtext?v=e2eTest0001&lang=en&kind=asr&pot=PLAYER-TOKEN&fmt=json3');`);
+    await openWatch(page);
+    await setVideo(page, 1.5);
+    await openNotes(sw, page);
+    await expect.poll(async () => (await transcript(sw))?.cues.length, { timeout: 10_000 }).toBe(2);
+    await expect(panel(page).locator('#tab-transcript .tab-count')).toHaveText('2');
+  });
+
+  test('YouTube : transcription de la vidéo (panneau « Afficher la transcription ») quand le fichier est refusé', async ({ context, page, sw }) => {
+    await context.route(/^https:\/\/www\.youtube\.com\/api\/timedtext/, (route) => route.fulfill({ contentType: 'application/json', body: '' }));
+    let request: Record<string, unknown> | null = null;
+    await context.route(/^https:\/\/www\.youtube\.com\/youtubei\/v1\/get_transcript/, (route) => {
+      request = route.request().postDataJSON() as Record<string, unknown>;
+      const seg = (startMs: number, endMs: number, text: string) => ({ transcriptSegmentRenderer: { startMs: String(startMs), endMs: String(endMs), snippet: { runs: [{ text }] } } });
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          actions: [
+            {
+              updateEngagementPanelAction: {
+                content: {
+                  transcriptRenderer: {
+                    content: {
+                      transcriptSearchPanelRenderer: {
+                        body: { transcriptSegmentListRenderer: { initialSegments: [seg(1000, 3000, 'hello everyone'), seg(3000, 6000, 'today we study Stokes')] } },
+                        footer: { transcriptFooterRenderer: { languageMenu: { sortFilterSubMenuRenderer: { subMenuItems: [{ title: 'anglais (générés automatiquement)', selected: true }] } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        }),
+      });
+    });
+    await routeWatch(context, `var ytInitialData = {"engagementPanels":[{"continuationEndpoint":{"getTranscriptEndpoint":{"params":"CgtlMmVUZXN0MDAwMQ\\u003d\\u003d"}}}]}; var cfg = {"INNERTUBE_CLIENT_VERSION":"2.20250901.00.00"};`);
+    await openWatch(page);
+    await setVideo(page, 1.5);
+    await openNotes(sw, page);
+    await expect.poll(async () => (await transcript(sw))?.cues.map((c) => c.text), { timeout: 10_000 }).toEqual(['hello everyone', 'today we study Stokes']);
+    expect(await transcript(sw)).toMatchObject({ source: 'platform', lang: 'en', label: 'Sous-titres YouTube · anglais (générés automatiquement)' });
+    expect(request).toMatchObject({ params: 'CgtlMmVUZXN0MDAwMQ==', context: { client: { clientName: 'WEB', clientVersion: '2.20250901.00.00' } } });
   });
 
   test('fin de la vidéo : la transcription est épinglée à la note', async ({ page, sw }) => {
@@ -309,6 +455,22 @@ test.describe('Passages', () => {
     await expect
       .poll(async () => (await storedNote(sw))?.markdown, { timeout: 10_000 })
       .toContain('[00:03–00:09] ![Passage 00:03–00:09 · The circulation of F around the boundary](assets/');
+
+    // The card's « Transcription » icon: what is said in the passage, highlighted in the transcript.
+    await page.keyboard.press('Alt+T');
+    await p.locator('.cm-content').press('Control+End');
+    await page.keyboard.press('Enter');
+    await p.getByRole('button', { name: 'Lire la transcription du passage 00:03–00:09' }).click();
+    await expect(p.locator('#tab-transcript')).toHaveAttribute('aria-selected', 'true');
+    await expect(p.locator('.cue.in-passage')).toHaveCount(2);
+    await expect(p.locator('.cue.in-passage .cue-text').first()).toHaveText('The circulation of F around the boundary');
+    await expect(p.locator('.tx-bar-text')).toHaveText('Passage 00:03–00:09 · 2 répliques');
+    // « Lire le passage »: played, and stopped at its end.
+    await p.getByRole('button', { name: 'Lire le passage' }).click();
+    await expect.poll(() => videoPaused(page), { timeout: 12_000 }).toBe(true);
+    expect(await videoTime(page)).toBeGreaterThanOrEqual(8.9);
+    await p.getByRole('button', { name: 'Fermer' }).click();
+    await expect(p.locator('.cue.in-passage')).toHaveCount(0);
 
     // A range typed by hand replays that stretch.
     await page.keyboard.press('Alt+T');

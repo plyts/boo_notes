@@ -94,7 +94,7 @@ test('options page', async ({ context, sw }) => {
   const page = await context.newPage();
   await page.setViewportSize({ width: 1200, height: 900 });
   await page.goto(`chrome-extension://${id}/options/options.html#bienvenue`);
-  await expect(page.locator('#shortcut-rows .row')).toHaveCount(5);
+  await expect(page.locator('#shortcut-rows .row')).toHaveCount(7);
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/options.png` });
   await page.emulateMedia({ colorScheme: 'dark' });

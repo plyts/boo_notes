@@ -1,7 +1,7 @@
 import { h, icon } from '../shared/icons';
 import type { CaptionState } from '../shared/messages';
 import { formatTimecode } from '../shared/time';
-import { coverageRatio, cueIndexAt, cuesInRange, languagesLabel, rangeLabel, type Cue, type Transcript } from '../shared/transcript';
+import { coverageRatio, cueIndexAt, cuesInRange, languageName, languagesLabel, rangeLabel, type Cue, type Transcript } from '../shared/transcript';
 import type { TranslateStatus } from './translator';
 
 /**
@@ -26,7 +26,19 @@ export interface TranscriptViewHooks {
   notesIn(start: number, end: number): number;
   /** Adds a .vtt / .srt file as the transcript (desktop app); no button when absent. */
   importSubtitles?(): void;
+  /** Switches the player's captions on, so they are collected (browser); no button when absent. */
+  showCaptions?(): void;
+  /** Language translations are written in (BCP 47), chosen by the user. */
+  setTarget?(lang: string): void;
+  /** Plays [start, end] and stops at its end (passage shown in the transcript). */
+  playRange?(start: number, end: number): void;
 }
+
+/** Languages offered for the translation (any other BCP 47 code set in the options is kept). */
+export const TRANSLATION_TARGETS = ['fr', 'en', 'es', 'de', 'it', 'pt', 'nl', 'ar', 'zh', 'ja'];
+
+/** « français », « anglais »… */
+export const targetName = (lang: string): string => (lang ? languageName(lang) : 'français');
 
 interface Row {
   el: HTMLDivElement;
@@ -46,6 +58,7 @@ export class TranscriptView {
   private readonly emptyEl: HTMLDivElement;
   private readonly followButton: HTMLButtonElement;
   private readonly translateButton: HTMLButtonElement;
+  private readonly targetSelect: HTMLSelectElement;
   private readonly searchBox: HTMLDivElement;
   private readonly searchInput: HTMLInputElement;
   private readonly bar: HTMLDivElement;
@@ -62,6 +75,8 @@ export class TranscriptView {
   private target = 'fr';
   private readOnly = false;
   private emptyText: string | null = null;
+  /** Passage shown in the transcript (from its card in the note). */
+  private focused: { start: number; end: number } | null = null;
 
   constructor(private readonly hooks: TranscriptViewHooks) {
     this.labelEl = h('span', { class: 'tx-label' }, 'Transcription');
@@ -73,6 +88,12 @@ export class TranscriptView {
       h('span', {}, 'Traduire en français'),
     );
     this.translateButton.addEventListener('click', () => hooks.toggleTranslate(!this.translating));
+    // Direction of the translation: anglais → français, français → anglais… as the user likes.
+    this.targetSelect = h('select', { class: 'tx-target', 'aria-label': 'Langue de la traduction', title: 'Traduire vers…' });
+    this.fillTargets();
+    this.targetSelect.addEventListener('change', () => hooks.setTarget?.(this.targetSelect.value));
+    this.targetSelect.hidden = !hooks.setTarget;
+    this.labelTranslate();
     const searchButton = h('button', { type: 'button', class: 'icon-btn', title: 'Rechercher dans la transcription', 'aria-label': 'Rechercher dans la transcription' }, icon('search'));
     searchButton.addEventListener('click', () => this.toggleSearch());
     const pinAll = h(
@@ -121,7 +142,7 @@ export class TranscriptView {
         'div',
         { class: 'tx-head' },
         h('div', { class: 'tx-source' }, icon('subtitles', 15), this.labelEl, this.coverEl),
-        h('div', { class: 'tx-tools' }, this.translateButton, h('span', { class: 'spacer' }), ...tools),
+        h('div', { class: 'tx-tools' }, this.translateButton, this.targetSelect, h('span', { class: 'spacer' }), ...tools),
         this.searchBox,
         this.statusEl,
       ),
@@ -157,6 +178,24 @@ export class TranscriptView {
 
   setTarget(target: string): void {
     this.target = target;
+    this.fillTargets();
+    this.labelTranslate();
+  }
+
+  /** « Traduire » next to the language chosen (« Traduire en français » without the list). */
+  private labelTranslate(): void {
+    const name = `Traduire en ${targetName(this.target)}`;
+    (this.translateButton.lastElementChild as HTMLElement).textContent = this.hooks.setTarget ? 'Traduire' : name;
+    this.translateButton.setAttribute('aria-label', name);
+    this.translateButton.title = `${name} (sur l’appareil)`;
+  }
+
+  private fillTargets(): void {
+    const codes = TRANSLATION_TARGETS.includes(this.target) ? TRANSLATION_TARGETS : [this.target, ...TRANSLATION_TARGETS];
+    if (this.targetSelect.options.length !== codes.length) {
+      this.targetSelect.replaceChildren(...codes.map((c) => h('option', { value: c }, targetName(c))));
+    }
+    this.targetSelect.value = this.target;
   }
 
   /** Message of an empty transcript, instead of the browser's (desktop app). */
@@ -184,6 +223,52 @@ export class TranscriptView {
     }
     this.renderRows();
     this.renderHead();
+    if (this.focused && other) this.showPassage(this.focused.start, this.focused.end);
+  }
+
+  /**
+   * A passage of the note (its card, its extract), read here: its lines are
+   * highlighted and brought into view, with a button replaying it.
+   */
+  showPassage(start: number, end: number): void {
+    this.anchor = null;
+    this.selection = null;
+    this.focused = { start, end };
+    this.following = false;
+    const inside = cuesInRange(this.transcript?.cues ?? [], start, end);
+    this.markPassage();
+    const first = inside[0] ? this.rows.get(inside[0].id)?.el : null;
+    if (first && !this.el.hidden) {
+      requestAnimationFrame(() => {
+        const list = this.list.getBoundingClientRect();
+        const r = first.getBoundingClientRect();
+        this.list.scrollBy({ top: r.top - list.top - 12, behavior: 'smooth' });
+      });
+    }
+    const n = inside.length;
+    const text = n
+      ? `Passage ${rangeLabel(start, end)} · ${n} réplique${n > 1 ? 's' : ''}`
+      : `Passage ${rangeLabel(start, end)} · aucune réplique transcrite pour ce moment`;
+    const close = h('button', { type: 'button', class: 'btn-quiet' }, 'Fermer');
+    close.addEventListener('click', () => this.clearSelection());
+    const actions: Node[] = [close];
+    if (this.hooks.playRange) {
+      const play = h('button', { type: 'button', class: 'btn-primary' }, icon('play', 15), 'Lire le passage');
+      play.addEventListener('click', () => this.hooks.playRange?.(start, end));
+      actions.push(play);
+    }
+    this.bar.replaceChildren(h('span', { class: 'tx-bar-text' }, text), h('div', { class: 'tx-bar-actions' }, ...actions));
+    this.bar.hidden = false;
+    this.bar.dataset.kind = 'passage';
+    this.renderFollow();
+  }
+
+  private markPassage(): void {
+    const f = this.focused;
+    for (const [id, row] of this.rows) {
+      const cue = this.transcript?.cues.find((c) => c.id === id);
+      row.el.classList.toggle('in-passage', Boolean(f && cue && cue.end > f.start && cue.start < f.end));
+    }
   }
 
   setState(state: CaptionState): void {
@@ -204,19 +289,27 @@ export class TranscriptView {
     this.translating = on;
     this.translateButton.setAttribute('aria-checked', String(on));
     this.el.dataset.translate = String(on);
-    const lang = this.target === 'fr' ? 'français' : this.target;
-    (this.translateButton.lastElementChild as HTMLElement).textContent = `Traduire en ${lang}`;
+    const lang = targetName(this.target);
+    this.labelTranslate();
     const text: Partial<Record<TranslateStatus['state'], string>> = {
       unsupported: 'Traduction sur l’appareil indisponible dans ce navigateur (Chrome 138+) : cliquez sous une réplique pour la traduire vous-même.',
       unavailable: 'Traduction indisponible pour cette langue : cliquez sous une réplique pour la traduire vous-même.',
-      same: 'Les sous-titres sont déjà en français.',
+      same: `Les sous-titres sont déjà en ${lang}.`,
       detecting: 'Détection de la langue…',
       error: 'Traduction interrompue : cliquez sous une réplique pour la traduire vous-même.',
     };
     let message = text[status.state] ?? '';
     if (status.state === 'downloading') message = `Téléchargement du modèle de traduction… ${Math.round(status.progress * 100)} %`;
     if (status.state === 'working') message = `Traduction sur l’appareil… ${status.done} / ${status.total}`;
-    this.statusEl.textContent = message;
+    const children: Array<Node | string> = [message];
+    // Subtitles already in the target language: one click translates the other way.
+    if (status.state === 'same' && this.hooks.setTarget) {
+      const other = this.target.split('-')[0] === 'fr' ? 'en' : 'fr';
+      const flip = h('button', { type: 'button', class: 'link-btn tx-flip' }, `Traduire en ${targetName(other)}`);
+      flip.addEventListener('click', () => this.hooks.setTarget?.(other));
+      children.push(' ', flip);
+    }
+    this.statusEl.replaceChildren(...children);
     this.statusEl.hidden = !message || !on;
   }
 
@@ -257,9 +350,15 @@ export class TranscriptView {
       'captions-off': 'Activez les sous-titres du lecteur (CC) : Boo Notes les recopie ici au fil de la lecture.',
       capturing: 'Les sous-titres affichés sont recopiés ici au fil de la lecture.',
       complete: '',
+      none: 'Cette vidéo n’a pas de sous-titres : pas de transcription possible. Vos notes, captures et passages fonctionnent normalement.',
     };
     this.emptyEl.hidden = count > 0;
     const children: Node[] = [icon('subtitles', 28), h('p', {}, this.emptyText ?? (messages[this.state.status] || messages.searching))];
+    if (this.hooks.showCaptions && !this.readOnly && (this.state.status === 'captions-off' || this.state.status === 'searching')) {
+      const show = h('button', { type: 'button', class: 'btn-quiet tx-show-cc' }, icon('subtitles', 15), 'Afficher les sous-titres');
+      show.addEventListener('click', () => this.hooks.showCaptions?.());
+      children.push(show);
+    }
     if (this.hooks.importSubtitles && !this.readOnly) {
       const add = h('button', { type: 'button', class: 'btn-quiet tx-import' }, icon('plus', 15), 'Ajouter des sous-titres (.vtt, .srt)');
       add.addEventListener('click', () => this.hooks.importSubtitles?.());
@@ -290,6 +389,7 @@ export class TranscriptView {
       this.rows.delete(id);
     }
     if (this.query) this.applyFilter();
+    if (this.focused) this.markPassage();
   }
 
   private createRow(cue: Cue): Row {
@@ -500,6 +600,7 @@ export class TranscriptView {
   }
 
   private startSelection(cue: Cue): void {
+    this.unfocus();
     this.anchor = cue;
     this.selection = null;
     this.markSelected(cue.start, cue.end);
@@ -544,11 +645,19 @@ export class TranscriptView {
     } else children.push(h('div', { class: 'tx-bar-actions' }, cancel));
     this.bar.replaceChildren(...children);
     this.bar.hidden = false;
+    this.bar.dataset.kind = 'selection';
+  }
+
+  private unfocus(): void {
+    if (!this.focused) return;
+    this.focused = null;
+    this.markPassage();
   }
 
   clearSelection(): void {
     this.anchor = null;
     this.selection = null;
+    this.unfocus();
     this.bar.hidden = true;
     for (const row of this.rows.values()) row.el.classList.remove('selected');
   }
