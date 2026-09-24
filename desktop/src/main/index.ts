@@ -22,6 +22,7 @@ import {
 } from 'electron';
 import { noteSlug, timestampUrl } from '../../../src/shared/platforms';
 import { formatTimecode } from '../../../src/shared/time';
+import { pastedMediaPath } from '../../../src/shared/media-paths';
 import type { CuePatch } from '../../../src/shared/transcript';
 import { ConfigStore, plainBox, type SecretBox } from '../core/config';
 import { richCopyNote, writeExport, type ExportFormat, type ExportOptions } from '../core/export';
@@ -569,6 +570,34 @@ function registerIpc(): void {
     const start = Number(entry.start) || 0;
     const path = `media/${noteSlug(id)}-${entry.kind === 'audio' ? 'audio' : 'passage'}-${formatTimecode(start).replace(/:/g, '-')}-${nonce}.${ext}`;
     await library.putMedia(id, { path, kind: entry.kind === 'audio' ? 'audio' : 'passage', mime, start, end: Number(entry.end) || 0 }, Buffer.from(bytes));
+    return path;
+  });
+  handle(C.pasteImage, async (noteId: string, src: string) => {
+    const id = str(noteId, 'id');
+    const value = str(src, 'image');
+    // A picture of the web, downloaded by the app (sites often refuse it to a page).
+    if (/^https?:\/\//.test(value)) {
+      const res = await net.fetch(value, { redirect: 'follow' });
+      const type = (res.headers.get('content-type') ?? '').split(';')[0].trim();
+      const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' } as Record<string, 'jpg' | 'png' | 'webp' | 'gif'>)[type];
+      if (!res.ok || !ext) throw new Error('Image introuvable');
+      const bytes = Buffer.from(await res.arrayBuffer());
+      if (bytes.length > 20 * 1024 * 1024) throw new Error('Image trop lourde');
+      return library.savePastedImage(id, bytes, ext);
+    }
+    const m = /^data:image\/(jpeg|png|webp);base64,(.+)$/.exec(value);
+    if (!m) throw new Error('Image invalide');
+    return library.savePastedImage(id, Buffer.from(m[2], 'base64'), m[1] === 'jpeg' ? 'jpg' : (m[1] as 'png' | 'webp'));
+  });
+  handle(C.pasteMedia, async (noteId: string, file: { name: string; mime: string; at: number }, bytes: Uint8Array) => {
+    const id = str(noteId, 'id');
+    if (!(bytes instanceof Uint8Array) || !bytes.length) throw new Error('Fichier vide');
+    const mime = str(file?.mime, 'type').split(';')[0];
+    if (!/^(audio|video)\/[\w.+-]+$/.test(mime)) throw new Error('Seules les vidéos et les audios se collent ici');
+    const name = str(file?.name ?? 'media', 'nom').slice(0, 200);
+    const path = pastedMediaPath(id, name, mime, randomBytes(3).toString('hex'));
+    const at = Number(file?.at) || 0;
+    await library.putMedia(id, { path, kind: 'file', name, mime, start: at, end: at }, Buffer.from(bytes));
     return path;
   });
   handle(C.copyNote, async (noteId: string) => {

@@ -172,10 +172,15 @@ export interface ActivePlayer {
   url: string;
 }
 
-/** A recorded extract of a passage, or a stretch of the course's sound kept while it played (`media/…`). */
+/**
+ * A recorded extract of a passage, a stretch of the course's sound kept while
+ * it played, or a video / audio pasted into the note (`media/…`).
+ */
 export interface MediaEntry {
   path: string;
-  kind: 'passage' | 'audio';
+  kind: 'passage' | 'audio' | 'file';
+  /** Name of a pasted file. */
+  name?: string;
   mime: string;
   /** Media time range (s). */
   start: number;

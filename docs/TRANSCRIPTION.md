@@ -189,6 +189,28 @@ Les extraits vidéo, trop lourds pour un presse-papier, voyagent avec **Téléch
 dossier `.md` + `assets/` + `media/` + `transcripts/`) ou l’**export Markdown** de l’application :
 glissé dans un coffre Obsidian, tout s’affiche et se lit.
 
+### Copier / coller dans les notes (extension et application)
+
+**Coller** (`Ctrl/⌘ + V`) ou **glisser-déposer** dans une note :
+
+| Ce qui est collé | Ce que devient la note |
+| --- | --- |
+| Une **image** : capture d’écran (Impr. écran, `Win + Maj + S`, `⌘ + Maj + 4`), « Copier l’image » d’un site, fichier image | enregistrée avec les captures (`assets/…`, réduite à 2400 px au plus) ; pendant une vidéo, à l’instant de la vidéo : `[04:12] ![Image collée 04:12](assets/…)`, une carte comme une capture |
+| Une **vidéo** ou un **audio** (fichier `.mp4`, `.webm`, `.mov`, `.mp3`, `.m4a`, `.wav`…, jusqu’à 500 Mo) | gardé avec la note (`media/…`, envoyé à l’application Desktop) : `[04:12] [🎬 cours.mp4](media/…)` ; un clic le lit au-dessus des notes, **⤓** le télécharge |
+| Du **texte mis en forme** (page web, Notion, Google Docs, Word, un mail…) | Markdown : titres, gras, italique, surligné, barré, listes et cases à cocher, citations, code, tableaux, liens ; ses **images** sont enregistrées dans la note (celles qu’un site refuse de céder restent en ligne, affichées) ; vidéos, audios et vidéos intégrées (YouTube, Vimeo, Loom) deviennent des liens |
+| Une **partie d’une autre note** Boo Notes | telle quelle : mêmes captures, cartes de passage, extraits et transcription ; ses horodatages deviennent des liens vers les instants de **sa** vidéo (un clic l’ouvre) |
+| Du texte simple | comme d’habitude |
+
+Pendant l’enregistrement d’un fichier, un repère « Import de … » tient sa place dans la note : vous
+continuez d’écrire.
+
+**Copier** (`Ctrl/⌘ + C`, ou couper) une **partie** de la note met dans le presse-papier, comme
+« Copier la note » mais sans titre : Markdown et HTML avec les **images intégrées**, horodatages
+liés à l’instant de la vidéo — et le format de Boo Notes, pour la coller telle quelle dans une autre
+note. **Copier l’image** (au survol d’une carte) met l’image elle-même (PNG), à coller dans
+n’importe quelle application. Une **vidéo** ne passe pas par le presse-papier d’un navigateur : son
+lecteur propose **⤓ Télécharger le fichier**.
+
 ## 6. Raccourcis
 
 | Action | Raccourci |
@@ -234,6 +256,7 @@ glissé dans un coffre Obsidian, tout s’affiche et se lit.
 | Stockage de l’extension (fusion des sources, traductions et commentaires) | `src/shared/transcript-store.ts` |
 | Extraits et son conservé (IndexedDB) | `src/shared/media-db.ts` |
 | Collecte dans la page | `src/content/subtitles.ts` |
+| Copier / coller : ce que contient un collage, images, médias collés, format de Boo Notes | `src/panel/rich-clipboard.ts`, `src/shared/html-markdown.ts`, `src/shared/media-paths.ts`, `desktop/src/renderer/lib/clipboard.ts` |
 | Enregistrement (captureStream + MediaRecorder), carte d’un passage | `src/content/recorder.ts` |
 | Vue Transcription (panneau et application) | `src/panel/transcript-view.ts`, `src/panel/transcript.css` |
 | Traduction sur l’appareil | `src/panel/translator.ts` |

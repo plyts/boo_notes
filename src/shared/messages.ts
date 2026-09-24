@@ -147,6 +147,8 @@ export type BackgroundRequest =
   | { type: 'frames:inject' }
   /** Embedded players the user allowed (origins): the agent is injected there from now on. */
   | { type: 'players:allow'; origins: string[]; tabId: number }
+  /** A video or audio pasted into a note was stored (IndexedDB) by the panel: to send to the desktop app. */
+  | { type: 'media:stored'; path: string }
   | { type: 'popout:open'; noteId: string }
   | { type: 'popout:close'; tabId: number }
   | { type: 'options:open' }
@@ -187,11 +189,14 @@ export type BackgroundRequest =
 export interface MediaMeta {
   path: string;
   noteId: string;
-  kind: 'passage' | 'audio';
+  /** `passage`: extract of a passage; `audio`: sound of the course kept; `file`: a video or audio pasted into the note. */
+  kind: 'passage' | 'audio' | 'file';
   mime: string;
-  /** Media time range (s). */
+  /** Media time range (s); for a pasted file, the moment it was pasted at. */
   start: number;
   end: number;
+  /** Name of a pasted file. */
+  name?: string;
 }
 
 /** State of the subtitles collection, for the panel. */
@@ -223,6 +228,7 @@ export interface BackgroundResponses {
   'frame:command': void;
   'frames:inject': void;
   'players:allow': void;
+  'media:stored': void;
   'popout:open': { windowId: number };
   'popout:close': void;
   'options:open': void;

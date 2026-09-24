@@ -578,6 +578,11 @@ const handlers: Handlers = {
     return { path: r.path };
   },
 
+  'media:stored': async (msg) => {
+    if (!/^media\/[\w.-]+$/.test(msg.path) || !(await getMedia(msg.path))) throw new Error('Média introuvable');
+    void sync.notifyChanged();
+  },
+
   'player:progress': async (msg) => {
     let position = msg.position;
     if (msg.kind === 'page') {

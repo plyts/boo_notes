@@ -21,7 +21,8 @@ import { languagesLabel, PASSAGE_LINE, rangeLabel, TRANSCRIPT_LINE, type Transcr
  * its card (first picture) and a link that replays it at the source.
  */
 export interface RichCopyInput {
-  title: string;
+  /** Title of the note; none for a selection (copied inside a text). */
+  title?: string;
   /** Web page of the note's media or article (null: local file, revision sheet). */
   sourceUrl: string | null;
   /** « Cours › Chapitre ». */
@@ -46,6 +47,18 @@ export interface RichCopy {
   images: number;
   /** Images that could not be read. */
   missing: string[];
+}
+
+/**
+ * Links to the note's own files that mean nothing elsewhere: a video or audio
+ * pasted into the note (`[🎬 cours.mp4](media/…)`) keeps its name; a transcript
+ * line without its transcript, its label.
+ */
+function localLinks(markdown: string): string {
+  return markdown
+    .split('\n')
+    .map((line) => (PASSAGE_LINE.test(line) ? line : line.replace(/\[([^\]\n]*)\]\((?:media|transcripts)\/[^)\s]+\)/g, '$1')))
+    .join('\n');
 }
 
 /** Recorded extract of a passage: a link replaying it at the source (Markdown), nothing in HTML (the card links there). */
@@ -80,28 +93,40 @@ function transcriptMarkdown(t: Transcript, timeUrl: (s: number) => string | null
   return lines.join('\n').trimEnd();
 }
 
-export async function buildRichCopy(input: RichCopyInput): Promise<RichCopy> {
-  const hasTranscript = Boolean(input.transcript?.cues.length);
-  const body = hasTranscript ? input.markdown.split('\n').filter((l) => !TRANSCRIPT_LINE.test(l)).join('\n') : input.markdown;
+function bodyOf(input: Pick<RichCopyInput, 'markdown' | 'transcript'>): string {
+  return input.transcript?.cues.length ? input.markdown.split('\n').filter((l) => !TRANSCRIPT_LINE.test(l)).join('\n') : input.markdown;
+}
 
+export async function buildRichCopy(input: RichCopyInput): Promise<RichCopy> {
   // Every picture of the note, read once.
   const images = new Map<string, string>();
-  const missing: string[] = [];
-  for (const path of findAssetRefs(body)) {
+  for (const path of findAssetRefs(bodyOf(input))) {
     const data = await input.image(path).catch(() => null);
     if (data) images.set(path, data);
-    else missing.push(path);
   }
+  return renderRichCopy(input, images);
+}
+
+/**
+ * The same, at once, with the pictures already read (`images`: data URL by
+ * `assets/…` path): what a copy of a selection needs, the clipboard being
+ * filled during the copy event.
+ */
+export function renderRichCopy(input: Omit<RichCopyInput, 'image'>, images: ReadonlyMap<string, string>): RichCopy {
+  const hasTranscript = Boolean(input.transcript?.cues.length);
+  const body = bodyOf(input);
+  const missing = findAssetRefs(body).filter((p) => !images.has(p));
+  const used = findAssetRefs(body).filter((p) => images.has(p)).length;
 
   // --- Markdown -------------------------------------------------------------------------
-  let md = input.linkify(passageLinks(body, input.timeUrl, true));
+  let md = input.linkify(localLinks(passageLinks(body, input.timeUrl, true)));
   md = md.replace(/!\[([^\]\n]*)\]\((assets\/[^)\s]+)\)/g, (_all, alt: string, path: string) => {
     const data = images.get(path);
     return data ? `![${alt}](${data})` : `*${alt || 'Image'} (image introuvable)*`;
   });
-  const head = [`# ${input.title}`, ''];
+  const head = input.title ? [`# ${input.title}`, ''] : [];
   const meta = [input.sourceUrl ? `[${input.sourceUrl}](${input.sourceUrl})` : '', input.place ?? ''].filter(Boolean);
-  if (meta.length) head.push(meta.join(' · '), '');
+  if (input.title && meta.length) head.push(meta.join(' · '), '');
   const markdown = [
     ...head,
     md.trim(),
@@ -111,7 +136,7 @@ export async function buildRichCopy(input: RichCopyInput): Promise<RichCopy> {
     .concat('\n');
 
   // --- HTML -----------------------------------------------------------------------------
-  const blocks = markdownToBlocks(passageLinks(body, input.timeUrl, false), input.context);
+  const blocks = markdownToBlocks(localLinks(passageLinks(body, input.timeUrl, false)), input.context);
   if (hasTranscript) blocks.push(...transcriptBlocks(input.transcript!, input.timeUrl));
   const metaHtml = [
     input.sourceUrl ? `▶ <a href="${esc(input.sourceUrl)}">${esc(input.sourceUrl)}</a>` : '',
@@ -119,7 +144,8 @@ export async function buildRichCopy(input: RichCopyInput): Promise<RichCopy> {
   ]
     .filter(Boolean)
     .join(' · ');
-  const html = `<meta charset="utf-8"><h1>${esc(input.title)}</h1>${metaHtml ? `<p>${metaHtml}</p>` : ''}${blocksHtml(blocks, (p) => images.get(p) ?? '')}`;
+  const title = input.title ? `<h1>${esc(input.title)}</h1>${metaHtml ? `<p>${metaHtml}</p>` : ''}` : '';
+  const html = `<meta charset="utf-8">${title}${blocksHtml(blocks, (p) => images.get(p) ?? '')}`;
 
-  return { markdown, html, images: images.size, missing };
+  return { markdown, html, images: used, missing };
 }

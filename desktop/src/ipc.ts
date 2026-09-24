@@ -152,6 +152,10 @@ export interface BooApi {
     copyNote(noteId: string): Promise<{ images: number; missing: number }>;
     /** A passage extract recorded in the app (WebM bytes): returns its `media/…` path. */
     saveMedia(noteId: string, entry: { kind: 'passage' | 'audio'; mime: string; start: number; end: number }, bytes: Uint8Array): Promise<string>;
+    /** A picture pasted or dropped into the note (data URL, or a web address the app downloads): returns its `assets/…` path. */
+    pasteImage(noteId: string, src: string): Promise<string>;
+    /** A video or audio pasted or dropped into the note: returns its `media/…` path. */
+    pasteMedia(noteId: string, file: { name: string; mime: string; at: number }, bytes: Uint8Array): Promise<string>;
 
     // Courses and chapters
     createCourse(input: { title: string; emoji?: string; hue?: number; description?: string }): Promise<Course>;
@@ -228,6 +232,8 @@ export const CHANNELS = {
   annotateTranscript: 'note:annotate-transcript',
   importSubtitles: 'note:import-subtitles',
   saveMedia: 'note:save-media',
+  pasteImage: 'note:paste-image',
+  pasteMedia: 'note:paste-media',
   copyNote: 'note:copy',
   createCourse: 'course:create',
   updateCourse: 'course:update',

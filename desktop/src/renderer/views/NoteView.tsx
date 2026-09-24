@@ -21,6 +21,7 @@ import { openTitle, removeNote, syncNotion } from '../actions';
 import { NoteEditor, SAVE_LABELS, type NoteEditorHandle, type SaveState } from '../islands/NoteEditor';
 import { isLocal, ResourceViewer, type Position, type ViewerHandle } from '../islands/ResourceViewer';
 import { TranscriptPanel } from '../islands/TranscriptPanel';
+import { copyImage, copySelection, pasteInto, preloadAssets, type ClipNote } from '../lib/clipboard';
 import { frameOf, passageCard, recordBlocker, Recording, recordRange, seekTo } from '../lib/passages';
 import { dueLabel, errorMessage, formatTimecode, plural } from '../lib/format';
 import { KIND_ICON } from '../lib/kinds';
@@ -307,6 +308,17 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
     } catch (e) {
       toast(`Copie impossible : ${errorMessage(e)}`, 'error');
     }
+  };
+
+  /** The note, for a copy or a paste: its main media's page and whether its timestamps are moments. */
+  const clipNote = (): ClipNote => {
+    const main = primary ? resources.get(primary) : undefined;
+    return { id: note?.id ?? '', source: main?.source ?? null, timed: timed(main?.kind) || timed(note?.kind) };
+  };
+  /** Moment of the media playing, for what is pasted (null: not a video or audio). */
+  const timedNow = (): number | null => {
+    const v = viewerRef.current;
+    return v && timed(v.resource.kind) ? v.time() : null;
   };
 
   /** A passage (its card, its extract): its lines, read in the transcript. */
@@ -713,7 +725,13 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                     return v && pos ? token(pos, qualifier(v.resource.id)) : null;
                   },
                   onTimestampHover: () => undefined,
-                  onTimestampClick: (s, r, end) => {
+                  onTimestampClick: (s, r, end, url) => {
+                    // A moment of another media (pasted from another note): opened where it lives.
+                    const main = primary ? resources.get(primary) : undefined;
+                    if (url && url.split('#')[0] !== main?.source.split('#')[0]) {
+                      void window.boo.settings.openExternal(url);
+                      return;
+                    }
                     const target = r ?? primary;
                     // A range `[02:05–06:07]`: the passage is replayed and stops at its end.
                     if (end !== null && end !== undefined && target === active && viewerRef.current?.playRange) viewerRef.current.playRange(s, end);
@@ -721,14 +739,26 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                   },
                   onMediaClick: (path) => {
                     const entry = note.media.find((m) => m.path === path);
+                    const pasted = entry?.kind === 'file' || /^media\/[\w.-]*-file-/.test(path);
                     setMediaPop({
                       path,
                       offset: 0,
-                      title: entry ? `Extrait ${rangeLabel(entry.start, entry.end)}` : 'Extrait',
-                      video: entry ? entry.mime.startsWith('video/') : !/-audio-/.test(path),
-                      ...(entry ? { range: { start: entry.start, end: entry.end } } : {}),
+                      title: pasted ? (entry?.name ?? path.split('/').pop() ?? 'Média') : entry ? `Extrait ${rangeLabel(entry.start, entry.end)}` : 'Extrait',
+                      video: entry ? entry.mime.startsWith('video/') : !/-audio-/.test(path) && !/\.(mp3|m4a|wav|ogg|opus|flac|aac)$/.test(path),
+                      ...(entry && entry.kind === 'passage' ? { range: { start: entry.start, end: entry.end } } : {}),
                     });
                   },
+                  onPaste: (data) => {
+                    const ed = editorRef.current?.editor;
+                    if (!ed || readOnly) return false;
+                    return pasteInto(ed, data, clipNote(), timedNow(), toast);
+                  },
+                  onCopy: (md, data) => copySelection(md, data, clipNote()),
+                  onCopyImage: (path) =>
+                    void copyImage(path).then(
+                      () => toast('Image copiée : collez-la où vous voulez', 'success'),
+                      (e: unknown) => toast(`Copie de l’image impossible : ${errorMessage(e)}`, 'error'),
+                    ),
                   onTranscriptClick: () => setPane('transcript'),
                   onPassageTranscript: (start, end) => showPassageTranscript(start, end),
                   onAnchorClick: (k, n, r) => showAnchor(k, n, r),
@@ -749,6 +779,7 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                   onKeystroke: () => viewerRef.current?.keystroke?.(),
                   onContentChanged: (md) => {
                     setMarkdown(md);
+                    preloadAssets(md);
                     queueMicrotask(() => viewerRef.current?.syncMarkers());
                   },
                   placeholderText: hasStage

@@ -1,6 +1,7 @@
 import { TypingAutoPause } from '../shared/autopause';
 import { plainText } from '../shared/cards';
-import { getMedia, listMedia } from '../shared/media-db';
+import { getMedia, listMedia, putMedia } from '../shared/media-db';
+import { htmlToMarkdown } from '../shared/html-markdown';
 import { h, icon, type IconName } from '../shared/icons';
 import { findAssetRefs, findFragmentLinks, linkedTitles, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import {
@@ -17,8 +18,8 @@ import {
   type PlaybackState,
   type SyncStatus,
 } from '../shared/messages';
-import { PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
-import { buildRichCopy } from '../shared/rich-copy';
+import { detectVideoContext, PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
+import { buildRichCopy, renderRichCopy, type RichCopyInput } from '../shared/rich-copy';
 import { loadSettings, normalizeSettings, saveSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, CourseOption, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
@@ -39,6 +40,19 @@ import {
 } from '../shared/transcript';
 import type { CuePatch } from '../shared/transcript-store';
 import { NotesEditor } from './editor';
+import {
+  adaptClip,
+  classifyPaste,
+  fileKind,
+  imageLine,
+  MAX_MEDIA_BYTES,
+  mediaFileLine,
+  pastedMediaPath,
+  pictureBlob,
+  prepareImage,
+  toPngBlob,
+  writeBooClip,
+} from './rich-clipboard';
 import { EmptyState, ShortcutsSheet, type ShortcutMap } from './sheet';
 import { Timeline } from './timeline';
 import { TranscriptView } from './transcript-view';
@@ -58,6 +72,8 @@ const SAVE_DELAY_MS = 400;
 type SaveState = 'saved' | 'pending' | 'saving' | 'error' | 'idle';
 
 const assetCache = new Map<string, Promise<string>>();
+/** Pictures already read (data URL by path): a copy fills the clipboard at once with them. */
+const assetData = new Map<string, string>();
 
 /** Same page, ignoring the fragment and the encoding of `(` `)`. */
 function samePage(a: string, b: string): boolean {
@@ -71,6 +87,7 @@ function loadAsset(path: string): Promise<string> {
     p = chrome.storage.local.get(`asset:${path}`).then((res) => {
       const asset = res[`asset:${path}`] as AssetRecord | undefined;
       if (!asset || !asset.dataUrl.startsWith('data:image/')) throw new Error('missing asset');
+      assetData.set(path, asset.dataUrl);
       return asset.dataUrl;
     });
     p.catch(() => assetCache.delete(path));
@@ -203,11 +220,20 @@ class PanelApp {
       now: () => (this.hasVideo ? this.now() : null),
       autoTimestamp: () => this.settings.autoTimestamp,
       onTimestampHover: (seconds) => this.post({ type: 'mark', seconds }),
-      onTimestampClick: (seconds, _res, end) =>
-        this.post(end !== null && end !== undefined ? { type: 'play-range', start: seconds, end } : { type: 'seek', seconds }),
+      onTimestampClick: (seconds, _res, end, url) => {
+        // A moment of another media (pasted from another note): opened there.
+        if (url && detectVideoContext(url)?.noteId !== this.ctx?.noteId) {
+          window.open(url, '_blank', 'noopener');
+          return;
+        }
+        this.post(end !== null && end !== undefined ? { type: 'play-range', start: seconds, end } : { type: 'seek', seconds });
+      },
       onMediaClick: (path) => void this.openMedia(path),
       onTranscriptClick: () => this.setView('transcript'),
       onPassageTranscript: (start, end) => this.showPassageTranscript(start, end),
+      onPaste: (data) => this.paste(data),
+      onCopy: (markdown, data) => this.copySelection(markdown, data),
+      onCopyImage: (path) => void this.copyImage(path),
       onKeystroke: () => this.autoPause.keystroke(),
       onChange: () => this.scheduleSave(),
       onContentChanged: () => this.scheduleContentRefresh(),
@@ -459,6 +485,8 @@ class PanelApp {
     if (links) parts.push(plural(links, 'lien'));
     this.statsEl.textContent = parts.filter(Boolean).join(' · ');
     this.emptyState.el.hidden = !this.note || !this.editor.isEmpty;
+    // Every picture of the note read beforehand: a copy of any part of it carries them.
+    for (const path of findAssetRefs(this.editor.content)) if (!assetData.has(path)) void loadAsset(path).catch(() => undefined);
   }
 
   // --- Note lifecycle -------------------------------------------------------------------
@@ -1066,7 +1094,8 @@ class PanelApp {
     });
     const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer l’extrait', title: 'Fermer (Échap)' }, icon('close', 16));
     close.addEventListener('click', () => this.closeMedia());
-    const label = title ?? `${record.kind === 'passage' ? 'Extrait' : 'Son du cours'} ${rangeLabel(record.start, record.end)}`;
+    const label =
+      title ?? (record.kind === 'file' ? (record.name ?? 'Média collé') : `${record.kind === 'passage' ? 'Extrait' : 'Son du cours'} ${rangeLabel(record.start, record.end)}`);
     const head: Node[] = [icon(isVideo ? 'video' : 'volume', 15), h('span', { class: 'mp-title' }, label)];
     if (record.kind === 'passage') {
       // Read what is said in the extract.
@@ -1078,6 +1107,13 @@ class PanelApp {
       read.addEventListener('click', () => this.showPassageTranscript(record.start, record.end));
       head.push(read);
     }
+    // The file itself (a video cannot go through the clipboard): saved where the user wants.
+    const save = h(
+      'a',
+      { class: 'icon-btn mp-download', href: this.mediaUrl, download: record.name ?? path.split('/').pop() ?? 'extrait', 'aria-label': 'Télécharger le fichier', title: 'Télécharger le fichier' },
+      icon('download', 16),
+    );
+    head.push(save);
     this.mediaPop.replaceChildren(h('div', { class: 'mp-head' }, ...head, close), player);
     this.mediaPop.dataset.kind = isVideo ? 'video' : 'audio';
     this.mediaPop.hidden = false;
@@ -1508,25 +1544,28 @@ class PanelApp {
    * Docs, Word…), screenshots and passage cards embedded, timestamps linked to the instant,
    * transcript included.
    */
-  private async copyNote(): Promise<void> {
-    if (!this.note) return;
-    const note = { ...this.note, title: this.title || this.note.title, markdown: this.editor.content };
+  /** What a copy of the note (or of a part of it) needs: links to the moments of its media. */
+  private copyInput(markdown: string): Omit<RichCopyInput, 'image' | 'title'> & { title: string } {
+    const note = { ...this.note!, title: this.title || this.note!.title, markdown };
     const web = /^https?:\/\//.test(note.url) ? note.url : null;
     const timed = (note.kind ?? this.kind) !== 'page';
     const timeUrl = (s: number) => (web && timed ? timestampUrl(web, s) : null);
+    return {
+      title: note.title,
+      sourceUrl: web,
+      place: note.course ? `${note.course} › ${note.chapter ?? 'Chapitre 1'}` : null,
+      markdown,
+      linkify: (md) => toPortableMarkdown({ ...note, markdown: md }, { frontMatter: false }),
+      context: { anchor: (kind, value) => (kind === 'time' ? { url: timeUrl(value) } : null) },
+      timeUrl,
+    };
+  }
+
+  private async copyNote(): Promise<void> {
+    if (!this.note) return;
     let copy: Awaited<ReturnType<typeof buildRichCopy>>;
     try {
-      copy = await buildRichCopy({
-        title: note.title,
-        sourceUrl: web,
-        place: note.course ? `${note.course} › ${note.chapter ?? 'Chapitre 1'}` : null,
-        markdown: note.markdown,
-        linkify: (md) => toPortableMarkdown({ ...note, markdown: md }, { frontMatter: false }),
-        context: { anchor: (kind, value) => (kind === 'time' ? { url: timeUrl(value) } : null) },
-        timeUrl,
-        image: (path) => loadAsset(path),
-        transcript: this.transcript,
-      });
+      copy = await buildRichCopy({ ...this.copyInput(this.editor.content), image: (path) => loadAsset(path), transcript: this.transcript });
     } catch (e) {
       this.notify(`Copie impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
       return;
@@ -1549,6 +1588,140 @@ class PanelApp {
     const pics = copy.images ? ` avec ${copy.images} image${copy.images > 1 ? 's' : ''}` : '';
     const lost = copy.missing.length ? ` (${copy.missing.length} introuvable${copy.missing.length > 1 ? 's' : ''})` : '';
     this.notify(`Note copiée${pics}${lost} — collez-la dans Obsidian, Notion, Docs…`, copy.missing.length ? 'info' : 'success');
+  }
+
+  // --- Copy / paste « tout compris » -------------------------------------------------------
+
+  /**
+   * Copy (or cut) of a part of the note: Markdown and HTML with its pictures
+   * inside and its moments linked (Obsidian, Notion, Docs, a mail…), and
+   * Boo Notes' own format — pasted into a note, it keeps its captures,
+   * passages, extracts and timestamps as they are.
+   */
+  private copySelection(markdown: string, data: DataTransfer): boolean {
+    if (!this.note) return false;
+    const copy = renderRichCopy({ ...this.copyInput(markdown), title: undefined }, assetData);
+    data.setData('text/plain', copy.markdown.trimEnd());
+    data.setData('text/html', copy.html);
+    writeBooClip(data, { noteId: this.note.id, url: this.note.url, timed: (this.note.kind ?? this.kind) !== 'page', markdown });
+    return true;
+  }
+
+  /** « Copier l’image » of a card: the picture itself, pasted as a picture anywhere. */
+  private async copyImage(path: string): Promise<void> {
+    try {
+      const src = /^https?:\/\//.test(path) ? path : await loadAsset(path);
+      // The promise keeps the click's permission to write while the picture is converted.
+      const png = toPngBlob(src);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      this.notify('Image copiée : collez-la où vous voulez', 'success');
+    } catch (e) {
+      this.notify(`Copie de l’image impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+
+  /** The line of a pasted item starts at the moment of the media, like a capture. */
+  private pasteMoment(): { stamp: string | null; at: number } {
+    const t = this.kind === 'page' || !this.hasVideo ? null : this.now();
+    return t === null ? { stamp: null, at: 0 } : { stamp: `[${formatTimecode(t)}]`, at: t };
+  }
+
+  /**
+   * Paste or drop into the note: pictures (screenshots, « Copier l’image »,
+   * files), videos and audios, formatted text with its pictures, a part of
+   * another note. Plain text is left to the editor.
+   */
+  private paste(data: DataTransfer): boolean {
+    if (!this.note || this.orphaned) return false;
+    const content = classifyPaste(data);
+    switch (content.kind) {
+      case 'clip': {
+        const text = adaptClip(content.clip, this.note.id);
+        const id = this.editor.reserve('');
+        this.editor.fill(id, text, false);
+        return true;
+      }
+      case 'files':
+        if (content.skipped.length) this.notify(`Non collé${content.skipped.length > 1 ? 's' : ''} : ${content.skipped.join(', ')} (images, vidéos et audios seulement)`, 'error');
+        if (!content.files.length) return true;
+        void this.pasteFiles(content.files);
+        return true;
+      case 'html':
+        void this.pasteHtml(content.html);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private async pasteFiles(files: File[]): Promise<void> {
+    const note = this.note;
+    if (!note) return;
+    const { stamp, at } = this.pasteMoment();
+    // Every place kept at once (in order), then filled one by one.
+    const slots = files.map((f) => ({ file: f, id: this.editor.reserve(`Import de ${f.name || 'l’image'}…`) }));
+    let done = 0;
+    for (const { file, id } of slots) {
+      try {
+        const kind = fileKind(file);
+        if (kind === 'image') {
+          const path = await this.storeImage(file, note.id, at);
+          this.editor.fill(id, imageLine(path, file.name.replace(/\.[^.]*$/, '') === 'image' ? '' : file.name.replace(/\.[^.]*$/, ''), stamp));
+        } else if (kind === 'video' || kind === 'audio') {
+          if (file.size > MAX_MEDIA_BYTES) throw new Error(`${file.name} dépasse ${MAX_MEDIA_BYTES / 1024 / 1024} Mo`);
+          const path = pastedMediaPath(note.id, file.name || kind, file.type, Math.random().toString(36).slice(2, 6));
+          const mime = file.type || (kind === 'video' ? 'video/mp4' : 'audio/mpeg');
+          await putMedia({ path, noteId: note.id, kind: 'file', name: file.name, mime, start: at, end: at, blob: file, size: file.size, createdAt: Date.now() });
+          void callBackground({ type: 'media:stored', path }).catch(() => undefined);
+          this.editor.fill(id, mediaFileLine(file.name, path, kind, stamp));
+        } else this.editor.fill(id, null);
+        done++;
+      } catch (e) {
+        this.editor.fill(id, null);
+        this.notify(`${file.name || 'Fichier'} non collé : ${e instanceof Error ? e.message : String(e)}`, 'error');
+      }
+    }
+    if (done) this.notify(done > 1 ? `${done} fichiers ajoutés à la note` : 'Ajouté à la note', 'success');
+  }
+
+  /** A picture (a pasted file, a data URL, a picture of the web) saved with the note's captures. */
+  private async storeImage(blob: Blob, noteId: string, time: number): Promise<string> {
+    const img = await prepareImage(blob);
+    const { path } = await callBackground({ type: 'asset:save', noteId, dataUrl: img.dataUrl, mime: img.mime, width: img.width, height: img.height, time });
+    assetData.set(path, img.dataUrl);
+    return path;
+  }
+
+  /** Formatted text (a web page, Notion, Docs, Word…) as Markdown; its pictures kept in the note when their site allows it. */
+  private async pasteHtml(html: string): Promise<void> {
+    const note = this.note;
+    if (!note) return;
+    const { markdown, images } = htmlToMarkdown(html);
+    const id = this.editor.reserve(images.length ? `Import de ${images.length} image${images.length > 1 ? 's' : ''}…` : '');
+    let text = markdown;
+    let kept = 0;
+    for (const [i, img] of images.entries()) {
+      let target: string | null = /^https?:\/\//.test(img.src) ? img.src : null;
+      // A few dozen pictures at most are downloaded; the others stay online.
+      if (i < 40) {
+        try {
+          const blob = await pictureBlob(img.src);
+          if (blob.type.startsWith('image/')) {
+            target = await this.storeImage(blob, note.id, 0);
+            kept++;
+          }
+        } catch {
+          // The site refused (CORS): the picture stays online.
+        }
+      }
+      text = target ? text.split(`](${img.token})`).join(`](${target})`) : text.replace(new RegExp(`!\\[([^\\]]*)\\]\\(${img.token}\\)`), (_a, alt: string) => (alt ? `*${alt}*` : ''));
+    }
+    const block = text.includes('\n') || /^(?:#|>|[-*+] |\d+\. |!\[|```|\|)/.test(text);
+    this.editor.fill(id, text.trim() || null, block);
+    if (images.length) {
+      const online = images.length - kept;
+      this.notify(`Collé avec ${images.length} image${images.length > 1 ? 's' : ''}${online ? ` (${online} restée${online > 1 ? 's' : ''} en ligne)` : ''}`, online ? 'info' : 'success');
+    }
   }
 
   private bindGlobalEvents(): void {

@@ -503,6 +503,16 @@ export class Library extends EventEmitter<LibraryEvents> {
     return rel;
   }
 
+  /** A picture pasted into a note: `assets/<note>-<nonce>.<ext>`. */
+  async savePastedImage(noteId: string, data: Buffer, ext: 'jpg' | 'png' | 'webp' | 'gif'): Promise<string> {
+    const note = this.notes[noteId];
+    if (!note) throw new Error('Note introuvable');
+    const slug = safeFileName(note.title).replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'image';
+    const rel = `assets/${slug}-image-${randomBytes(3).toString('hex')}.${ext}`;
+    await this.putAsset(rel, data);
+    return rel;
+  }
+
   putAsset(rel: string, data: Buffer): Promise<void> {
     const file = this.assetPath(rel);
     return this.exclusive(async () => {
@@ -838,7 +848,8 @@ export class Library extends EventEmitter<LibraryEvents> {
       await writeFile(file, data);
       const record: MediaEntry = {
         path: entry.path,
-        kind: entry.kind === 'audio' ? 'audio' : 'passage',
+        kind: entry.kind === 'audio' || entry.kind === 'file' ? entry.kind : 'passage',
+        ...(entry.kind === 'file' && entry.name ? { name: String(entry.name).slice(0, 200) } : {}),
         mime: entry.mime,
         start: Number(entry.start) || 0,
         end: Number(entry.end) || 0,

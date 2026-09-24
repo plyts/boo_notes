@@ -65,7 +65,7 @@ export async function listMedia(noteId: string): Promise<MediaRecord[]> {
 /** Media not yet sent to the desktop app. */
 export async function unsyncedMedia(): Promise<MediaMeta[]> {
   const all = (await request('readonly', (s) => s.getAll())) as MediaRecord[];
-  return all.filter((r) => !r.synced).map(({ path, noteId, kind, mime, start, end }) => ({ path, noteId, kind, mime, start, end }));
+  return all.filter((r) => !r.synced).map(({ path, noteId, kind, mime, start, end, name }) => ({ path, noteId, kind, mime, start, end, ...(name ? { name } : {}) }));
 }
 
 export async function markMediaSynced(path: string, synced = true): Promise<void> {

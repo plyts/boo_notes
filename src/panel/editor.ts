@@ -60,7 +60,7 @@ export interface EditorHooks {
    * `resource`: the resource named by the timestamp (`[04:15](res:<id>)`), null for the main one.
    * `end`: end of a range (`[02:05–06:07]`, a passage): play the passage and stop there.
    */
-  onTimestampClick(seconds: number, resource?: string | null, end?: number | null): void;
+  onTimestampClick(seconds: number, resource?: string | null, end?: number | null, url?: string | null): void;
   /** Any typed character / deletion (drives auto-pause). */
   onKeystroke(): void;
   onChange(): void;
@@ -96,6 +96,16 @@ export interface EditorHooks {
   onTranscriptClick?(path: string): void;
   /** Click on the « Transcription » button of a passage card: its lines, in the transcript. */
   onPassageTranscript?(start: number, end: number): void;
+  /**
+   * Paste or drop into the note: returns true when the host takes the content
+   * (pictures, videos, rich text, a clip of Boo Notes) — it then inserts it
+   * where the cursor was, through `reserve` / `fill`.
+   */
+  onPaste?(data: DataTransfer, kind: 'paste' | 'drop'): boolean;
+  /** Copy / cut of the selection (`markdown`): the host fills the clipboard (rich copy); true when it did. */
+  onCopy?(markdown: string, data: DataTransfer): boolean;
+  /** « Copier l’image » on a capture or passage card: the picture itself in the clipboard. */
+  onCopyImage?(path: string): void;
   /** Text of an empty note. */
   placeholderText?: string;
 }
@@ -173,6 +183,7 @@ class ImageWidget extends WidgetType {
     readonly path: string,
     readonly alt: string,
     private readonly load: (path: string) => Promise<string>,
+    private readonly copyable = false,
   ) {
     super();
   }
@@ -227,7 +238,22 @@ class ImageWidget extends WidgetType {
         wrap.append(info, tx);
       }
     }
-    this.load(this.path).then(
+    // « Copier l’image »: the picture itself, to paste anywhere.
+    if (this.copyable) {
+      const copy = document.createElement('span');
+      copy.className = 'cm-boo-img-copy';
+      copy.setAttribute('role', 'button');
+      copy.dataset.copyImage = this.path;
+      copy.title = 'Copier l’image';
+      copy.setAttribute('aria-label', 'Copier l’image');
+      copy.innerHTML =
+        '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+      wrap.append(copy);
+    }
+    // A picture pasted from the web may stay online (its site refused to hand it over).
+    const remote = /^https?:\/\//.test(this.path);
+    if (remote || seconds === null) wrap.classList.add('cm-boo-img-free');
+    (remote ? Promise.resolve(this.path) : this.load(this.path)).then(
       (url) => {
         img.src = url;
       },
@@ -236,6 +262,7 @@ class ImageWidget extends WidgetType {
         wrap.textContent = 'Capture introuvable';
       },
     );
+    if (remote) img.addEventListener('error', () => wrap.classList.add('missing'), { once: true });
     return wrap;
   }
 
@@ -248,7 +275,7 @@ class ImageWidget extends WidgetType {
 
 const hide = Decoration.replace({});
 
-function buildPreview(view: EditorView, load: (path: string) => Promise<string>, badge: BadgeFn): DecorationSet {
+function buildPreview(view: EditorView, load: (path: string) => Promise<string>, badge: BadgeFn, copyable: boolean): DecorationSet {
   const { state } = view;
   const tree = syntaxTree(state);
   const active = new Set<number>();
@@ -299,9 +326,9 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
           return;
         }
         if (name === 'Image') {
-          const m = /^!\[([^\]\n]*)\]\((assets\/[^)\s]+)\)$/.exec(state.sliceDoc(node.from, node.to));
+          const m = /^!\[([^\]\n]*)\]\((assets\/[^)\s]+|https?:\/\/[^)\s]+)\)$/.exec(state.sliceDoc(node.from, node.to));
           if (!m) return;
-          const widget = new ImageWidget(m[2], m[1], load);
+          const widget = new ImageWidget(m[2], m[1], load, copyable);
           if (isActive(node.from)) out.push(Decoration.widget({ widget, side: 1 }).range(node.to));
           else out.push(Decoration.replace({ widget }).range(node.from, node.to));
           return false;
@@ -409,6 +436,8 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
               'data-t': String(m.seconds),
               ...(m.end !== null ? { 'data-end': String(m.end) } : {}),
               ...(m.resource ? { 'data-res': m.resource } : {}),
+              // Linked to the moment of another media (pasted from another note).
+              ...(m.url && /^https?:\/\//.test(m.url) ? { 'data-url': m.url } : {}),
               title:
                 m.end !== null
                   ? `Revoir le passage ${state.sliceDoc(m.from + 1, m.labelTo - 1)}${where} (Alt+clic pour éditer)`
@@ -440,8 +469,10 @@ function pushMediaChips(out: Range<Decoration>[], text: string, offset: number, 
         class: 'cm-boo-media',
         attributes: {
           'data-media': m[2],
+          // A video or audio file pasted into the note (its label names it).
+          ...(/^media\/[\w.-]*-file-/.test(m[2]) ? { 'data-kind': 'file' } : {}),
           ...(start ? { 'data-t': String(parseTimecode(start) ?? '') } : {}),
-          title: 'Écouter l’extrait enregistré',
+          title: /^media\/[\w.-]*-file-/.test(m[2]) ? 'Lire la vidéo ou l’audio' : 'Écouter l’extrait enregistré',
         },
       }).range(from, from + m[0].length),
     );
@@ -452,12 +483,12 @@ function pushMediaChips(out: Range<Decoration>[], text: string, offset: number, 
 /** Asks the live preview to redraw (the resource badges changed). */
 const refreshPreview = StateEffect.define<null>();
 
-function livePreview(load: (path: string) => Promise<string>, badge: BadgeFn): Extension {
+function livePreview(load: (path: string) => Promise<string>, badge: BadgeFn, copyable: boolean): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildPreview(view, load, badge);
+        this.decorations = buildPreview(view, load, badge, copyable);
       }
       update(u: ViewUpdate) {
         if (
@@ -468,7 +499,7 @@ function livePreview(load: (path: string) => Promise<string>, badge: BadgeFn): E
           syntaxTree(u.startState) !== syntaxTree(u.state) ||
           u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshPreview)))
         ) {
-          this.decorations = buildPreview(u.view, load, badge);
+          this.decorations = buildPreview(u.view, load, badge, copyable);
         }
       }
     },
@@ -493,6 +524,55 @@ const nowLine = StateField.define<{ pos: number | null; deco: DecorationSet }>({
     return { pos, deco };
   },
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+});
+
+// --- Content being pasted (a picture or a video being saved) ---------------------------------
+
+interface Pending {
+  id: number;
+  pos: number;
+  label: string;
+}
+
+let pendingSeq = 0;
+const addPending = StateEffect.define<Pending>();
+const removePending = StateEffect.define<number>();
+
+class PendingWidget extends WidgetType {
+  constructor(readonly label: string) {
+    super();
+  }
+
+  eq(other: PendingWidget): boolean {
+    return other.label === this.label;
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'cm-boo-pending';
+    el.setAttribute('role', 'status');
+    el.textContent = this.label;
+    return el;
+  }
+}
+
+const pendingInserts = StateField.define<Pending[]>({
+  create: () => [],
+  update(list, tr) {
+    let next = tr.docChanged ? list.map((p) => ({ ...p, pos: tr.changes.mapPos(p.pos, 1) })) : list;
+    for (const e of tr.effects) {
+      if (e.is(addPending)) next = [...next, e.value];
+      else if (e.is(removePending)) next = next.filter((p) => p.id !== e.value);
+    }
+    return next;
+  },
+  provide: (f) =>
+    EditorView.decorations.from(f, (list) =>
+      Decoration.set(
+        list.map((p) => Decoration.widget({ widget: new PendingWidget(p.label), side: 1 }).range(p.pos)),
+        true,
+      ),
+    ),
 });
 
 // --- Look ---------------------------------------------------------------------------
@@ -547,8 +627,9 @@ export class NotesEditor {
       markdown({ base: markdownLanguage, addKeymap: false }),
       syntaxHighlighting(highlight),
       theme,
-      livePreview(hooks.loadAsset, hooks.resourceBadge),
+      livePreview(hooks.loadAsset, hooks.resourceBadge, Boolean(hooks.onCopyImage)),
       nowLine,
+      pendingInserts,
       this.editable.of(EditorView.editable.of(true)),
       placeholder(hooks.placeholderText ?? 'Écrivez ici…'),
       keymap.of([
@@ -575,6 +656,12 @@ export class NotesEditor {
       }),
       EditorView.domEventHandlers({
         mousedown: (e) => {
+          const copy = (e.target as Element | null)?.closest?.('.cm-boo-img-copy');
+          if (copy && e.button === 0) {
+            e.preventDefault();
+            hooks.onCopyImage?.(copy.getAttribute('data-copy-image') ?? '');
+            return true;
+          }
           const tx = (e.target as Element | null)?.closest?.('.cm-boo-img-tx');
           if (tx && e.button === 0) {
             e.preventDefault();
@@ -609,10 +696,28 @@ export class NotesEditor {
           else if (frag !== null) hooks.onFragmentClick?.(frag);
           else {
             const end = target.getAttribute('data-end');
-            hooks.onTimestampClick(Number(target.getAttribute('data-t')), res, end === null ? null : Number(end));
+            hooks.onTimestampClick(Number(target.getAttribute('data-t')), res, end === null ? null : Number(end), target.getAttribute('data-url'));
           }
           return true;
         },
+        paste: (e, view) => {
+          if (!e.clipboardData || !hooks.onPaste || !view.state.facet(EditorView.editable)) return false;
+          if (!hooks.onPaste(e.clipboardData, 'paste')) return false;
+          e.preventDefault();
+          return true;
+        },
+        drop: (e, view) => {
+          if (!e.dataTransfer?.files.length || !hooks.onPaste || !view.state.facet(EditorView.editable)) return false;
+          // The content goes where it was dropped.
+          const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+          if (pos !== null) view.dispatch({ selection: { anchor: pos } });
+          if (!hooks.onPaste(e.dataTransfer, 'drop')) return false;
+          e.preventDefault();
+          view.focus();
+          return true;
+        },
+        copy: (e, view) => this.copySelection(e, view, false),
+        cut: (e, view) => this.copySelection(e, view, true),
         mouseover: (e) => {
           const target = (e.target as Element | null)?.closest?.('.cm-boo-ts[data-t], .cm-boo-img[data-t]');
           if (target) hooks.onTimestampHover(Number(target.getAttribute('data-t')));
@@ -789,6 +894,61 @@ export class NotesEditor {
       selection: { anchor: from + insert.length },
       scrollIntoView: true,
       userEvent: 'input.capture',
+    });
+  }
+
+  /** Copy / cut with a selection: the host writes the clipboard (Markdown, HTML with the pictures, Boo Notes clip). */
+  private copySelection(e: ClipboardEvent, view: EditorView, cut: boolean): boolean {
+    const ranges = view.state.selection.ranges.filter((r) => !r.empty);
+    if (!ranges.length || !e.clipboardData || !this.hooks.onCopy) return false;
+    const text = ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join('\n');
+    if (!this.hooks.onCopy(text, e.clipboardData)) return false;
+    e.preventDefault();
+    if (cut && view.state.facet(EditorView.editable)) {
+      view.dispatch({ changes: ranges.map((r) => ({ from: r.from, to: r.to })), userEvent: 'delete.cut', scrollIntoView: true });
+    }
+    return true;
+  }
+
+  /**
+   * Keeps the place (the cursor) of content being prepared — a pasted picture
+   * or video being saved — with a « … » marker there; `fill` puts it in.
+   */
+  reserve(label: string): number {
+    const id = ++pendingSeq;
+    const { state } = this.view;
+    this.view.dispatch({
+      changes: state.selection.ranges.filter((r) => !r.empty).map((r) => ({ from: r.from, to: r.to })),
+      effects: addPending.of({ id, pos: state.selection.main.from, label }),
+      userEvent: 'input.paste',
+    });
+    return id;
+  }
+
+  /** Content for a reserved place (null: nothing after all). `block`: on a line of its own. */
+  fill(id: number, text: string | null, block = true): void {
+    const pending = this.view.state.field(pendingInserts).find((p) => p.id === id);
+    if (!pending) return;
+    if (!text) {
+      this.view.dispatch({ effects: removePending.of(id) });
+      return;
+    }
+    const doc = this.view.state.doc;
+    const pos = Math.min(pending.pos, doc.length);
+    const line = doc.lineAt(pos);
+    let insert = text;
+    if (block) {
+      if (pos > line.from && doc.sliceString(pos - 1, pos) !== '\n') insert = `\n${insert}`;
+      if (pos < line.to) insert = `${insert}\n`;
+      else if (line.number === doc.lines && !text.endsWith('\n')) insert = `${insert}\n`;
+    }
+    const focused = this.view.hasFocus && this.view.state.selection.main.head === pending.pos;
+    this.view.dispatch({
+      changes: { from: pos, insert },
+      effects: removePending.of(id),
+      ...(focused ? { selection: { anchor: pos + insert.length } } : {}),
+      scrollIntoView: focused,
+      userEvent: 'input.paste',
     });
   }
 

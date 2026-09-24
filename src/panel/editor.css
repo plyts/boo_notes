@@ -197,6 +197,74 @@
   right: 40px;
 }
 
+/* « Copier l’image » (on hover), left of the transcript icon on a passage card. */
+.cm-boo-img-copy {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(10, 10, 12, 0.62);
+  color: #fff;
+  opacity: 0;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: opacity var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+
+.cm-boo-passage .cm-boo-img-copy {
+  right: 38px;
+}
+
+.cm-boo-img:hover .cm-boo-img-copy,
+.cm-boo-img-copy:focus-visible {
+  opacity: 1;
+}
+
+.cm-boo-img-copy:hover {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+/* A picture without a moment (pasted, or left online): its own proportions. */
+.cm-boo-img.cm-boo-img-free {
+  aspect-ratio: auto;
+  min-height: 48px;
+}
+
+.cm-boo-img.cm-boo-img-free img {
+  height: auto;
+  max-height: 480px;
+}
+
+/* Pasted content being saved (a picture, a video). */
+.cm-boo-pending {
+  display: inline-block;
+  margin: 2px 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.85em;
+  animation: cm-boo-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cm-boo-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-boo-pending {
+    animation: none;
+  }
+}
+
 /* Recorded extract of a passage: « 🔊 Extrait ». */
 .cm-boo-media {
   display: inline-block;
@@ -213,6 +281,11 @@
 
 .cm-boo-media::before {
   content: '🔊 ';
+}
+
+/* A video or audio pasted into the note: its name carries its own icon. */
+.cm-boo-media[data-kind='file']::before {
+  content: none;
 }
 
 .cm-boo-media:hover {

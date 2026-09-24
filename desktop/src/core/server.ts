@@ -237,7 +237,8 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
           String(msg.noteId ?? ''),
           {
             path,
-            kind: msg.kind === 'audio' ? 'audio' : 'passage',
+            kind: msg.kind === 'audio' || msg.kind === 'file' ? msg.kind : 'passage',
+            ...(msg.kind === 'file' && typeof msg.name === 'string' ? { name: msg.name } : {}),
             mime: String(msg.mime ?? '').split(';')[0],
             start: Number(msg.start) || 0,
             end: Number(msg.end) || 0,

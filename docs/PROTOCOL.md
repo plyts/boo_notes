@@ -40,7 +40,7 @@ alarme par minute tant que des notes attendent).
 | `open` | `title` : titre d’une note (clic sur un `[[lien]]` dans le navigateur) | — (l’application s’affiche sur la note, en créant la fiche si besoin) |
 | `transcript.put` | `transcript` : `{ noteId, lang, label, source, target, complete, covered, duration, cues: [{ id, start, end, text, tr?, note? }], updatedAt, rev }` | `transcript.ack { noteId, rev }` |
 | `media.chunk` | `path` (`media/…`), `index` (0, 1, 2…), `data` (base64, 1 Mo par morceau) | — |
-| `media.put` | `path`, `noteId`, `kind` : `"passage"` \| `"audio"`, `mime`, `start` (s), `end` (s), `chunks` (nombre de morceaux) | `media.ack { path }` |
+| `media.put` | `path`, `noteId`, `kind` : `"passage"` \| `"audio"` \| `"file"`, `mime`, `start` (s), `end` (s), `name` (fichier collé), `chunks` (nombre de morceaux) | `media.ack { path }` |
 | `ping` | — (toutes les 20 s) | `pong` |
 
 - `note.id` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<leçon>`,
@@ -65,7 +65,8 @@ alarme par minute tant que des notes attendent).
   `transcripts/<note>.json`, `.md`, `.vtt` (et `.fr.vtt` quand des traductions existent), et garde
   sa copie si elle est plus récente (`updatedAt`, `rev`).
 - `media.chunk` puis `media.put` : un **extrait de passage** enregistré (image et son, ou son
-  seul) ou un segment du **son du cours** conservé, écrit dans `media/` (chemin vérifié :
+  seul), un segment du **son du cours** conservé ou une **vidéo / un audio collé** dans la note
+  (`kind: "file"`, avec son `name`), écrit dans `media/` (chemin vérifié :
   `media/<nom>` uniquement). Les morceaux sont envoyés sans attendre, `media.put` en donne le
   nombre ; l’application répond `media.ack` une fois le fichier écrit.
 - Pour une page lue (`kind: "page"`), `media.progress` porte le **pourcentage lu** : `position`

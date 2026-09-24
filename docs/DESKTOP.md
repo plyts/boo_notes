@@ -103,6 +103,9 @@ réplique en cours sous les notes.
 **Copier la note** (bouton ⧉ en haut de la note) : la note entière dans le presse-papier, images
 comprises (intégrées), horodatages liés, passages et transcription — à coller dans Obsidian,
 Notion, Docs ou Word. Détails : [TRANSCRIPTION.md § 5](TRANSCRIPTION.md#5-formats).
+**Coller** une capture d’écran, une image, une vidéo, un audio ou du texte mis en forme dans une
+note les enregistre dans le dossier de notes (`assets/`, `media/`) ; les images qu’un site refuse
+à une page sont téléchargées par l’application. Copier une partie d’une note emporte ses images.
 
 ![Passage et son extrait dans une note de l’application](screenshots/desktop-passage.png)
 

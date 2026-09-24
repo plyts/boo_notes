@@ -26,6 +26,11 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
 - **Copier la note « tout compris »** : captures, images et cartes des passages **intégrées**,
   horodatages liés à l’instant, transcription — à coller dans **Obsidian**, **Notion**, Google Docs,
   Word… (Markdown et HTML à la fois) ; **Télécharger** ajoute les extraits vidéo et la transcription.
+- **Copier / coller riche** dans les notes ([détails](docs/TRANSCRIPTION.md#copier--coller-dans-les-notes-extension-et-application)) :
+  coller (ou glisser) une **capture d’écran**, une **image** du web, une **vidéo** ou un **audio**, du
+  **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
+  note avec ses captures et extraits ; copier une partie d’une note emporte ses **images** ; **Copier
+  l’image** d’une carte.
 - **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : cours, chapitres et notes ;
   une note liée à plusieurs supports (**PDF**, **vidéo / audio** locaux ou **flux** par adresse —
   HLS, radios —, **images**, **textes**, pages vues dans le navigateur) ; **carte mentale** de tout
