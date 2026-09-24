@@ -86,6 +86,14 @@ export const test = base.extend<{ context: BrowserContext; sw: Worker; page: Pag
   sw: async ({ context }, use) => {
     let [sw] = context.serviceWorkers();
     sw ??= await context.waitForEvent('serviceworker');
+    // Just created, the worker may still be setting up its global scope (APIs, then its script's test hook).
+    for (let i = 0; i < 200; i++) {
+      const ready = await sw
+        .evaluate(() => Boolean((globalThis as { booNotes?: unknown }).booNotes && (globalThis as { chrome?: { storage?: unknown } }).chrome?.storage))
+        .catch(() => false);
+      if (ready) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
     await use(sw);
   },
   page: async ({ context, sw }, use) => {

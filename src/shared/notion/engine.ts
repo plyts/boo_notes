@@ -3,7 +3,7 @@ import { KIND_LABELS, PLATFORM_LABELS, type MediaKind, type Platform } from '../
 import { STATUS_LABELS, type StudyStatus } from '../study';
 import { timestampUrl } from '../platforms';
 import { TRANSCRIPT_LINE, type Transcript } from '../transcript';
-import { hashBlock, markdownToBlocks, plainRichText, toNotion, transcriptBlocks, type BlockSpec, type Json } from './blocks';
+import { hashBlock, markdownToBlocks, plainRichText, safeUrl, toNotion, transcriptBlocks, type BlockSpec, type Json } from './blocks';
 import { explainNotionError, NotionClient, NotionError, parseNotionId, type NotionClientOptions } from './client';
 
 /**
@@ -378,8 +378,9 @@ export class NotionEngine {
       item.sources ?? (item.source ? [{ id: item.id, kind: item.kind, title: item.title, source: item.source, upload: item.uploadSource }] : []);
     const many = sources.length > 1;
     for (const src of sources) {
-      if (isYouTube(src.source)) blocks.push({ type: 'video', url: src.source });
-      else if (isHttp(src.source)) blocks.push({ type: 'bookmark', url: src.source });
+      const url = safeUrl(src.source);
+      if (url && isYouTube(url)) blocks.push({ type: 'video', url });
+      else if (url && isHttp(url)) blocks.push({ type: 'bookmark', url });
       else if (src.upload) blocks.push({ type: 'image', asset: `source:${src.id}`, caption: plainRichText(many ? src.title : baseName(src.source)) });
       else if (src.source) {
         blocks.push({

@@ -66,10 +66,17 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     if (!Array.isArray(children)) throw fail(400, 'validation_error', 'children should be an array');
     if (children.length > 100) throw fail(400, 'validation_error', 'body.children.length should be ≤ 100');
     if (depth > 3) throw fail(400, 'validation_error', 'Too many levels of nesting in children');
-    return children.map((spec) => {
+    return children.map((spec, i) => {
       const type = spec.type;
       if (!type || !spec[type]) throw fail(400, 'validation_error', 'block type missing');
       const data = structuredClone(spec[type]);
+      // As the API: a bookmark / embed takes its `url` itself, a media its `external.url` (or an upload).
+      const need = (value, path) => {
+        if (typeof value !== 'string' || !/^https?:\/\/\S+$/.test(value))
+          throw fail(400, 'validation_error', `body.children[${i}].${type}.${path} should be ${value === undefined ? 'defined' : 'a valid URL'}, instead was \`${JSON.stringify(value) ?? 'undefined'}\`.`);
+      };
+      if (type === 'bookmark' || type === 'embed') need(data.url, 'url');
+      if (['image', 'video', 'file', 'pdf', 'audio'].includes(type) && data.type === 'external') need(data.external?.url, 'external.url');
       checkRichText(data.rich_text, `${type}.rich_text`);
       checkRichText(data.caption, `${type}.caption`);
       if (type === 'image' && data.type === 'file_upload') {

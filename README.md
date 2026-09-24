@@ -118,6 +118,11 @@ npm run build        # → dist/
 
 `npm run watch` reconstruit à chaque modification (recharger l’extension ensuite).
 
+**Mettre à jour** (après un `git pull`) : `npm install && npm run build`, puis **Recharger** l’extension
+dans `chrome://extensions` et recharger les onglets ouverts. Une nouvelle dépendance non installée
+arrête le build avec un message clair : `dist/` n’est remplacé que par un build complet (un build
+échoué ne laisse plus une extension à moitié construite, au panneau de notes vide).
+
 ## Raccourcis
 
 | Action | Défaut | Comportement |

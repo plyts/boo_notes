@@ -1,13 +1,15 @@
 // Bundles the extension into dist/ (load it with "Load unpacked" in chrome://extensions).
 import { build, context } from 'esbuild';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const src = join(root, 'src');
-const out = join(root, 'dist');
+const dist = join(root, 'dist');
 const watch = process.argv.includes('--watch');
+// Built aside, then swapped in whole: a failed build never leaves a half-built extension in dist/.
+const out = watch ? dist : join(root, 'dist.building');
 // End-to-end builds may inject the content script on test hosts without a permission prompt.
 const e2e = process.argv.includes('--e2e');
 
@@ -53,6 +55,17 @@ async function copyStatic() {
   for (const f of INTER_FILES) await cp(join(inter, f), join(out, 'fonts', f));
 }
 
+// A `git pull` may bring a new dependency: without `npm install` the bundles cannot be made.
+const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const missing = [];
+for (const dep of Object.keys(pkg.dependencies ?? {})) {
+  await access(join(root, 'node_modules', dep, 'package.json')).catch(() => missing.push(dep));
+}
+if (missing.length) {
+  console.error(`\n✘ Dépendances manquantes : ${missing.join(', ')}\n  Lancez d’abord « npm install », puis « npm run build ». (dist/ est laissé tel quel.)\n`);
+  process.exit(1);
+}
+
 await rm(out, { recursive: true, force: true });
 await copyStatic();
 
@@ -61,5 +74,12 @@ if (watch) {
   await Promise.all(contexts.map((c) => c.watch()));
   console.log('Watching src/ … (static files are copied at start only)');
 } else {
-  await Promise.all(entries.map((e) => build({ ...common, ...e })));
+  const results = await Promise.allSettled(entries.map((e) => build({ ...common, ...e })));
+  if (results.some((r) => r.status === 'rejected')) {
+    await rm(out, { recursive: true, force: true });
+    console.error('\n✘ Build échoué : dist/ est laissé tel quel (voir les erreurs ci-dessus).\n');
+    process.exit(1);
+  }
+  await rm(dist, { recursive: true, force: true });
+  await rename(out, dist);
 }

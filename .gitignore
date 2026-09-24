@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist.building/
 test-results/
 playwright-report/
 .boo-desktop-data/

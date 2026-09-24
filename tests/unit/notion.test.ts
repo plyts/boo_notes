@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ExtensionNotion, noteToSyncItem } from '../../src/background/notion';
 import type { NotionStatus } from '../../src/shared/messages';
 import { NoteStore } from '../../src/shared/store';
+import { TranscriptStore } from '../../src/shared/transcript-store';
 import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../desktop/tools/mock-notion.mjs';
 import { MemoryArea } from './helpers';
 
@@ -85,6 +86,43 @@ describe('ExtensionNotion (direct sync, desktop app closed)', () => {
     expect(linked).toContain('web:cours.test/ohm');
     const content = JSON.stringify(mock.pageContent(link!.pageId));
     expect(content).toContain('U = R × I');
+  });
+
+  it('writes a course lesson: link to the lesson, capture, passage, timestamps, transcript', async () => {
+    // A lesson of a course platform (SCORM module): the page's URL is a bookmark, not a video block.
+    const lesson = {
+      platform: 'web' as const,
+      url: 'https://customer-academy.databricks.com/learn/courses/2971/pipelines/lessons/63328:4384/course-project-and-dataset-types-overview',
+      title: 'Course Project and Dataset Types Overview',
+      kind: 'video' as const,
+    };
+    const id = 'web:customer-academy.databricks.com/learn/courses/2971/pipelines/lessons/63328:4384/course-project-and-dataset-types-overview';
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mNk+M9QzwAEjDAGNzYAAB0VAwFyX4bOAAAAAElFTkSuQmCC';
+    const shot = await store.saveAsset({ noteId: id, dataUrl: png, mime: 'image/png', width: 2, height: 2, time: 12 });
+    const card = await store.saveAsset({ noteId: id, dataUrl: png, mime: 'image/png', width: 2, height: 2, time: 125 });
+    await new TranscriptStore(area).put(id, { lang: 'en', label: 'Sous-titres du lecteur · anglais', source: 'track', complete: true, duration: 300 }, [
+      { id: 'c5', start: 5, end: 8, text: 'Welcome to the course project.' },
+    ], true);
+    await store.saveNote(
+      id,
+      lesson,
+      [
+        '[00:05] Le projet du cours',
+        `[00:12] ![Capture 00:12](${shot.path})`,
+        `[02:05–06:07] ![Passage 02:05–06:07 · Streaming tables](${card.path}) [Extrait](media/lesson-passage-02-05-ab12.webm)`,
+        '📄 [Transcription — anglais · 1 réplique](transcripts/lesson.md)',
+      ].join('\n'),
+    );
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    const { url } = await notion.syncNow(id);
+    expect(url).toBeTruthy();
+    const pageId = (await notion.link(id))!.pageId;
+    const blocks = [...mock.state.blocks.values()].filter((b) => b.parentId?.replace(/-/g, '') === pageId.replace(/-/g, ''));
+    expect(blocks[0]).toMatchObject({ type: 'bookmark', bookmark: { url: lesson.url } });
+    expect(blocks.filter((b) => b.type === 'image')).toHaveLength(2);
+    const content = JSON.stringify(mock.pageContent(pageId));
+    expect(content).toContain('Le projet du cours');
+    expect(content).toContain('Welcome to the course project.');
   });
 
   it('queues changes and leaves them to the desktop app when it is connected', async () => {

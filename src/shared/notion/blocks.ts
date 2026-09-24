@@ -315,8 +315,10 @@ export async function toNotion(spec: BlockSpec, upload: Uploader): Promise<Json>
         code: { rich_text: capRich(text(spec.text || ' ')), language: spec.language },
       };
     case 'video':
+      return { object: 'block', type: 'video', video: { type: 'external', external: { url: spec.url } } };
     case 'bookmark':
-      return { object: 'block', type: spec.type, [spec.type]: { type: 'external', external: { url: spec.url } } };
+      // A bookmark takes its URL itself (only media blocks have `external`).
+      return { object: 'block', type: 'bookmark', bookmark: { url: spec.url, caption: [] } };
     case 'external_image':
       return {
         object: 'block',
