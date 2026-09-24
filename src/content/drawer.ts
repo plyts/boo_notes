@@ -135,18 +135,51 @@ export class Drawer {
   }
 
   /** Fullscreen: the drawer must live inside the fullscreen element to be visible. */
+  /**
+   * The element the notes must live in to be seen: the fullscreen element,
+   * or the page's modal dialog / popover (the top layer, drawn above
+   * everything else); null: the page itself.
+   */
   setFullscreenTarget(target: Element | null): void {
     this.fullscreenTarget = target;
     if (target && this.opened) this.moveHost(target);
     if (!target && this.host.isConnected && this.host.parentElement !== document.documentElement) {
       this.moveHost(document.documentElement);
     }
+    // Its layer went away with the notes in it (a dialog removed): back in the page.
+    if (!target && this.opened && !this.host.isConnected) document.documentElement.append(this.host);
     this.panel.style.setProperty('--top', `${target ? 0 : this.opts.topInset()}px`);
     this.applyDock();
   }
 
   get layoutMode(): DrawerLayout {
     return this.layout;
+  }
+
+  /**
+   * What covers the open panel (an element of the page drawn above it), null
+   * when it is seen. `own`: other boxes of Boo Notes.
+   */
+  coveredBy(own: Element[] = []): Element | null {
+    if (!this.opened || !this.host.isConnected) return null;
+    const r = this.panel.getBoundingClientRect();
+    if (r.width < 40 || r.height < 80) return null;
+    for (const [x, y] of [
+      [r.left + r.width / 2, r.top + Math.min(r.height / 2, 220)],
+      [r.left + r.width / 2, r.bottom - 48],
+    ]) {
+      // Still sliding in, or out of the window.
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && hit !== this.host && !this.host.contains(hit) && !own.some((o) => o === hit || o.contains(hit))) return hit;
+    }
+    return null;
+  }
+
+  /** Last of its parent: above a page element of the same z-index added after it. */
+  bringToFront(): void {
+    const parent = this.host.parentElement;
+    if (parent && parent.lastElementChild !== this.host) this.moveHost(parent);
   }
 
   /** On-screen box of the open drawer, null when closed. */

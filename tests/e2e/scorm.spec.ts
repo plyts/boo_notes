@@ -211,7 +211,7 @@ test('« Diagnostic de cette page » : cadres lus, module SCORM suivi, cadre d�
   const report = await opened;
   await expect(report).toHaveURL(/diagnostic\/diagnostic\.html$/);
   const findings = report.locator('#findings');
-  await expect(findings).toContainText('Boo Notes est actif sur cette page, notes ouvertes.');
+  await expect(findings).toContainText('Boo Notes est actif sur cette page, notes ouvertes et visibles.');
   await expect(findings).toContainText('Module SCORM 2004 suivi : incomplete · 50 %.');
   // The video host of the module: out of reach, the report says so and offers to allow every site.
   await expect(findings.locator('li.error')).toHaveText(/^✗1 cadre de la page \(videos\.scorm-cdn\.example\)/);

@@ -30,7 +30,7 @@ const base: Diagnostic = {
 describe('page diagnostic', () => {
   it('names the frame Boo Notes cannot read (hidden address) and the missing right', () => {
     const f = findings(base);
-    expect(f[0]).toEqual({ level: 'ok', text: 'Boo Notes est actif sur cette page, notes ouvertes.' });
+    expect(f[0]).toEqual({ level: 'ok', text: 'Boo Notes est actif sur cette page, notes ouvertes et visibles.' });
     expect(f.find((x) => x.level === 'error')?.text).toContain('1 cadre de la page (adresse masquée)');
     expect(f.some((x) => x.text.includes('Interface SCORM du LMS trouvée'))).toBe(true);
     expect(reportText(base)).toContain('#0 [page] https://customer-academy.databricks.com/learn/courses/2971/lessons/63328:4384/overview · Boo Notes ✓ · SCORM 2004');
@@ -78,6 +78,17 @@ describe('page diagnostic', () => {
   it('a video block not loaded yet: says to start it', () => {
     const d: Diagnostic = { ...base, permissions: { site: true, all: true }, content: { ...base.content!, blocked: [] }, frames: [{ ...top, frames: [] }, { ...top, frameId: 7, top: false, url: 'https://cdn.example/scormcontent/index.html', frames: [], textLength: 3000, videoBlocks: 1 }] };
     expect(findings(d).some((x) => x.text.startsWith('1 bloc vidéo dans la leçon, pas encore chargé'))).toBe(true);
+  });
+
+  it('the panel open but covered by the page: says by what', () => {
+    const d: Diagnostic = {
+      ...base,
+      content: { ...base.content!, panel: { loaded: true, coveredBy: '<iframe> — en plein écran', layer: null, fullscreen: '<iframe> — en plein écran' } },
+    };
+    const f = findings(d);
+    expect(f[0]).toMatchObject({ level: 'error' });
+    expect(f[0].text).toContain('Le panneau des notes est ouvert mais invisible : la page le recouvre (<iframe> — en plein écran)');
+    expect(reportText(d)).toContain('panneau : ouvert · chargé oui · recouvert par <iframe> — en plein écran');
   });
 });
 

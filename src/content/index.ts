@@ -69,6 +69,24 @@ function isEditableTarget(e: Event): boolean {
   return t instanceof HTMLElement && t.isContentEditable;
 }
 
+function matches(el: Element, selector: string): boolean {
+  try {
+    return el.matches(selector);
+  } catch {
+    return false; // Selector unknown to this browser.
+  }
+}
+
+/** An element of the page, as the diagnostic names it: `<div#id.class>`, its layer and z-index. */
+function describeElement(el: Element): string {
+  const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 3).join('.')}` : '';
+  let top: Element | null = el;
+  while (top && !(top === document.fullscreenElement || matches(top, ':modal') || matches(top, ':popover-open'))) top = top.parentElement;
+  const layer = !top ? '' : top === document.fullscreenElement ? ' — en plein écran' : matches(top, ':modal') ? ' — dans une boîte de dialogue modale' : ' — dans un popover';
+  const z = getComputedStyle(el).zIndex;
+  return `<${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${cls}>${z !== 'auto' ? ` z-index ${z}` : ''}${layer}`;
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -326,7 +344,14 @@ class ContentApp {
 
     this.intervals.push(setInterval(() => this.checkUrl(), 750));
     // Players resize themselves (window resized, theatre mode, page reflow): kept beside the notes.
-    this.intervals.push(setInterval(() => this.updateFit(), 700));
+    this.intervals.push(
+      setInterval(() => {
+        // The page may show its lesson in the top layer (dialog, popover) or cover the notes.
+        this.syncLayer();
+        this.updateFit();
+        this.checkPanel();
+      }, 700),
+    );
     window.addEventListener('resize', () => this.scheduleFit(), { signal: this.abort.signal });
     // The extension reloaded or updated under this page: this copy is orphaned.
     this.intervals.push(setInterval(() => !chrome.runtime?.id && this.orphan(), 2000));
@@ -607,6 +632,15 @@ class ContentApp {
       scorm: this.scorm,
       notesOpen: this.drawer.isOpen,
       popout: this.popoutPort !== null,
+      panel: {
+        loaded: this.embeddedPort !== null || this.popoutPort !== null,
+        coveredBy: this.drawer.isOpen ? (() => {
+          const cover = this.drawer.coveredBy([this.overlay.host]);
+          return cover ? describeElement(cover) : null;
+        })() : null,
+        layer: this.layer ? describeElement(this.layer) : null,
+        fullscreen: document.fullscreenElement ? describeElement(document.fullscreenElement) : null,
+      },
       errors: [...this.overlay.errors],
     };
   }
@@ -650,10 +684,8 @@ class ContentApp {
       this.redirectFullscreen(fs);
       return;
     }
-    const target = fs && hostsChildren(fs) ? fs : null;
-    this.overlay.reparent(target);
     // The notes stay open in fullscreen, beside the video (which makes room for them).
-    this.drawer.setFullscreenTarget(target);
+    this.syncLayer(true);
     if (!fs) {
       if (this.fullscreenBackdrop) {
         this.fullscreenBackdrop.el.style.setProperty('background', this.fullscreenBackdrop.value, this.fullscreenBackdrop.priority);
@@ -671,6 +703,76 @@ class ContentApp {
     }
     this.scheduleFit();
   };
+
+  /** Where the notes must live to be seen (see Drawer.setFullscreenTarget). */
+  private layer: Element | null = null;
+
+  /**
+   * The element drawn above the page the notes must join: the fullscreen
+   * element, else the page's modal dialog, else a popover covering most of
+   * the window (a lesson player shown in the top layer).
+   */
+  private layerTarget(): Element | null {
+    const fs = document.fullscreenElement;
+    if (fs) return hostsChildren(fs) ? fs : null;
+    const modal = [...document.querySelectorAll('dialog')].filter((d) => matches(d, ':modal')).at(-1);
+    if (modal) return modal;
+    return (
+      [...document.querySelectorAll('[popover]')]
+        .filter((p) => {
+          if (!matches(p, ':popover-open')) return false;
+          const r = p.getBoundingClientRect();
+          return r.width * r.height >= innerWidth * innerHeight * 0.5;
+        })
+        .at(-1) ?? null
+    );
+  }
+
+  private syncLayer(force = false): void {
+    const target = this.layerTarget();
+    if (!force && target === this.layer) return;
+    this.layer = target;
+    this.overlay.reparent(target);
+    this.drawer.setFullscreenTarget(target);
+  }
+
+  private coveredSince = 0;
+  private openedAt = 0;
+  /** The notes went to a window of their own, the page hiding them (once per page). */
+  private panelFallback = false;
+
+  /**
+   * The panel open but not seen — covered by the page, or its frame never
+   * loaded —: brought to the front, else opened in a window of its own,
+   * where no page can hide it.
+   */
+  private checkPanel(): void {
+    if (this.dead || !this.drawer.isOpen || this.popoutPort) {
+      this.coveredSince = 0;
+      return;
+    }
+    const now = Date.now();
+    const cover = this.drawer.coveredBy([this.overlay.host]);
+    if (!cover) this.coveredSince = 0;
+    else if (!this.coveredSince) {
+      this.coveredSince = now;
+      this.syncLayer(true);
+      this.drawer.bringToFront();
+      return;
+    }
+    const hidden = this.coveredSince > 0 && now - this.coveredSince > 2500;
+    const unloaded = !this.embeddedPort && this.openedAt > 0 && now - this.openedAt > 8000;
+    if ((!hidden && !unloaded) || this.panelFallback || !this.ctx) return;
+    this.panelFallback = true;
+    this.overlay.toast(
+      hidden
+        ? 'La page recouvre le panneau des notes : elles s’ouvrent dans une fenêtre à part (même note, mêmes raccourcis).'
+        : 'Le panneau des notes ne se charge pas dans cette page : elles s’ouvrent dans une fenêtre à part.',
+      'info',
+      6000,
+    );
+    void this.bg({ type: 'popout:open', noteId: this.ctx.noteId }).catch((e: unknown) => this.overlay.toast(`Fenêtre des notes impossible : ${errorMessage(e)}`, 'error'));
+  }
 
   /** Leaves the fullscreen of `el` (a bare video, a frame) to put its container fullscreen. */
   private redirectFullscreen(el: HTMLElement): void {
@@ -1125,9 +1227,6 @@ class ContentApp {
           if (this.drawer.isOpen) this.closeDrawer();
           else {
             this.openDrawer('keep');
-            // A bare video fullscreen hides everything else: its container takes over, the notes beside it.
-            const fs = document.fullscreenElement;
-            if (fs instanceof HTMLElement && !hostsChildren(fs)) this.redirectFullscreen(fs);
           }
         }
         break;
@@ -1160,7 +1259,13 @@ class ContentApp {
       return;
     }
     void this.ensureRegistered(true);
+    this.syncLayer(true);
     this.drawer.open();
+    this.openedAt = Date.now();
+    // A frame or bare video fullscreen by itself shows nothing else (Docebo's fullscreen of a SCORM
+    // lesson): its container takes the fullscreen, the notes beside it.
+    const fs = document.fullscreenElement;
+    if (fs instanceof HTMLElement && !hostsChildren(fs)) this.redirectFullscreen(fs);
     this.notifyFrames();
     this.scheduleFit();
     this.postPanels({ type: 'page-theme', theme: detectPageTheme(this.adapter) });

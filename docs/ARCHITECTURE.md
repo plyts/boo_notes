@@ -252,6 +252,13 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
   inverse (boîte fixe couvrant l’élément) et gardent taille et place. Une `<video>` ou une iframe
   seule en plein écran ne peut rien contenir : notes ouvertes, Boo Notes quitte ce plein écran et
   le redemande pour son parent tant que l’activation du clic de l’utilisateur est valable.
+- **Notes toujours visibles** : la page peut afficher sa leçon dans la *top layer* (élément plein
+  écran, `<dialog>` modale, popover), au-dessus de tout z-index et rendant le reste inerte. Le script
+  de la page suit cette couche (toutes les 0,7 s et à chaque changement de plein écran) et y place le
+  panneau et le HUD. Il vérifie aussi que le panneau ouvert est bien ce que la page montre à cet
+  endroit (`elementFromPoint`) : recouvert, il repasse au premier plan ; toujours recouvert (ou son
+  cadre jamais chargé), les notes s’ouvrent dans la fenêtre détachée. Un cadre ou une vidéo mis seuls
+  en plein écran quand les notes s’ouvrent laissent la place à leur conteneur.
 - L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
 
 ## Sécurité

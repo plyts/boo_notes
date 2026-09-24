@@ -23,6 +23,16 @@ export interface PageState {
   scorm: ScormState | null;
   notesOpen: boolean;
   popout: boolean;
+  /** The notes panel as seen on screen. */
+  panel?: {
+    /** Its frame loaded (connected to the page). */
+    loaded: boolean;
+    /** Element of the page drawn above it, null when it is seen. */
+    coveredBy: string | null;
+    /** Where it lives: fullscreen element, modal dialog, popover (null: the page). */
+    layer: string | null;
+    fullscreen: string | null;
+  };
   /** Last errors shown to the user (toasts). */
   errors: string[];
 }
@@ -242,7 +252,19 @@ export function findings(d: Diagnostic): Finding[] {
   } else if (!c.context) {
     out.push({ level: 'error', text: 'Boo Notes tourne mais ne reconnaît pas cette adresse comme une page à annoter.' });
   } else {
-    out.push({ level: 'ok', text: `Boo Notes est actif sur cette page${c.notesOpen || c.popout ? ', notes ouvertes' : ' (notes fermées)'}.` });
+    const panel = c.panel;
+    if (c.notesOpen && panel && !panel.loaded) {
+      out.push({ level: 'error', text: 'Le panneau des notes est ouvert mais son contenu ne s’est pas chargé dans cette page : Boo Notes l’ouvre dans une fenêtre à part (même note).' });
+    } else if (c.notesOpen && panel?.coveredBy) {
+      out.push({
+        level: 'error',
+        text: `Le panneau des notes est ouvert mais invisible : la page le recouvre (${panel.coveredBy}). Boo Notes le passe au premier plan, sinon ouvre les notes dans une fenêtre à part.`,
+      });
+    } else {
+      out.push({ level: 'ok', text: `Boo Notes est actif sur cette page${c.popout ? ', notes dans une fenêtre à part' : c.notesOpen ? ', notes ouvertes et visibles' : ' (notes fermées)'}.` });
+    }
+    if (panel?.fullscreen) out.push({ level: 'ok', text: `Page en plein écran : ${panel.fullscreen}.` });
+    if (panel?.layer && panel.layer !== panel.fullscreen) out.push({ level: 'ok', text: `La page affiche la leçon au premier plan (${panel.layer}) : les notes s’y placent.` });
   }
 
   const unread = unreadFrames(d);
@@ -307,6 +329,11 @@ export function reportText(d: Diagnostic): string {
   if (!c) lines.push(`  absent${d.injectError ? ` (${d.injectError})` : ''}`);
   else {
     lines.push(`  note ${c.context?.noteId ?? '—'} · mode ${c.mode} · source ${c.source ?? 'aucune'} · cadres avec média ${c.mediaFrames} · module suivi ${c.moduleFollowed ? 'oui' : 'non'}`);
+    if (c.panel) {
+      lines.push(
+        `  panneau : ${c.notesOpen ? 'ouvert' : c.popout ? 'fenêtre à part' : 'fermé'} · chargé ${c.panel.loaded ? 'oui' : 'non'} · ${c.panel.coveredBy ? `recouvert par ${c.panel.coveredBy}` : 'visible'}${c.panel.layer ? ` · placé dans ${c.panel.layer}` : ''}${c.panel.fullscreen ? ` · plein écran ${c.panel.fullscreen}` : ''}`,
+      );
+    }
     if (c.media) lines.push(`  média : ${c.media.tag} ${c.media.width}×${c.media.height} · ${c.media.duration} s${c.media.drm ? ' · DRM' : ''}`);
     if (c.blocked.length) lines.push(`  cadres à autoriser : ${c.blocked.join(', ')}`);
     if (c.scorm) lines.push(`  SCORM ${c.scorm.version} : ${c.scorm.status} · progression ${c.scorm.progress ?? '—'} · score ${c.scorm.score ?? '—'}`);
