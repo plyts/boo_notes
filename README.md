@@ -74,6 +74,9 @@ Captivate, iSpring) :
   **Activer sur tous les sites** dans les options ; ses vidéos s’horodatent alors comme les autres.
   Un module lancé dans un cadre dont l’adresse est masquée (formulaire envoyé dans le cadre, comme
   certains LMS) est signalé aussi : **Autoriser** active alors Boo Notes sur tous les sites ;
+- une vidéo au fond du module (leçon Databricks Academy : page Docebo → lanceur SCORM → pilote
+  SCORM → contenu Articulate Rise, quatre cadres emboîtés) est suivie et **placée** : horodatages,
+  captures recadrées sur l’image, lecteur ajusté à côté des notes ;
 - **Diagnostic de cette page** (clic droit sur l’icône Boo Notes, ou bouton dans l’aide `?` du
   panneau) : ce que Boo Notes voit de la leçon — ses cadres (LMS, module, lecteur vidéo), les vidéos
   qu’ils contiennent, l’interface SCORM, les droits accordés — et, en clair, ce qui le bloque

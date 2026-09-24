@@ -274,4 +274,50 @@ test.describe('Tout flux, toute plateforme', () => {
       .toEqual(['bienvenue dans ce cours', 'les DAG sont des graphes', 'sans cycle']);
     expect(await transcriptOf(sw, '/own-player')).toMatchObject({ source: 'live' });
   });
+
+  test('leçon Databricks (Docebo → lanceur SCORM → pilote → contenu Rise) : vidéo à 4 cadres de profondeur, placée et suivie', async ({ page, sw }) => {
+    // The structure seen on customer-academy.databricks.com: each level in its own frame.
+    const doc = (title: string, body: string) =>
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><style>body{margin:0}iframe{border:0;display:block}</style></head><body>${body}</body></html>`;
+    await page.route(/^https:\/\/(academy|cdn5)\.example\.test\//, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith('.webm')) return fulfillMedia(route, await sampleVideo(), 'video/webm');
+      const pages: Record<string, string> = {
+        '/learn/courses/5855/lessons/63961:3560/tool-integration': doc('Tool Integration and Observability', '<header style="height:60px">Databricks Learning</header><iframe src="https://cdn5.example.test/dcd/scormapi_v60/launcher.html" allow="autoplay" style="width:1000px;height:760px"></iframe>'),
+        '/dcd/scormapi_v60/launcher.html': doc('Launcher', '<iframe src="/files/scorm/abc/scormdriver/indexAPI.html" style="width:100vw;height:100vh"></iframe>'),
+        '/files/scorm/abc/scormdriver/indexAPI.html': doc('Driver', '<iframe src="/files/scorm/abc/scormcontent/index.html" style="position:absolute;left:9px;top:0;width:calc(100vw - 18px);height:100vh"></iframe>'),
+        '/files/scorm/abc/scormcontent/index.html': doc('Rise', '<main style="padding:40px 120px"><h1>Tool Integration</h1><p>Observability of agents.</p><video muted preload="auto" src="/files/scorm/abc/scormcontent/assets/lesson.webm" style="width:560px;height:315px"></video></main>'),
+      };
+      const body = pages[url.pathname];
+      return body ? route.fulfill({ contentType: 'text/html; charset=utf-8', body }) : route.fulfill({ status: 404, body: '' });
+    });
+    await page.goto('https://academy.example.test/learn/courses/5855/lessons/63961:3560/tool-integration');
+    await page.bringToFront();
+    await expect.poll(() => page.frames().some((f) => f.url().endsWith('/scormcontent/index.html'))).toBe(true);
+    await openNotes(sw, page);
+    const content = page.frames().find((f) => f.url().endsWith('/scormcontent/index.html'))!;
+    await content.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+    await content.evaluate(() => (document.querySelector('video') as HTMLVideoElement).play());
+    await page.waitForTimeout(1200);
+    await content.evaluate(() => (document.querySelector('video') as HTMLVideoElement).pause());
+    // Followed as a video: a timestamp at its time.
+    const notes = panel(page);
+    await expect(notes.locator('.platform')).toHaveText('Web · Lecteur intégré', { timeout: 10_000 });
+    await runCommand(sw, page, 'insert-timestamp');
+    await expect(notes.locator('.cm-content')).toContainText(/00:0[1-3]/);
+    // Placed where it is, four frames down: the capture's flash covers its picture exactly.
+    const video = (await page.frameLocator('iframe[src*="launcher"]').frameLocator('iframe').frameLocator('iframe').locator('video').boundingBox())!;
+    await runCommand(sw, page, 'capture-screenshot');
+    await expect(page.locator('#boo-notes-overlay .toast')).toContainText('Capture sauvegardée');
+    const flash = await page.evaluate(() => {
+      const el = document.getElementById('boo-notes-overlay')!.shadowRoot!.querySelector('.flash') as HTMLElement;
+      const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(el.style.transform)!;
+      return { x: Number(m[1]), y: Number(m[2]), width: parseFloat(el.style.width), height: parseFloat(el.style.height) };
+    });
+    expect(Math.abs(flash.x + flash.width / 2 - (video.x + video.width / 2))).toBeLessThan(3);
+    expect(Math.abs(flash.y + flash.height / 2 - (video.y + video.height / 2))).toBeLessThan(3);
+    expect(flash.width).toBeLessThanOrEqual(video.width + 1);
+    expect(flash.width).toBeGreaterThan(video.width * 0.6);
+  });
 });
+

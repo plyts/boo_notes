@@ -1,3 +1,4 @@
+import { liftMap, type FrameHello } from '../shared/frame-hello';
 import type { FrameCommand, FrameMedia, MediaSource, PlaybackState } from '../shared/messages';
 import type { MediaKind } from '../shared/platforms';
 import { queryVisible, type PlatformAdapter } from './adapters';
@@ -81,6 +82,8 @@ export class MediaController {
   private readonly remotes = new Map<number, Remote>();
   /** Frame agent token → its <iframe> element (from the agent's postMessage). */
   private readonly frames = new Map<string, HTMLIFrameElement>();
+  /** Where each media's frame sits in its <iframe> (hello, maybe relayed through nested frames). */
+  private readonly hellos = new Map<string, FrameHello>();
   readonly stopwatch = new Stopwatch();
   stopwatchKind: 'video' | 'audio' = 'audio';
 
@@ -177,8 +180,9 @@ export class MediaController {
     else this.remotes.delete(frameId);
   }
 
-  bindFrame(token: string, iframe: HTMLIFrameElement): void {
+  bindFrame(token: string, iframe: HTMLIFrameElement, hello: FrameHello): void {
     this.frames.set(token, iframe);
+    this.hellos.set(token, hello);
   }
 
   /** <iframe> elements that hold a reporting agent. */
@@ -313,11 +317,10 @@ export class MediaController {
     if (!box || !iframe?.isConnected) return null;
     const f = iframe.getBoundingClientRect();
     if (!f.width || !f.height) return null;
-    const sx = iframe.clientWidth / (r.media.viewport.width || iframe.clientWidth) || 1;
-    const sy = iframe.clientHeight / (r.media.viewport.height || iframe.clientHeight) || 1;
-    const left = f.left + iframe.clientLeft;
-    const top = f.top + iframe.clientTop;
-    return new DOMRect(left + box.x * sx, top + box.y * sy, box.width * sx, box.height * sy);
+    // The media's frame may sit several frames deep in this <iframe> (course modules).
+    const hello = this.hellos.get(r.media.token) ?? { booNotesFrame: r.media.token, map: { x: 0, y: 0, sx: 1, sy: 1 }, view: { w: r.media.viewport.width, h: r.media.viewport.height } };
+    const m = liftMap(hello, iframe);
+    return new DOMRect(m.x + box.x * m.sx, m.y + box.y * m.sy, box.width * m.sx, box.height * m.sy);
   }
 
   progressBarRect(): DOMRect | null {

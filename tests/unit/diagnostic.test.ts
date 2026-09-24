@@ -51,4 +51,33 @@ describe('page diagnostic', () => {
   it('keeps addresses without their query', () => {
     expect(bareUrl('https://lms.example.com/launch?token=secret#t=3')).toBe('https://lms.example.com/launch');
   });
+
+  it('the real Databricks lesson (Docebo → launcher → SCORM driver → Rise): everything readable, a lesson to read', () => {
+    const cdn = 'https://cdn5.dcbstatic.com/files/d/a/databricks_docebosaas_com/1790301600/i6tr3gi/scorm/8114ff';
+    const frame = (frameId: number, url: string, textLength: number, extra: Partial<FrameProbe> = {}): FrameProbe => ({
+      frameId, url, top: false, title: '', agent: true, app: false, frames: [], media: [], textLength, bridge: true, ...extra,
+    });
+    const d: Diagnostic = {
+      ...base,
+      permissions: { site: true, all: true },
+      content: { ...base.content!, blocked: [], moduleFollowed: true, scorm: { version: '1.2', status: 'incomplete', progress: null, score: null, location: '' } },
+      frames: [
+        { ...top, frames: [{ src: 'https://cdn5.dcbstatic.com/dcd/scormapi_v60/launcher.html', width: 1341, height: 953, reachable: false, sandbox: null, allow: 'autoplay' }], scorm: { api12: false, api2004: false, parent: 'none' } },
+        frame(3205, 'https://cdn5.dcbstatic.com/dcd/scormapi_v60/launcher.html', 0, { scorm: { api12: true, api2004: false, parent: 'none' }, frames: [{ src: `${cdn}/scormdriver/indexAPI.html`, width: 1341, height: 953, reachable: true, sandbox: null, allow: '' }] }),
+        frame(3206, `${cdn}/scormdriver/indexAPI.html`, 0, { frames: [{ src: `${cdn}/scormcontent/index.html`, width: 1323, height: 953, reachable: true, sandbox: null, allow: '' }] }),
+        frame(3207, `${cdn}/scormcontent/index.html`, 9833, { tool: 'Articulate Rise 360' }),
+      ],
+    };
+    const f = findings(d);
+    expect(f.filter((x) => x.level === 'error')).toEqual([]);
+    expect(f.find((x) => x.text.startsWith('La partie affichée de la leçon'))).toMatchObject({ level: 'ok' });
+    expect(f.find((x) => x.text.startsWith('La partie affichée de la leçon'))!.text).toContain('(module Articulate Rise 360)');
+    expect(f.some((x) => x.text.includes('Module SCORM 1.2 suivi : incomplete'))).toBe(true);
+  });
+
+  it('a video block not loaded yet: says to start it', () => {
+    const d: Diagnostic = { ...base, permissions: { site: true, all: true }, content: { ...base.content!, blocked: [] }, frames: [{ ...top, frames: [] }, { ...top, frameId: 7, top: false, url: 'https://cdn.example/scormcontent/index.html', frames: [], textLength: 3000, videoBlocks: 1 }] };
+    expect(findings(d).some((x) => x.text.startsWith('1 bloc vidéo dans la leçon, pas encore chargé'))).toBe(true);
+  });
 });
+

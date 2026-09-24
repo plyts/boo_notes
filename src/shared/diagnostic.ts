@@ -60,6 +60,10 @@ export interface FrameProbe {
   frames: FrameInfo[];
   media: MediaInfo[];
   textLength: number;
+  /** Authoring tool of a course module (Articulate Rise 360, Storyline, Captivate, iSpring). */
+  tool?: string;
+  /** Video-looking blocks with no <video> in them yet (poster, player not loaded). */
+  videoBlocks?: number;
   /** Main world: the SCORM API of this frame or of a parent, the media bridge. */
   scorm?: { api12: boolean; api2004: boolean; parent: 'found' | 'none' | 'cross-origin' };
   bridge?: boolean;
@@ -116,7 +120,16 @@ export function probeFrame(): Omit<FrameProbe, 'frameId'> {
     const visit = (root: Document | ShadowRoot, depth: number) => {
       out.push(...root.querySelectorAll(selector));
       if (depth > 4) return;
-      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) visit(el.shadowRoot, depth + 1);
+      for (const el of root.querySelectorAll('*')) {
+        // Closed trees too (content scripts may open them).
+        let shadow: ShadowRoot | null = el.shadowRoot;
+        try {
+          shadow ??= (chrome as unknown as { dom?: { openOrClosedShadowRoot?(e: Element): ShadowRoot | null } }).dom?.openOrClosedShadowRoot?.(el) ?? null;
+        } catch {
+          shadow = null;
+        }
+        if (shadow) visit(shadow, depth + 1);
+      }
     };
     visit(document, 0);
     return out;
@@ -159,6 +172,19 @@ export function probeFrame(): Omit<FrameProbe, 'frameId'> {
       };
     }),
     textLength: (document.body?.innerText ?? '').length,
+    tool: document.querySelector('#preso, script[src*="story_content"]')
+      ? 'Articulate Storyline'
+      : /\/scormcontent\//.test(location.pathname)
+        ? 'Articulate Rise 360'
+        : document.querySelector('script[src*="CPM.js" i], #cpDocument')
+          ? 'Adobe Captivate'
+          : document.querySelector('script[src*="ispring" i], [class*="ispring" i]')
+            ? 'iSpring'
+            : undefined,
+    videoBlocks: all('[class*="video" i], [data-block-type*="video" i]').filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width >= 200 && r.height >= 110 && !el.querySelector('video, iframe') && !el.closest('video');
+    }).length,
   };
 }
 
@@ -237,9 +263,19 @@ export function findings(d: Diagnostic): Finding[] {
   } else if (videos.length) {
     out.push({ level: 'warn', text: `${videos.length} vidéo${videos.length > 1 ? 's' : ''} trouvée${videos.length > 1 ? 's' : ''} dans la page mais pas suivie${videos.length > 1 ? 's' : ''} : lancez la lecture, puis rouvrez les notes.` });
   } else if (!unread.length) {
+    const module = [...d.frames].sort((a, b) => b.textLength - a.textLength).find((p) => !p.top && p.textLength > 200);
+    const blocks = d.frames.reduce((n, p) => n + (p.videoBlocks ?? 0), 0);
+    if (blocks) {
+      out.push({
+        level: 'warn',
+        text: `${blocks} bloc${blocks > 1 ? 's' : ''} vidéo dans la leçon, pas encore chargé${blocks > 1 ? 's' : ''} (image d’aperçu) : cliquez lecture sur la vidéo — Boo Notes la suit dès qu’elle démarre — puis, au besoin, refaites le diagnostic.`,
+      });
+    }
     out.push({
-      level: 'warn',
-      text: 'Aucune vidéo ni aucun audio dans les parties lisibles de la page : la leçon est lue comme une page (citations, ancres, captures). Si la vidéo n’a pas encore démarré, lancez-la ; sinon le « Chronomètre » du panneau horodate quand même.',
+      level: module ? 'ok' : 'warn',
+      text: module
+        ? `La partie affichée de la leçon${module.tool ? ` (module ${module.tool})` : ''} ne contient ni vidéo ni audio — ${module.textLength.toLocaleString('fr-FR')} caractères de texte : Boo Notes la suit comme un cours à lire. Sélectionnez un passage puis « Citer » (ou Alt+Maj+T), Alt+Maj+T sans sélection ancre la note au titre lu, Alt+Maj+S capture le module. Une vidéo lancée plus loin dans la leçon est suivie dès qu’elle démarre.`
+        : 'Aucune vidéo ni aucun audio dans les parties lisibles de la page : la leçon est lue comme une page (citations, ancres, captures). Si la vidéo n’a pas encore démarré, lancez-la ; sinon le « Chronomètre » du panneau horodate quand même.',
     });
   }
   if (media.some((m) => m.drm)) out.push({ level: 'warn', text: 'Vidéo protégée (DRM) : les captures sont noires ; horodatages et passages fonctionnent.' });
@@ -278,7 +314,9 @@ export function reportText(d: Diagnostic): string {
   lines.push('', `Cadres lisibles (${d.frames.length}) :`);
   for (const p of d.frames) {
     const scorm = p.scorm ? ` · SCORM ${p.scorm.api2004 ? '2004' : p.scorm.api12 ? '1.2' : p.scorm.parent === 'found' ? 'parent' : p.scorm.parent === 'cross-origin' ? 'parent ?' : 'non'}` : '';
-    lines.push(`- #${p.frameId} ${p.top ? '[page] ' : ''}${p.url}${p.agent || p.app ? ' · Boo Notes ✓' : ' · Boo Notes absent'}${scorm}${p.bridge ? ' · pont média ✓' : ''} · texte ${p.textLength} car.`);
+    lines.push(
+      `- #${p.frameId} ${p.top ? '[page] ' : ''}${p.url}${p.agent || p.app ? ' · Boo Notes ✓' : ' · Boo Notes absent'}${scorm}${p.bridge ? ' · pont média ✓' : ''} · texte ${p.textLength} car.${p.tool ? ` · ${p.tool}` : ''}${p.videoBlocks ? ` · blocs vidéo non chargés ${p.videoBlocks}` : ''}`,
+    );
     for (const m of p.media) lines.push(`    ${m.tag} ${m.width}×${m.height} · ${m.src || 'sans source'} · état ${m.readyState}${m.paused ? ' · en pause' : ' · lecture'}${m.duration !== null ? ` · ${m.duration} s` : ''}${m.drm ? ' · DRM' : ''}`);
     for (const f of p.frames) lines.push(`    cadre ${f.width}×${f.height} · ${f.src}${f.reachable ? ' · même site' : ''}${f.sandbox !== null ? ` · sandbox="${f.sandbox}"` : ''}${f.allow ? ` · allow="${f.allow}"` : ''}`);
   }

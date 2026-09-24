@@ -8,9 +8,11 @@ import {
   type FrameMedia,
   type FrameToBackground,
 } from '../shared/messages';
+import { frameHello, liftHello, readHello } from '../shared/frame-hello';
 import { adapterForHost } from './adapters';
 import { captureVideoFrame, probeFrame } from './capture';
 import { FrameReading } from './frame-reading';
+import { allFrames } from './media-scan';
 import { MediaController } from './player';
 import { captionFile, readLiveLines, readTextTrack, SubtitleCollector } from './subtitles';
 
@@ -67,6 +69,22 @@ class FrameAgent {
     document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
     const captions = setInterval(() => this.sampleCaptions(), 400);
     this.abort.signal.addEventListener('abort', () => clearInterval(captions));
+    // A media deeper in this frame (course module → its player): its hello goes on up, placed in this frame.
+    window.addEventListener(
+      'message',
+      (e) => {
+        const hello = readHello(e.data);
+        if (!hello || !e.source || e.source === window) return;
+        const iframe = allFrames().find((f) => f.contentWindow === e.source);
+        if (!iframe) return;
+        try {
+          window.parent.postMessage(liftHello(hello, iframe), '*');
+        } catch {
+          // Parent gone.
+        }
+      },
+      { signal: this.abort.signal },
+    );
     this.reading.start();
     this.report();
   }
@@ -134,9 +152,9 @@ class FrameAgent {
     this.announced = true;
     this.post({ type: 'media', media: state });
     if (first && this.file) this.post({ type: 'captions', captions: this.file });
-    // Lets the parent page find the <iframe> element holding this media.
+    // Lets the parent page find the <iframe> element holding this media (relayed up by the frames between).
     try {
-      window.parent.postMessage({ booNotesFrame: this.token }, '*');
+      window.parent.postMessage(frameHello(this.token), '*');
     } catch {
       // Parent gone.
     }

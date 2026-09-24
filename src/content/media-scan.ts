@@ -130,3 +130,8 @@ export function frameSite(frame: HTMLIFrameElement): string | null {
   }
   return reachable ? null : HIDDEN_SITE;
 }
+
+/** Every <iframe> of the document, those in shadow trees included. */
+export function allFrames(): HTMLIFrameElement[] {
+  return [...document.querySelectorAll('iframe'), ...scanMedia(document, 8000).roots.flatMap((r) => [...r.querySelectorAll('iframe')])];
+}

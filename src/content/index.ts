@@ -32,7 +32,8 @@ import { adapterForHost, detectPageTheme, headerInset, queryVisible, type Platfo
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
 import { hostsChildren, PlayerFit } from './fit';
-import { frameSite, looksLikePlayer, playerFrames, scanMedia } from './media-scan';
+import { allFrames, frameSite, looksLikePlayer, playerFrames } from './media-scan';
+import { readHello } from '../shared/frame-hello';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
 import { PageReader } from './reader';
@@ -498,11 +499,11 @@ class ContentApp {
       this.agentWindows.add(e.source);
       return;
     }
-    const token = (e.data as { booNotesFrame?: unknown } | null)?.booNotesFrame;
-    if (typeof token !== 'string' || !e.source) return;
-    const frames = [...document.querySelectorAll('iframe'), ...scanMedia(document, 8000).roots.flatMap((r) => [...r.querySelectorAll('iframe')])];
-    const iframe = frames.find((f) => f.contentWindow === e.source);
-    if (iframe) this.player.bindFrame(token, iframe);
+    // A media's frame, maybe several frames deep: its hello comes from the <iframe> of this page holding it.
+    const hello = readHello(e.data);
+    if (!hello || !e.source) return;
+    const iframe = allFrames().find((f) => f.contentWindow === e.source);
+    if (iframe) this.player.bindFrame(hello.booNotesFrame, iframe, hello);
   };
 
   /** Player-looking iframes without a reporting agent: the panel offers to allow their host. */
