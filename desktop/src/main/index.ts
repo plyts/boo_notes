@@ -7,6 +7,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  ClipboardItem,
   dialog,
   ipcMain,
   Menu,
@@ -23,7 +24,7 @@ import { noteSlug, timestampUrl } from '../../../src/shared/platforms';
 import { formatTimecode } from '../../../src/shared/time';
 import type { CuePatch } from '../../../src/shared/transcript';
 import { ConfigStore, plainBox, type SecretBox } from '../core/config';
-import { writeExport, type ExportFormat, type ExportOptions } from '../core/export';
+import { richCopyNote, writeExport, type ExportFormat, type ExportOptions } from '../core/export';
 import { kindForFile, Library, OPEN_FILE_FILTERS } from '../core/library';
 import { NotionSync } from '../core/notion/sync';
 import { ExtensionServer } from '../core/server';
@@ -569,6 +570,12 @@ function registerIpc(): void {
     const path = `media/${noteSlug(id)}-${entry.kind === 'audio' ? 'audio' : 'passage'}-${formatTimecode(start).replace(/:/g, '-')}-${nonce}.${ext}`;
     await library.putMedia(id, { path, kind: entry.kind === 'audio' ? 'audio' : 'passage', mime, start, end: Number(entry.end) || 0 }, Buffer.from(bytes));
     return path;
+  });
+  handle(C.copyNote, async (noteId: string) => {
+    const copy = await richCopyNote(library, str(noteId, 'id'));
+    // Both flavours: Markdown for Obsidian / text editors, HTML for Notion, Docs, Word…
+    await clipboard.write([new ClipboardItem({ 'text/plain': copy.markdown, 'text/html': copy.html })]);
+    return { images: copy.images, missing: copy.missing.length };
   });
   handle(C.openSource, async (id: string, seconds?: number) => {
     const res = library.requireResource(str(id, 'id'));

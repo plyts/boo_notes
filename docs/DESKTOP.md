@@ -96,7 +96,13 @@ deviennent sa **transcription** (onglet **Transcription** de la note, `Alt+T`) :
 lecture, se traduit et se commente réplique par réplique, une réplique s’épingle dans la note
 (`Ctrl+Maj+K`) ; **＋ Ajouter des sous-titres** importe un autre fichier. `Alt+I` / `Alt+O` (bouton
 **Passage**) découpent un **passage** dont l’image et le son sont enregistrés ; un intervalle
-`[02:05–06:07]` rejoue le passage et s’arrête à sa fin ; 🔊 **Extrait** le lit au-dessus des notes.
+`[02:05–06:07]` rejoue le passage et s’arrête à sa fin (les passages sont aussi des bandes sur la
+barre de lecture) ; 🔊 **Extrait** le lit au-dessus des notes ; le **bandeau de sous-titre** montre la
+réplique en cours sous les notes.
+
+**Copier la note** (bouton ⧉ en haut de la note) : la note entière dans le presse-papier, images
+comprises (intégrées), horodatages liés, passages et transcription — à coller dans Obsidian,
+Notion, Docs ou Word. Détails : [TRANSCRIPTION.md § 5](TRANSCRIPTION.md#5-formats).
 
 ![Passage et son extrait dans une note de l’application](screenshots/desktop-passage.png)
 

@@ -16,7 +16,7 @@ import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
 import { NoteStore, type CourseOption } from '../shared/store';
 import { clearMedia, getMedia, markAllMediaUnsynced, markMediaSynced, putMedia, unsyncedMedia } from '../shared/media-db';
-import { pinTranscriptLine, transcriptLine } from '../shared/transcript';
+import { findMediaRefs, pinTranscriptLine, transcriptLine, transcriptPath, transcriptToMarkdown, transcriptToVtt } from '../shared/transcript';
 import { TranscriptStore } from '../shared/transcript-store';
 import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
@@ -705,15 +705,22 @@ async function downloadNote(noteId: string): Promise<string> {
     await chrome.downloads.download(markdownFile(name));
   }
   const folder = `Boo Notes/${name}`;
+  const save = (url: string, path: string) => chrome.downloads.download({ url, filename: `${folder}/${path}`, conflictAction: 'overwrite', saveAs: false });
   for (const path of findAssetRefs(note.markdown)) {
     const asset = await store.getAsset(path);
-    if (!asset) continue;
-    await chrome.downloads.download({
-      url: asset.dataUrl,
-      filename: `${folder}/${path}`,
-      conflictAction: 'overwrite',
-      saveAs: false,
-    });
+    if (asset) await save(asset.dataUrl, path);
+  }
+  // Recorded extracts (next to the note: its `[Extrait](media/…)` links open them, Obsidian plays them).
+  for (const path of findMediaRefs(note.markdown)) {
+    const media = await getMedia(path).catch(() => null);
+    if (media) await save(await blobToDataUrl(media.blob), path);
+  }
+  // The transcript the note's `📄` line points to, readable and for players.
+  const t = await transcripts.get(noteId);
+  if (t?.cues.length) {
+    await save(textToDataUrl(transcriptToMarkdown(t, { title: note.title, url: /^https?:/.test(note.url) ? note.url : undefined })), transcriptPath(noteId, 'md'));
+    await save(textToDataUrl(transcriptToVtt(t), 'text/vtt'), transcriptPath(noteId, 'vtt'));
+    if (t.cues.some((c) => c.tr)) await save(textToDataUrl(transcriptToVtt(t, true), 'text/vtt'), transcriptPath(noteId, 'vtt').replace(/\.vtt$/, `.${t.target || 'fr'}.vtt`));
   }
   return `Téléchargé dans « ${folder} »`;
 }

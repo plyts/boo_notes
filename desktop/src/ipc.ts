@@ -145,6 +145,11 @@ export interface BooApi {
     annotateTranscript(noteId: string, patches: CuePatch[], langs?: { lang?: string; target?: string }): Promise<Transcript>;
     /** Asks for a .vtt / .srt file: it becomes the note's transcript (null: cancelled). */
     importSubtitles(noteId: string): Promise<Transcript | null>;
+    /**
+     * The note « tout compris » in the clipboard (Markdown + HTML): pictures embedded, timestamps
+     * linked, passages and transcript — to paste into Obsidian, Notion, Docs, Word…
+     */
+    copyNote(noteId: string): Promise<{ images: number; missing: number }>;
     /** A passage extract recorded in the app (WebM bytes): returns its `media/…` path. */
     saveMedia(noteId: string, entry: { kind: 'passage' | 'audio'; mime: string; start: number; end: number }, bytes: Uint8Array): Promise<string>;
 
@@ -223,6 +228,7 @@ export const CHANNELS = {
   annotateTranscript: 'note:annotate-transcript',
   importSubtitles: 'note:import-subtitles',
   saveMedia: 'note:save-media',
+  copyNote: 'note:copy',
   createCourse: 'course:create',
   updateCourse: 'course:update',
   removeCourse: 'course:remove',

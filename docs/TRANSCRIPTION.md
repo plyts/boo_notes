@@ -80,8 +80,9 @@ Deux principes :
 ### Application Desktop
 
 La note d’une vidéo ou d’un audio a les mêmes onglets **Notes │ Transcription** (même vue), le
-même bouton **Passage** (`Alt + I` / `Alt + O`), le même enregistrement des extraits et la même
-lecture d’un intervalle. Une vidéo importée avec ses sous-titres à côté (`cours.mp4` +
+même **bandeau de sous-titre** sous les notes, le même bouton **Passage** (`Alt + I` / `Alt + O`),
+le même enregistrement des extraits, la même lecture d’un intervalle (et les passages en bandes
+sur la barre de lecture), et la transcription s’épingle à la note à la fin de la vidéo. Une vidéo importée avec ses sous-titres à côté (`cours.mp4` +
 `cours.vtt`, `cours.en.srt`…) a sa transcription d’office ; **＋ Ajouter des sous-titres**
 importe un `.vtt` / `.srt` (les traductions et commentaires suivent le moment dont ils parlaient).
 La transcription d’une note du navigateur s’y **lit** (les annotations se font dans l’extension).
@@ -155,6 +156,22 @@ vidéo, réplique, traduction en italique, 💬 commentaire).
 **À l’export** : fiches de révision (chaque passage avec les notes prises et les répliques dites
 pendant lui), Markdown (`transcripts/`, `media/`), JSON (`passages` avec `notes` et `said`,
 `transcript` complet) pour générer des QCM.
+
+**Copier la note** (menu ⇪ du panneau, bouton ⧉ de l’application) met **toute la note** dans le
+presse-papier, à coller dans Obsidian, Notion, Google Docs, Word, un mail… :
+
+| Élément | Markdown (Obsidian, éditeurs de texte) | HTML (Notion, Docs, Word…) |
+| --- | --- | --- |
+| Titre, source, cours › chapitre | `# Titre`, lien de la vidéo | titre, lien |
+| Horodatages `[04:15]`, intervalles `[02:05–06:07]` | liens vers l’instant de la vidéo | liens vers l’instant |
+| Captures d’écran, images, cartes des passages | **intégrées** (`data:image/…`) : visibles sans aucun fichier | **intégrées** dans la page |
+| Extrait enregistré d’un passage | lien **▶ Revoir le passage** (à la source) | la légende de la carte est ce lien |
+| Citations de sous-titres, `[[liens]]`, `==surlignage==` | conservés tels quels | citation, gras, surligné |
+| Transcription (📄) | section **Transcription** : heure liée, réplique, *traduction*, 💬 | idem |
+
+Les extraits vidéo, trop lourds pour un presse-papier, voyagent avec **Télécharger** (extension :
+dossier `.md` + `assets/` + `media/` + `transcripts/`) ou l’**export Markdown** de l’application :
+glissé dans un coffre Obsidian, tout s’affiche et se lit.
 
 ## 6. Raccourcis
 

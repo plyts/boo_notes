@@ -876,6 +876,13 @@ export class NotesEditor {
       .map((m) => m.seconds);
   }
 
+  /** Passages (`[02:05–06:07]`) about `resource`: bands on a media timeline. */
+  rangesOf(resource?: string | null): Array<[number, number]> {
+    return findTimestamps(this.view.state.doc.toString())
+      .filter((m) => m.end !== null && this.targets(m.resource, resource))
+      .map((m) => [m.seconds, m.end!] as [number, number]);
+  }
+
   private wikiCompletions(ctx: CompletionContext): CompletionResult | null {
     const m = ctx.matchBefore(/\[\[[^[\]\n|]*$/);
     if (!m) return null;

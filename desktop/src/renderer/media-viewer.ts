@@ -31,6 +31,7 @@ export class MediaViewer {
   private readonly stage: HTMLElement;
   private lastSaved = 0;
   private markers: number[] = [];
+  private ranges: Array<[number, number]> = [];
   private destroyed = false;
   private hls: { destroy(): void } | null = null;
   /** Passage being replayed: playback stops at its end. */
@@ -141,6 +142,12 @@ export class MediaViewer {
     this.renderMarkers();
   }
 
+  /** Passages of the note (`[02:05–06:07]`), drawn as bands on the scrubber. */
+  setRanges(ranges: Array<[number, number]>): void {
+    this.ranges = ranges;
+    this.renderMarkers();
+  }
+
   private async attachStream(url: string): Promise<void> {
     const { default: Hls } = await import('hls.js');
     if (this.destroyed) return;
@@ -232,7 +239,17 @@ export class MediaViewer {
       this.markersEl.replaceChildren();
       return;
     }
+    const bands = this.ranges
+      .filter(([a]) => a < d)
+      .map(([a, b]) => {
+        const band = h('button', { type: 'button', class: 'scrub-range', title: `Passage ${formatTimecode(a)}–${formatTimecode(b)}`, 'aria-label': `Revoir le passage ${formatTimecode(a)}–${formatTimecode(b)}` });
+        band.style.left = `${(a / d) * 100}%`;
+        band.style.width = `${((Math.min(b, d) - a) / d) * 100}%`;
+        band.addEventListener('click', () => this.playRange(a, b));
+        return band;
+      });
     this.markersEl.replaceChildren(
+      ...bands,
       ...this.markers
         .filter((s) => s <= d)
         .map((s) => {

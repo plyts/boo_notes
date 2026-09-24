@@ -321,6 +321,61 @@ test.describe('Passages', () => {
   });
 });
 
+test.describe('Copier et télécharger « tout compris »', () => {
+  test('passage, capture, horodatages et transcription : dans le presse-papier et le dossier téléchargé', async ({ context, page, sw }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openWatch(page);
+    await addTrack(page);
+    await setVideo(page, 1);
+    await openNotes(sw, page);
+    await page.keyboard.type('Introduction');
+    await expect(panel(page).locator('#tab-transcript .tab-count')).toHaveText('4');
+    await page.evaluate(() => document.querySelector('video')!.play());
+    await page.keyboard.press('Alt+I');
+    await page.waitForTimeout(2500);
+    await page.keyboard.press('Alt+O');
+    await expect.poll(async () => (await storedNote(sw))?.markdown, { timeout: 15_000 }).toContain('[Extrait](media/');
+    const p = panel(page);
+    await p.locator('#tab-transcript').click();
+    await p.getByRole('button', { name: 'Épingler la transcription à la note' }).click();
+    await p.locator('#tab-notes').click();
+    await expect.poll(async () => (await storedNote(sw))?.markdown).toContain('📄 [Transcription');
+
+    await p.getByRole('button', { name: 'Exporter la note' }).click();
+    await p.getByRole('menuitem', { name: /Copier la note/ }).click();
+    await expect(p.locator('.notice')).toContainText('Note copiée avec 1 image');
+    const clip = await page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      return { text: await (await item.getType('text/plain')).text(), html: await (await item.getType('text/html')).text() };
+    });
+    // The passage card travels as a picture, its extract as a link replaying it at the source.
+    expect(clip.text).toMatch(/\[00:0\d–00:0\d\]\(https:\/\/www\.youtube\.com\/watch\?v=e2eTest0001#t=\d\) !\[Passage [^\]]+\]\(data:image\/jpeg;base64,/);
+    expect(clip.text).toMatch(/\[▶ Revoir le passage 00:0\d–00:0\d\]\(https:\/\/www\.youtube\.com\/watch\?v=e2eTest0001#t=\d\)/);
+    expect(clip.text).toContain('## Transcription');
+    expect(clip.text).toContain('[00:03](https://www.youtube.com/watch?v=e2eTest0001#t=3) The circulation of F around the boundary');
+    expect(clip.text).not.toMatch(/\]\((assets|media|transcripts)\//);
+    expect(clip.html).toContain('<h3>Transcription</h3>');
+    expect(clip.html).toMatch(/<figure><img src="data:image\/jpeg;base64,/);
+
+    // Downloaded: the note, its card, its recorded extract and its transcript (Markdown + WebVTT).
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await p.getByRole('button', { name: 'Exporter la note' }).click();
+    await p.getByRole('menuitem', { name: /Télécharger/ }).click();
+    await expect(p.locator('.notice')).toContainText('Téléchargé dans');
+    const files = await sw.evaluate(async () => {
+      for (let i = 0; i < 80; i++) {
+        const items = await chrome.downloads.search({});
+        if (items.length >= 5 && items.every((d) => d.state === 'complete')) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return (await chrome.downloads.search({})).map((d) => ({ mime: d.mime, state: d.state, size: d.fileSize }));
+    });
+    // Playwright renames downloads: their types tell what was saved.
+    expect(files.map((f) => f.mime).sort()).toEqual(['image/jpeg', 'text/markdown', 'text/markdown', 'text/vtt', 'video/webm']);
+    expect(files.every((f) => f.state === 'complete' && f.size > 0)).toBe(true);
+  });
+});
+
 test.describe('Piste audio du cours', () => {
   test('« Conserver l’audio » : le son est enregistré pendant la lecture, par segments', async ({ context, page, sw }) => {
     const wav = makeWav(30);

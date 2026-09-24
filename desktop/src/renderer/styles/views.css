@@ -1820,3 +1820,16 @@
   display: block;
   width: 100%;
 }
+
+/* Live subtitle strip under the notes (shared look: src/panel/transcript.css). */
+.notes-pane > .live-caption {
+  margin-top: 6px;
+  border: 0;
+  border-radius: var(--radius-l);
+  background: var(--glass-clear);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.notes-pane > .live-caption .lc-pin {
+  color: var(--accent);
+}

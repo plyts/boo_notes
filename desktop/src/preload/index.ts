@@ -39,6 +39,7 @@ const api: BooApi = {
     annotateTranscript: (noteId, patches, langs) => invoke(C.annotateTranscript, noteId, patches, langs),
     importSubtitles: (noteId) => invoke(C.importSubtitles, noteId),
     saveMedia: (noteId, entry, bytes) => invoke(C.saveMedia, noteId, entry, bytes),
+    copyNote: (noteId) => invoke(C.copyNote, noteId),
     createCourse: (input) => invoke(C.createCourse, input),
     updateCourse: (id, patch) => invoke(C.updateCourse, id, patch),
     removeCourse: (id) => invoke(C.removeCourse, id),

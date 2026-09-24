@@ -49,7 +49,7 @@ test('sous-titres à côté de la vidéo : transcription, commentaire, épingle,
   const video = join(ctx.dir, 'Cours 7.webm');
   await copyFile(SAMPLE, video);
   await writeFile(join(ctx.dir, 'Cours 7.en.vtt'), VTT);
-  const { page } = await ctx.launch();
+  const { app, page } = await ctx.launch();
   await importAndOpen(page, [video], 'Cours 7');
   await page.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
 
@@ -106,11 +106,16 @@ test('sous-titres à côté de la vidéo : transcription, commentaire, épingle,
   await page.getByRole('tab', { name: 'Notes' }).click();
   await editor(page).click();
   await setVideo(page, 12, true);
+  // The line being said, under the notes (as in the browser panel).
+  await expect(page.locator('.live-caption .lc-text')).toHaveText('Any questions?');
   await page.keyboard.press('Alt+I');
   await expect(page.getByRole('button', { name: /Terminer le passage/ })).toBeVisible();
   await page.waitForTimeout(3000);
   await page.keyboard.press('Alt+O');
   await expect.poll(() => noteText(ctx.vault, 'Cours 7'), { timeout: 15_000 }).toMatch(/\[00:1[23]–00:1[56]\] !\[Passage [^\]]+\]\(assets\/[^)]+\) \[Extrait\]\(media\/[^)]+\.webm\)/);
+  // Both passages on the player's scrubber, and in the note's counters.
+  await expect(page.locator('.scrub-range')).toHaveCount(2);
+  await expect(page.locator('.notes-stats')).toContainText('2 passages');
   const lib = await libraryJson(ctx.vault);
   const noteId = Object.values(lib.notes).find((n) => n.title === 'Cours 7').id;
   const media = (lib as unknown as { media: Record<string, Array<{ path: string; size: number; kind: string }>> }).media[noteId];
@@ -130,6 +135,23 @@ test('sous-titres à côté de la vidéo : transcription, commentaire, épingle,
   await expect(page.locator('.media-pop video')).toBeVisible();
   await page.getByRole('button', { name: 'Fermer l’extrait' }).click();
   await expect(page.locator('.media-pop')).toHaveCount(0);
+
+  // « Copier la note »: Markdown and HTML, pictures embedded, transcript included.
+  await page.getByRole('button', { name: /^Copier la note/ }).click();
+  await expect(page.locator('.toast').last()).toContainText('Note copiée avec 2 images');
+  const clip = await app.evaluate(async ({ clipboard }) => {
+    const [item] = await clipboard.read();
+    const read = async (type: string) => ((await item.getType(type)) as Blob).text();
+    return { text: await read('text/plain'), html: await read('text/html') };
+  });
+  expect(clip.text).toMatch(/^# Cours 7\n/);
+  expect(clip.text).toMatch(/!\[Passage 00:03–00:09 · The circulation of F around the boundary\]\(data:image\/jpeg;base64,/);
+  expect(clip.text).toContain('> [00:06] « equals the flux of its curl. » — *égale le flux de son rotationnel.*');
+  expect(clip.text).toContain('## Transcription');
+  expect(clip.text).toContain('💬 Orientation du bord !');
+  expect(clip.text).not.toMatch(/\]\((assets|media|transcripts)\//);
+  expect(clip.html).toMatch(/<img src="data:image\/jpeg;base64,/);
+  expect(clip.html).toContain('<h3>Transcription</h3>');
 });
 
 test('note du navigateur : la transcription synchronisée se lit dans l’app', async ({ ctx }) => {
@@ -187,3 +209,18 @@ test('note du navigateur : la transcription synchronisée se lit dans l’app', 
   await expect(page.locator('.cue-act[data-act="comment"]').first()).toBeHidden();
   ws.close();
 });
+
+test('fin de la vidéo : la transcription est épinglée à la note', async ({ ctx }) => {
+  const video = join(ctx.dir, 'Cours 9.webm');
+  await copyFile(SAMPLE, video);
+  await writeFile(join(ctx.dir, 'Cours 9.vtt'), VTT);
+  const { page } = await ctx.launch();
+  await importAndOpen(page, [video], 'Cours 9');
+  await page.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+  await editor(page).click();
+  await page.keyboard.type('Introduction');
+  await expect(page.getByRole('tab', { name: /Transcription/ }).locator('.tab-count')).toHaveText('4');
+  await setVideo(page, 29, true);
+  await expect.poll(() => noteText(ctx.vault, 'Cours 9'), { timeout: 10_000 }).toMatch(/📄 \[Transcription — sous-titres · 4 répliques\]\(transcripts\/[^)]+\.md\)\n?$/);
+});
+

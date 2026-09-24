@@ -322,7 +322,9 @@ export function ResourceViewer({
         },
         syncMarkers: () => {
           const e = ed();
-          if (e) mv.setMarkers(e.timesOf(res.id));
+          if (!e) return;
+          mv.setMarkers(e.timesOf(res.id));
+          mv.setRanges(e.rangesOf(res.id));
         },
         time: () => mv.time,
         toggle: () => mv.toggle(),

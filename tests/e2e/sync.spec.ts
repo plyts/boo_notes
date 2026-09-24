@@ -70,7 +70,7 @@ test.describe('Synchronisation Desktop', () => {
 
       // Export to Notion goes through the desktop app.
       await panel(page).getByRole('button', { name: 'Exporter la note' }).click();
-      await panel(page).getByRole('menuitem', { name: /Notion/ }).click();
+      await panel(page).getByRole('menuitem', { name: /Envoyer vers Notion/ }).click();
       await expect(panel(page).locator('.notice')).toHaveText('Envoyé vers Notion (simulé)');
       expect(desktop.received.exports.at(-1)?.target).toBe('notion');
     } finally {

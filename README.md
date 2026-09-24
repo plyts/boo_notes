@@ -19,6 +19,9 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
   réplique s’**épingle** dans la note d’un geste ; les **passages** (`Alt+I` → `Alt+O`, ex.
   02:05 → 06:07) gardent leur image, leur son, leurs sous-titres et les notes prises pendant eux ;
   le **son du cours** peut être conservé. La transcription est épinglée à la note à la fin.
+- **Copier la note « tout compris »** : captures, images et cartes des passages **intégrées**,
+  horodatages liés à l’instant, transcription — à coller dans **Obsidian**, **Notion**, Google Docs,
+  Word… (Markdown et HTML à la fois) ; **Télécharger** ajoute les extraits vidéo et la transcription.
 - **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : cours, chapitres et notes ;
   une note liée à plusieurs supports (**PDF**, **vidéo / audio** locaux ou **flux** par adresse —
   HLS, radios —, **images**, **textes**, pages vues dans le navigateur) ; **carte mentale** de tout

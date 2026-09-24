@@ -140,6 +140,8 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   const [passageStart, setPassageStart] = useState<number | null>(null);
   const passageIn = useRef<{ start: number; poster: string | null; recording: Recording | null; off(): void } | null>(null);
   const cuesRef = useRef<Cue[]>([]);
+  /** The line being spoken: the live subtitle strip under the notes. */
+  const [liveCue, setLiveCue] = useState<Cue | null>(null);
   const markdownRef = useRef('');
   markdownRef.current = markdown;
 
@@ -272,6 +274,19 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
     toast(`Réplique ${formatTimecode(cue.start)} épinglée dans la note`, 'success');
   };
 
+  /** The note « tout compris » in the clipboard: pictures, timestamps, passages, transcript. */
+  const copyNote = async () => {
+    if (!note) return;
+    await editorRef.current?.flush();
+    try {
+      const { images, missing } = await window.boo.library.copyNote(note.id);
+      const pics = images ? ` avec ${plural(images, 'image')}` : '';
+      toast(`Note copiée${pics}${missing ? ` (${missing} introuvable${missing > 1 ? 's' : ''})` : ''} — collez-la dans Obsidian, Notion, Docs…`, 'success');
+    } catch (e) {
+      toast(`Copie impossible : ${errorMessage(e)}`, 'error');
+    }
+  };
+
   const listen = (seconds: number) => {
     const seg = note?.media.find((m) => m.kind === 'audio' && seconds >= m.start && seconds < m.end);
     if (seg) setMediaPop({ path: seg.path, offset: seconds - seg.start, title: `Son du cours · ${formatTimecode(seconds)}`, video: false });
@@ -379,6 +394,34 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   });
 
   // Leaving the note: pending writes first.
+  // Live subtitle strip: the line spoken at the player's time.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const t = viewerRef.current?.time();
+      const i = t === null || t === undefined ? -1 : cueIndexAt(cuesRef.current, t);
+      const cue = i === -1 ? null : cuesRef.current[i];
+      setLiveCue((prev) => (prev?.id === cue?.id && prev?.tr === cue?.tr ? prev : cue));
+    }, 250);
+    return () => clearInterval(timer);
+  }, []);
+
+  // End of the media: the transcript is pinned at the end of the note, as in the browser.
+  useEffect(() => {
+    const media = viewer?.mediaElement?.();
+    if (!media || readOnly) return;
+    const onEnded = () => {
+      const cues = cuesRef.current;
+      if (!cues.length || !note?.transcript) return;
+      void window.boo.library.transcript(note.id).then((t) => {
+        if (t?.cues.length && editorRef.current?.editor.transform((md) => pinTranscriptLine(md, transcriptLine(t)))) {
+          toast('Transcription épinglée à la note', 'success');
+        }
+      });
+    };
+    media.addEventListener('ended', onEnded);
+    return () => media.removeEventListener('ended', onEnded);
+  }, [viewer, readOnly, note?.id, note?.transcript]);
+
   useEffect(
     () => () => {
       void editorRef.current?.flush();
@@ -405,6 +448,7 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   const titles = [...notes.values()].map((n) => n.title).filter((t) => normalizeTitle(t) !== normalizeTitle(note.title));
   const activeRes = active ? resources.get(active) : undefined;
   const cards = extractCards(note.id, markdown);
+  const passages = (markdown.match(/(?:^|\n)\s*\[(?:\d+:)?\d{1,3}:\d{2}\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2}\]/g) ?? []).length;
   const notionOk = status?.notion.connected;
 
   const actions = (): Array<{ id: string; label: string; icon: Parameters<typeof Icon>[0]['name']; run(): void; title: string }> => {
@@ -484,6 +528,12 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                 onPress={() => void syncNotion(note.id)}
               />
             ) : null}
+            <IconButton
+              icon="copy"
+              variant="glass"
+              label="Copier la note — images, horodatages, passages et transcription compris (Obsidian, Notion, Docs…)"
+              onPress={() => void copyNote()}
+            />
             <IconButton icon="sidebar" variant="glass" label={inspectorOpen ? 'Masquer l’inspecteur' : 'Afficher l’inspecteur'} onPress={toggleInspector} />
             <MenuButton
               label="Actions de la note"
@@ -491,6 +541,7 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
               entries={[
                 ...(note.notion?.url ? [{ id: 'notion', label: 'Ouvrir dans Notion', icon: 'popout' as const, onAction: () => void window.boo.notion.open(note.id) }] : []),
                 { id: 'graph', label: 'Voir dans la carte mentale', icon: 'mindmap', onAction: () => go({ name: 'graph', courseId: note.courseId ?? undefined }) },
+                { id: 'copy', label: 'Copier la note (images comprises)', icon: 'copy', onAction: () => void copyNote() },
                 { id: 'reveal', label: 'Afficher le fichier (.md)', icon: 'folder', onAction: () => void window.boo.library.revealNote(note.id) },
                 'separator',
                 { id: 'delete', label: 'Supprimer la note…', icon: 'trash', danger: true, onAction: () => void removeNote(note.id) },
@@ -602,7 +653,12 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                   </div>
                 ) : null}
                 <span className="notes-stats">
-                  {[plural(note.noteCount ?? 0, 'ancre'), cards.length ? plural(cards.length, 'carte') : '', note.links?.length ? plural(note.links.length, 'lien') : '']
+                  {[
+                    plural(note.noteCount ?? 0, 'ancre'),
+                    passages ? plural(passages, 'passage') : '',
+                    cards.length ? plural(cards.length, 'carte') : '',
+                    note.links?.length ? plural(note.links.length, 'lien') : '',
+                  ]
                     .filter((x) => x && !x.startsWith('0 '))
                     .join(' · ')}
                 </span>
@@ -690,6 +746,20 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                     cuesRef.current = t?.cues ?? [];
                   }}
                 />
+              ) : null}
+              {liveCue && pane === 'notes' ? (
+                <div className="live-caption" aria-label="Sous-titre en cours">
+                  <button type="button" className="lc-time" title="Aller à ce moment" onClick={() => showAnchor('time', liveCue.start, null)}>
+                    {formatTimecode(liveCue.start)}
+                  </button>
+                  <button type="button" className="lc-body" title="Ouvrir la transcription (Alt+T)" onClick={() => setPane('transcript')}>
+                    <span className="lc-text">{liveCue.text}</span>
+                    {liveCue.tr ? <span className="lc-tr">{liveCue.tr}</span> : null}
+                  </button>
+                  {!readOnly ? (
+                    <IconButton icon="plus" size="s" className="lc-pin" label="Épingler la réplique dans la note (Ctrl+Maj+K)" onPress={() => pinCue(liveCue)} />
+                  ) : null}
+                </div>
               ) : null}
               {mediaPop ? <MediaPop {...mediaPop} onClose={() => setMediaPop(null)} /> : null}
               {!readOnly ? (

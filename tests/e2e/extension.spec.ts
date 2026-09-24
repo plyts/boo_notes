@@ -247,7 +247,7 @@ test.describe('Pop-out', () => {
 });
 
 test.describe('Export hors-ligne', () => {
-  test('télécharger la note (.md + captures) et copier le Markdown', async ({ page, sw, context }) => {
+  test('télécharger la note (.md + captures) et la copier images comprises', async ({ page, sw, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openWatch(page);
     await setVideo(page, 7);
@@ -259,7 +259,7 @@ test.describe('Export hors-ligne', () => {
 
     await p.getByRole('button', { name: 'Exporter la note' }).click();
     // Desktop targets are disabled while the app is offline.
-    await expect(p.getByRole('menuitem', { name: /Notion/ })).toBeDisabled();
+    await expect(p.getByRole('menuitem', { name: /Envoyer vers Notion/ })).toBeDisabled();
     await p.getByRole('menuitem', { name: /Télécharger/ }).click();
     // Accented name, or its ASCII fallback on systems refusing Unicode file names.
     await expect(p.locator('.notice')).toHaveText(/^Téléchargé dans « Boo Notes\/Vid[ée]o de test E2E »$/);
@@ -276,12 +276,20 @@ test.describe('Export hors-ligne', () => {
     expect(downloads.every((d) => d.state === 'complete' && d.size > 0)).toBe(true);
 
     await p.getByRole('button', { name: 'Exporter la note' }).click();
-    await p.getByRole('menuitem', { name: /Copier/ }).click();
-    await expect(p.locator('.notice')).toHaveText('Markdown copié dans le presse-papier');
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clip).toContain('title: "Vidéo de test E2E"');
-    expect(clip).toContain('[00:07](https://www.youtube.com/watch?v=e2eTest0001#t=7) Point clé');
-    expect(clip).toMatch(/!\[Capture 00:07\]\(assets\/youtube-e2eTest0001-00-07-\w+\.jpg\)/);
+    await p.getByRole('menuitem', { name: /Copier la note/ }).click();
+    await expect(p.locator('.notice')).toHaveText('Note copiée avec 1 image — collez-la dans Obsidian, Notion, Docs…');
+    // Two flavours: Markdown (Obsidian) and HTML (Notion, Docs, Word), the picture inside both.
+    const clip = await page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      const read = async (type: string) => (item.types.includes(type) ? (await item.getType(type)).text() : null);
+      return { text: await read('text/plain'), html: await read('text/html') };
+    });
+    expect(clip.text).toContain('# Vidéo de test E2E\n\n[https://www.youtube.com/watch?v=e2eTest0001]');
+    expect(clip.text).toContain('[00:07](https://www.youtube.com/watch?v=e2eTest0001#t=7) Point clé');
+    expect(clip.text).toMatch(/!\[Capture 00:07\]\(data:image\/jpeg;base64,[\w+/=]{200,}\)/);
+    expect(clip.text).not.toContain('assets/');
+    expect(clip.html).toContain('<a href="https://www.youtube.com/watch?v=e2eTest0001#t=7"><code>00:07</code></a> Point clé');
+    expect(clip.html).toMatch(/<img src="data:image\/jpeg;base64,[\w+/=]{200,}"/);
   });
 });
 

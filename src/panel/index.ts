@@ -17,7 +17,8 @@ import {
   type PlaybackState,
   type SyncStatus,
 } from '../shared/messages';
-import { PLATFORM_LABELS, type MediaKind, type VideoContext } from '../shared/platforms';
+import { PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
+import { buildRichCopy } from '../shared/rich-copy';
 import { loadSettings, normalizeSettings, saveSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, CourseOption, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
@@ -676,7 +677,7 @@ class PanelApp {
       );
       b.addEventListener('click', () => {
         this.closeMenu(true);
-        void (target === 'copy' ? this.copyMarkdown() : this.exportTo(target));
+        void (target === 'copy' ? this.copyNote() : this.exportTo(target));
       });
       return b;
     };
@@ -688,8 +689,8 @@ class PanelApp {
       item('notion', 'notion', 'Envoyer vers Notion', 'Tableau « Boo Notes — Mes notes »'),
       h('div', { class: 'menu-sep', role: 'separator' }),
       h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Sur cet appareil'),
-      item('download', 'download', 'Télécharger', 'Fichier .md + dossier assets/'),
-      item('copy', 'copy', 'Copier le Markdown', 'Avec liens horodatés'),
+      item('download', 'download', 'Télécharger', '.md + captures, extraits et transcription'),
+      item('copy', 'copy', 'Copier la note', 'Images comprises : Obsidian, Notion, Docs…'),
     );
     menu.addEventListener('keydown', (e) => {
       const items = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
@@ -1403,15 +1404,52 @@ class PanelApp {
     }
   }
 
-  private async copyMarkdown(): Promise<void> {
+  /**
+   * The whole note in the clipboard, to paste anywhere: Markdown (Obsidian) and HTML (Notion,
+   * Docs, Word…), screenshots and passage cards embedded, timestamps linked to the instant,
+   * transcript included.
+   */
+  private async copyNote(): Promise<void> {
     if (!this.note) return;
-    const text = toPortableMarkdown({ ...this.note, title: this.title || this.note.title, markdown: this.editor.content });
+    const note = { ...this.note, title: this.title || this.note.title, markdown: this.editor.content };
+    const web = /^https?:\/\//.test(note.url) ? note.url : null;
+    const timed = (note.kind ?? this.kind) !== 'page';
+    const timeUrl = (s: number) => (web && timed ? timestampUrl(web, s) : null);
+    let copy: Awaited<ReturnType<typeof buildRichCopy>>;
     try {
-      await navigator.clipboard.writeText(text);
-      this.notify('Markdown copié dans le presse-papier', 'success');
-    } catch {
-      this.notify('Copie refusée par le navigateur', 'error');
+      copy = await buildRichCopy({
+        title: note.title,
+        sourceUrl: web,
+        place: note.course ? `${note.course} › ${note.chapter ?? 'Chapitre 1'}` : null,
+        markdown: note.markdown,
+        linkify: (md) => toPortableMarkdown({ ...note, markdown: md }, { frontMatter: false }),
+        context: { anchor: (kind, value) => (kind === 'time' ? { url: timeUrl(value) } : null) },
+        timeUrl,
+        image: (path) => loadAsset(path),
+        transcript: this.transcript,
+      });
+    } catch (e) {
+      this.notify(`Copie impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+      return;
     }
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([copy.markdown], { type: 'text/plain' }),
+          'text/html': new Blob([copy.html], { type: 'text/html' }),
+        }),
+      ]);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(copy.markdown);
+      } catch {
+        this.notify('Copie refusée par le navigateur', 'error');
+        return;
+      }
+    }
+    const pics = copy.images ? ` avec ${copy.images} image${copy.images > 1 ? 's' : ''}` : '';
+    const lost = copy.missing.length ? ` (${copy.missing.length} introuvable${copy.missing.length > 1 ? 's' : ''})` : '';
+    this.notify(`Note copiée${pics}${lost} — collez-la dans Obsidian, Notion, Docs…`, copy.missing.length ? 'info' : 'success');
   }
 
   private bindGlobalEvents(): void {

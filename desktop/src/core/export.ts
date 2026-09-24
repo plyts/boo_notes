@@ -1,7 +1,9 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { findAssetRefs, normalizeTitle } from '../../../src/shared/markdown';
-import { markdownToBlocks, type BlockSpec, type InlineContext, type RichText } from '../../../src/shared/notion/blocks';
+import { markdownToBlocks, type InlineContext } from '../../../src/shared/notion/blocks';
+import { blocksHtml, esc } from '../../../src/shared/notion/html';
+import { buildRichCopy, type RichCopy } from '../../../src/shared/rich-copy';
 import { KIND_LABELS, timestampUrl } from '../../../src/shared/platforms';
 import { STATUS_LABELS } from '../../../src/shared/study';
 import { extractCards, plainText, type Flashcard } from '../../../src/shared/cards';
@@ -21,7 +23,7 @@ import {
 export { extractCards, plainText, type Flashcard };
 import { safeFileName, type Library } from './library';
 import type { Note, Resource } from './types';
-import { noteView } from './views';
+import { filing, noteView } from './views';
 
 /**
  * Export of the whole study base, meant to be kept, printed and revised:
@@ -56,84 +58,6 @@ export interface ExportResult {
   cards: number;
   files: string[];
   warnings: string[];
-}
-
-// --- Markdown → HTML (revision sheets) -------------------------------------------------------
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-function richHtml(items: RichText[]): string {
-  return items
-    .map((item) => {
-      if (item.type === 'mention') return '<span class="mention">↗</span>';
-      let html = esc(item.text.content).replace(/\n/g, '<br>');
-      const a = item.annotations ?? {};
-      if (a.code) html = `<code>${html}</code>`;
-      if (a.bold) html = `<strong>${html}</strong>`;
-      if (a.italic) html = `<em>${html}</em>`;
-      if (a.strikethrough) html = `<s>${html}</s>`;
-      const url = item.text.link?.url;
-      return url ? `<a href="${esc(url)}">${html}</a>` : html;
-    })
-    .join('');
-}
-
-function blocksHtml(blocks: BlockSpec[], asset: (path: string) => string): string {
-  let out = '';
-  let list: 'ul' | 'ol' | null = null;
-  const close = () => {
-    if (list) out += `</${list}>`;
-    list = null;
-  };
-  for (const b of blocks) {
-    const kind = b.type === 'bulleted_list_item' || b.type === 'to_do' ? 'ul' : b.type === 'numbered_list_item' ? 'ol' : null;
-    if (kind !== list) {
-      close();
-      if (kind) out += `<${kind}>`;
-      list = kind;
-    }
-    switch (b.type) {
-      case 'heading_1':
-      case 'heading_2':
-      case 'heading_3':
-        out += `<h${Number(b.type.slice(-1)) + 2}>${richHtml(b.rich)}</h${Number(b.type.slice(-1)) + 2}>`;
-        break;
-      case 'quote':
-        out += `<blockquote>${richHtml(b.rich)}</blockquote>`;
-        break;
-      case 'bulleted_list_item':
-      case 'numbered_list_item':
-      case 'to_do': {
-        const box = b.type === 'to_do' ? (b.checked ? '☑ ' : '☐ ') : '';
-        const children = b.children?.length ? `<ul>${b.children.map((c) => ('rich' in c ? `<li>${richHtml(c.rich)}</li>` : '')).join('')}</ul>` : '';
-        out += `<li>${box}${richHtml(b.rich)}${children}</li>`;
-        break;
-      }
-      case 'code':
-        out += `<pre><code>${esc(b.text)}</code></pre>`;
-        break;
-      case 'divider':
-        out += '<hr>';
-        break;
-      case 'image':
-        out += `<figure><img src="${esc(asset(b.asset))}" alt=""><figcaption>${richHtml(b.caption)}</figcaption></figure>`;
-        break;
-      case 'external_image':
-        out += `<figure><img src="${esc(b.url)}" alt=""><figcaption>${richHtml(b.caption)}</figcaption></figure>`;
-        break;
-      case 'video':
-      case 'bookmark':
-        out += `<p><a href="${esc(b.url)}">${esc(b.url)}</a></p>`;
-        break;
-      case 'callout':
-        out += `<aside>${richHtml(b.rich)}</aside>`;
-        break;
-      default:
-        out += `<p>${richHtml(b.rich)}</p>`;
-    }
-  }
-  close();
-  return out;
 }
 
 // --- Collect --------------------------------------------------------------------------------
@@ -214,7 +138,6 @@ function anchorContext(lib: Library, note: Note): InlineContext {
 const folderName = (s: string, fallback: string) => safeFileName(s) || fallback;
 
 function portableNote(lib: Library, e: ExportNote, assetPrefix: string): string {
-  const primary = e.resources[0];
   const lines = [
     '---',
     `title: ${JSON.stringify(e.note.title)}`,
@@ -228,7 +151,18 @@ function portableNote(lib: Library, e: ExportNote, assetPrefix: string): string 
     '---',
     '',
   ];
-  let body = e.body;
+  return lines.join('\n') + portableBody(lib, e.resources, e.body, assetPrefix);
+}
+
+/** Link to an instant of the note's main media, when it is online (a stream added by address has no seekable page). */
+function instantUrl(primary: Resource | undefined): (seconds: number) => string | null {
+  return (s) => (primary && /^https?:\/\//.test(primary.source) && primary.origin !== 'url' ? timestampUrl(primary.source, s) : null);
+}
+
+/** The note's Markdown, readable elsewhere: timestamps linked to the instant, anchors of other resources named, files relative to `assetPrefix`. */
+function portableBody(lib: Library, resources: Resource[], text: string, assetPrefix: string): string {
+  const primary = resources[0];
+  let body = text;
   // Timestamps of an online video become links to the instant.
   if (primary && /^https?:\/\//.test(primary.source) && primary.origin !== 'url') {
     body = body.replace(/(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})((?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?)\](?!\()/g, (_all, tc: string, end: string) => {
@@ -246,7 +180,35 @@ function portableNote(lib: Library, e: ExportNote, assetPrefix: string): string 
     return url ? `[${res.title} · ${label}](${url})` : `[${res.title} · ${label}]`;
   });
   body = body.replace(/\]\(((?:assets|media|transcripts)\/[^)\s]+)\)/g, (_all, path: string) => `](${assetPrefix}${path})`);
-  return lines.join('\n') + body;
+  return body;
+}
+
+const IMAGE_TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+
+/**
+ * A note « tout compris » for the clipboard (see src/shared/rich-copy.ts):
+ * Markdown and HTML with its pictures embedded, read from the notes folder.
+ */
+export async function richCopyNote(lib: Library, id: string): Promise<RichCopy> {
+  const note = lib.requireNote(id);
+  const resources = lib.resourcesOf(note);
+  const primary = resources[0];
+  const where = filing(lib, id);
+  const timeUrl = instantUrl(primary);
+  return buildRichCopy({
+    title: note.title,
+    sourceUrl: primary && /^https?:\/\//.test(primary.source) ? primary.source : null,
+    place: where ? `${where.course.title} › ${where.chapter.title}` : null,
+    markdown: await lib.readNote(id),
+    linkify: (md) => portableBody(lib, resources, md, ''),
+    context: anchorContext(lib, note),
+    timeUrl,
+    image: async (path) => {
+      const type = IMAGE_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/png';
+      return `data:${type};base64,${(await readFile(lib.assetPath(path))).toString('base64')}`;
+    },
+    transcript: lib.transcriptOf(id) ? await lib.getTranscript(id) : null,
+  });
 }
 
 const SHEET_CSS = `
@@ -316,7 +278,7 @@ function sheetsHtml(lib: Library, data: { courses: ExportCourse[]; unfiled: Expo
         return `<div class="passage"><h5>Passage ${esc(rangeLabel(p.start, p.end))}${p.title ? ` — ${esc(p.title)}` : ''}</h5>${notes.length ? `<ul class="p-notes">${notes.join('')}</ul>` : ''}${said.length ? `<ul class="p-said">${said.join('')}</ul>` : ''}</div>`;
       })
       .join('');
-    return `<article><h4>${esc(e.note.title)}</h4><p class="meta">${esc(meta)}</p>${resources}${blocksHtml(blocks, (p) => assetPrefix + p)}${passages ? `<section class="passages">${passages}</section>` : ''}${cards}</article>`;
+    return `<article><h4>${esc(e.note.title)}</h4><p class="meta">${esc(meta)}</p>${resources}${blocksHtml(blocks, (p) => assetPrefix + p, 2)}${passages ? `<section class="passages">${passages}</section>` : ''}${cards}</article>`;
   };
   const courses = data.courses
     .map(
