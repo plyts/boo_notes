@@ -417,5 +417,48 @@ describe('Transcripts and recordings', () => {
     await again.open();
     expect(again.mediaOf('youtube:abc')[0].path).toBe('media/a-audio-00-10-x.webm');
   });
-});
 
+  it('exports passages with their notes and lines, extracts and transcripts', async () => {
+    const media = join(dir, 'Cours 8.webm');
+    await writeFile(media, 'fake');
+    await writeFile(join(dir, 'Cours 8.vtt'), 'WEBVTT\n\n00:02.000 --> 00:04.000\nThe curl\n\n00:10.000 --> 00:12.000\nlater\n');
+    const { notes } = await lib.importFiles([media]);
+    const id = notes[0].id;
+    const t = await lib.getTranscript(id);
+    await lib.annotateTranscript(id, [{ id: t!.cues[0].id, tr: 'Le rotationnel' }]);
+    await lib.putMedia(id, { path: 'media/cours-8-passage-00-01-ab.webm', kind: 'passage', mime: 'video/webm', start: 1, end: 5 }, Buffer.from('webm'));
+    await mkdir(join(lib.path, 'assets'), { recursive: true });
+    await writeFile(join(lib.path, 'assets/p.jpg'), 'jpg');
+    await lib.saveNote(
+      id,
+      '[00:01–00:05] ![Passage 00:01–00:05 · Stokes](assets/p.jpg) [Extrait](media/cours-8-passage-00-01-ab.webm)\n[00:03] rotationnel\n[00:11] après\n',
+    );
+    const out = join(dir, 'export');
+    const res = await writeExport(lib, out, { formats: ['markdown', 'sheets', 'json'] });
+    expect(res.warnings).toEqual([]);
+    expect(await readFile(join(out, 'media/cours-8-passage-00-01-ab.webm'), 'utf8')).toBe('webm');
+    const slug = id.replace(/[^\w-]+/g, '-');
+    expect(await readFile(join(out, `transcripts/${slug}.md`), 'utf8')).toContain('[00:02] The curl\n*Le rotationnel*');
+    expect(await readFile(join(out, `transcripts/${slug}.fr.vtt`), 'utf8')).toContain('Le rotationnel');
+    const md = await readFile(join(out, 'Non classées', 'Cours 8.md'), 'utf8');
+    expect(md).toContain('[Extrait](../media/cours-8-passage-00-01-ab.webm)');
+    const sheet = await readFile(join(out, 'Fiches de révision.html'), 'utf8');
+    expect(sheet).toContain('Passage 00:01–00:05 — Stokes');
+    expect(sheet).toContain('<em>Le rotationnel</em>');
+    const json = JSON.parse(await readFile(join(out, 'boo-notes.json'), 'utf8'));
+    const n = json.notes.find((x: { id: string }) => x.id === id);
+    expect(n.passages).toEqual([
+      {
+        start: 1,
+        end: 5,
+        label: '00:01–00:05',
+        title: 'Stokes',
+        image: 'assets/p.jpg',
+        media: 'media/cours-8-passage-00-01-ab.webm',
+        notes: ['00:03 rotationnel'],
+        said: [{ start: 2, text: 'The curl', tr: 'Le rotationnel', note: null }],
+      },
+    ]);
+    expect(n.transcript.cues).toHaveLength(2);
+  });
+});

@@ -1,5 +1,6 @@
 @import '../../../../src/tokens.css';
 @import '../../../../src/panel/editor.css';
+@import '../../../../src/panel/transcript.css';
 @import '@xyflow/react/dist/style.css';
 @import './components.css';
 @import './views.css';

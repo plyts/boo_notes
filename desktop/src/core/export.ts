@@ -6,6 +6,17 @@ import { KIND_LABELS, timestampUrl } from '../../../src/shared/platforms';
 import { STATUS_LABELS } from '../../../src/shared/study';
 import { extractCards, plainText, type Flashcard } from '../../../src/shared/cards';
 import { formatTimecode } from '../../../src/shared/time';
+import {
+  cuesInRange,
+  findMediaRefs,
+  findPassages,
+  notesInRange,
+  rangeLabel,
+  transcriptPath,
+  transcriptToMarkdown,
+  transcriptToVtt,
+  type Transcript,
+} from '../../../src/shared/transcript';
 
 export { extractCards, plainText, type Flashcard };
 import { safeFileName, type Library } from './library';
@@ -15,7 +26,8 @@ import { noteView } from './views';
 /**
  * Export of the whole study base, meant to be kept, printed and revised:
  *
- * - `markdown`: one folder per course and chapter, one `.md` per note, captures in `assets/`;
+ * - `markdown`: one folder per course and chapter, one `.md` per note, captures in `assets/`,
+ *   recorded extracts in `media/`, transcripts (subtitles, translations, comments) in `transcripts/`;
  * - `sheets`: printable revision sheets (HTML, and PDF produced by the app);
  * - `cards`: flashcards for Anki / Quizlet (tab-separated), from the note syntax below;
  * - `json`: everything, structured (courses, chapters, notes, resources, cards) —
@@ -133,6 +145,7 @@ interface ExportNote {
   chapter: string | null;
   resources: Resource[];
   cards: Flashcard[];
+  transcript: Transcript | null;
 }
 
 interface ExportChapter {
@@ -153,7 +166,8 @@ async function collect(lib: Library, opts: ExportOptions): Promise<{ courses: Ex
   const wanted = opts.courses ? new Set(opts.courses) : null;
   const entry = async (note: Note, course: string | null, chapter: string | null): Promise<ExportNote> => {
     const body = await lib.readNote(note.id);
-    return { note, body, course, chapter, resources: lib.resourcesOf(note), cards: extractCards(note.id, body) };
+    const transcript = lib.transcriptOf(note.id) ? await lib.getTranscript(note.id) : null;
+    return { note, body, course, chapter, resources: lib.resourcesOf(note), cards: extractCards(note.id, body), transcript };
   };
   const courses: ExportCourse[] = [];
   for (const c of lib.listCourses()) {
@@ -266,6 +280,9 @@ a { color: var(--accent); text-decoration: none; }
 .cards h5 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .card { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eee; }
 .card .q { font-weight: 600; } .card .a { color: #2c2c2e; }
+.passages { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.passage h5 { margin: 0 0 6px; font-size: 13px; color: var(--accent); }
+.passage ul { margin: 0 0 10px; padding-left: 18px; } .passage .p-said { color: #2c2c2e; font-size: 13.5px; } .passage .p-said em { color: var(--muted); }
 @media print { body { background: #fff; } main { padding: 0; } article { border-color: #ddd; } .course { break-before: page; } .course:first-of-type { break-before: auto; } }
 `;
 
@@ -288,7 +305,18 @@ function sheetsHtml(lib: Library, data: { courses: ExportCourse[]; unfiled: Expo
           )
           .join('')}</section>`
       : '';
-    return `<article><h4>${esc(e.note.title)}</h4><p class="meta">${esc(meta)}</p>${resources}${blocksHtml(blocks, (p) => assetPrefix + p)}${cards}</article>`;
+    // Passages: what was noted and said during each of them.
+    const passages = findPassages(e.body)
+      .map((p) => {
+        const notes = notesInRange(e.body, p.start, p.end).map((l) => `<li>${esc(plainText(l))}</li>`);
+        const said = cuesInRange(e.transcript?.cues ?? [], p.start, p.end).map(
+          (c) => `<li><code>${formatTimecode(c.start)}</code> ${esc(c.text)}${c.tr ? `<br><em>${esc(c.tr)}</em>` : ''}${c.note ? `<br>💬 ${esc(c.note)}` : ''}</li>`,
+        );
+        if (!notes.length && !said.length) return '';
+        return `<div class="passage"><h5>Passage ${esc(rangeLabel(p.start, p.end))}${p.title ? ` — ${esc(p.title)}` : ''}</h5>${notes.length ? `<ul class="p-notes">${notes.join('')}</ul>` : ''}${said.length ? `<ul class="p-said">${said.join('')}</ul>` : ''}</div>`;
+      })
+      .join('');
+    return `<article><h4>${esc(e.note.title)}</h4><p class="meta">${esc(meta)}</p>${resources}${blocksHtml(blocks, (p) => assetPrefix + p)}${passages ? `<section class="passages">${passages}</section>` : ''}${cards}</article>`;
   };
   const courses = data.courses
     .map(
@@ -347,6 +375,26 @@ function jsonExport(lib: Library, data: { courses: ExportCourse[]; unfiled: Expo
       progress: Math.round(view.ratio * 1000) / 1000,
       review: e.note.review ?? null,
       cards: e.cards.map((c) => c.id),
+      // Passages (extracts) with what was noted and said during them: material for quizzes.
+      passages: findPassages(e.body).map((p) => ({
+        start: p.start,
+        end: p.end,
+        label: rangeLabel(p.start, p.end),
+        title: p.title || null,
+        image: p.image,
+        media: p.media,
+        notes: notesInRange(e.body, p.start, p.end).map((l) => plainText(l)),
+        said: cuesInRange(e.transcript?.cues ?? [], p.start, p.end).map((c) => ({ start: c.start, text: c.text, tr: c.tr ?? null, note: c.note ?? null })),
+      })),
+      transcript: e.transcript
+        ? {
+            lang: e.transcript.lang || null,
+            label: e.transcript.label,
+            source: e.transcript.source,
+            translation: e.transcript.target,
+            cues: e.transcript.cues.map((c) => ({ start: c.start, end: c.end, text: c.text, tr: c.tr ?? null, note: c.note ?? null })),
+          }
+        : null,
       createdAt: new Date(e.note.createdAt).toISOString(),
       updatedAt: new Date(e.note.updatedAt).toISOString(),
     };
@@ -405,6 +453,23 @@ export async function writeExport(lib: Library, folder: string, opts: ExportOpti
       } catch {
         warnings.push(`Capture introuvable : ${rel}`);
       }
+    }
+    // Recorded extracts, and the transcripts (readable Markdown, WebVTT for players).
+    for (const rel of new Set(all.flatMap((e) => findMediaRefs(e.body)))) {
+      try {
+        await mkdir(join(folder, 'media'), { recursive: true });
+        await copyFile(lib.mediaPath(rel), join(folder, rel));
+      } catch {
+        warnings.push(`Extrait introuvable : ${rel}`);
+      }
+    }
+    for (const e of all) {
+      const t = e.transcript;
+      if (!t?.cues.length) continue;
+      const src = e.resources[0];
+      await write(transcriptPath(t.noteId, 'md'), transcriptToMarkdown(t, { title: e.note.title, url: src && /^https?:\/\//.test(src.source) ? src.source : undefined }));
+      await write(transcriptPath(t.noteId, 'vtt'), transcriptToVtt(t));
+      if (t.cues.some((c) => c.tr)) await write(transcriptPath(t.noteId, 'vtt').replace(/\.vtt$/, `.${t.target || 'fr'}.vtt`), transcriptToVtt(t, true));
     }
   }
 

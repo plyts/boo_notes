@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findTimestamps, toPortableMarkdown } from '../../src/shared/markdown';
 import { plainText } from '../../src/shared/cards';
-import { markdownToBlocks } from '../../src/shared/notion/blocks';
+import { markdownToBlocks, transcriptBlocks } from '../../src/shared/notion/blocks';
 import {
   addCoverage,
   applyLiveSample,
@@ -254,3 +254,24 @@ describe('range timestamps', () => {
     expect(caption).toBe('Passage 02:05–06:07 · Stokes');
   });
 });
+
+describe('transcript in Notion', () => {
+  it('ends the page with one paragraph per line: time link, text, translation, comment', () => {
+    const t = emptyTranscript('youtube:abc', {
+      lang: 'en',
+      label: 'Sous-titres YouTube',
+      cues: [
+        { id: 'c125', start: 125, end: 128, text: 'The circulation of F', tr: 'La circulation de F', note: 'orientation !' },
+        { id: 'c130', start: 130, end: 131, text: 'equals the flux' },
+      ],
+    });
+    const blocks = transcriptBlocks(t, (s) => `https://youtu.be/abc?t=${s}`) as Array<{ type: string; rich: Array<{ text: { content: string; link?: { url: string } }; annotations?: Record<string, boolean> }> }>;
+    expect(blocks.map((b) => b.type)).toEqual(['heading_2', 'paragraph', 'paragraph', 'paragraph']);
+    expect(blocks[1].rich[0].text.content).toBe('Sous-titres YouTube · anglais → français · 2 répliques');
+    const first = blocks[2].rich;
+    expect(first[0]).toMatchObject({ text: { content: '02:05', link: { url: 'https://youtu.be/abc?t=125' } }, annotations: { code: true } });
+    expect(first.map((r) => r.text.content).join('')).toBe('02:05 The circulation of F\nLa circulation de F\n💬 orientation !');
+    expect(transcriptBlocks({ ...t, cues: [] })).toEqual([]);
+  });
+});
+

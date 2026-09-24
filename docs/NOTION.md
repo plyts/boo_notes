@@ -94,6 +94,11 @@ Idées de vues : **par cours** (groupé par *Cours*, puis trié par *Chapitre*),
 - Les **captures** sont téléversées et légendées ; titres, listes, cases à cocher, citations, code,
   gras / italique sont conservés ; pour un PDF, une section **« Passages surlignés »** reprend vos
   surlignages avec leur couleur.
+- Un **passage** d’une vidéo (`[02:05–06:07]`) devient une image légendée « Passage 02:05–06:07 ·
+  titre » (l’extrait enregistré reste dans le dossier de notes).
+- La **transcription** (sous-titres collectés pendant la lecture) termine la page : une section
+  **Transcription**, une réplique par paragraphe — heure liée à l’instant de la vidéo, texte,
+  traduction en italique, 💬 votre commentaire. Voir [TRANSCRIPTION.md](TRANSCRIPTION.md).
 
 ## Synchronisation
 

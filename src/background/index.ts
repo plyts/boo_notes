@@ -490,6 +490,8 @@ const handlers: Handlers = {
   'transcript:annotate': async (msg) => {
     const t = await transcripts.annotate(msg.noteId, msg.patches, { lang: msg.lang, target: msg.target });
     void sync.notifyChanged();
+    // Translations and comments reach the Notion page (debounced).
+    if (msg.patches.length) void notion.enqueue(msg.noteId);
     return t;
   },
 

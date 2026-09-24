@@ -1,7 +1,9 @@
 import { normalizeTitle } from '../markdown';
 import { KIND_LABELS, PLATFORM_LABELS, type MediaKind, type Platform } from '../platforms';
 import { STATUS_LABELS, type StudyStatus } from '../study';
-import { hashBlock, markdownToBlocks, plainRichText, toNotion, type BlockSpec, type Json } from './blocks';
+import { timestampUrl } from '../platforms';
+import { TRANSCRIPT_LINE, type Transcript } from '../transcript';
+import { hashBlock, markdownToBlocks, plainRichText, toNotion, transcriptBlocks, type BlockSpec, type Json } from './blocks';
 import { explainNotionError, NotionClient, NotionError, parseNotionId, type NotionClientOptions } from './client';
 
 /**
@@ -80,6 +82,8 @@ export interface SyncItem {
   /** Course and chapter the note is filed in (undefined: not managed by this device). */
   course?: string | null;
   chapter?: string | null;
+  /** Subtitles of the media: a « Transcription » section ends the page. */
+  transcript?: Transcript | null;
 }
 
 /** Where notes and their Notion mapping live (desktop library, extension storage). */
@@ -386,7 +390,9 @@ export class NotionEngine {
         });
       }
     }
-    blocks.push(...markdownToBlocks(item.body, { wiki }));
+    // The transcript's attachment line becomes the section at the end of the page.
+    const body = item.transcript?.cues.length ? item.body.split('\n').filter((l) => !TRANSCRIPT_LINE.test(l)).join('\n') : item.body;
+    blocks.push(...markdownToBlocks(body, { wiki }));
     const highlights = [...(item.highlights ?? [])].sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
     if (highlights.length) {
       blocks.push({ type: 'heading_3', rich: plainRichText('Passages surlignés') });
@@ -397,6 +403,10 @@ export class NotionEngine {
           rich: [...plainRichText(h.text.trim()), ...plainRichText(' '), ...plainRichText(`p. ${h.page}`, { code: true })],
         });
       }
+    }
+    if (item.transcript) {
+      const online = /^https?:\/\//.test(item.source) && (item.kind === 'video' || item.kind === 'audio');
+      blocks.push(...transcriptBlocks(item.transcript, (s) => (online ? timestampUrl(item.source, s) : null)));
     }
     return blocks;
   }

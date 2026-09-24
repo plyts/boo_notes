@@ -133,3 +133,61 @@ test('le second cerveau : accueil, cours, note, carte mentale, révisions', asyn
   ws.close();
   void ids;
 });
+
+test('transcription d’une vidéo locale, passage et extrait', async ({ ctx }) => {
+  const { copyFile } = await import('node:fs/promises');
+  const video = join(ctx.dir, 'Théorème de Stokes — Cours 7.webm');
+  await copyFile(fileURLToPath(new URL('../../../tests/e2e/fixtures/sample.webm', import.meta.url)), video);
+  const cues = [
+    ['So today we look at Stokes’ theorem.', 'Aujourd’hui, nous étudions le théorème de Stokes.'],
+    ['The circulation of F around the boundary…', 'La circulation de F le long du bord…'],
+    ['…equals the flux of its curl through S.', '…est égale au flux de son rotationnel à travers S.'],
+    ['Mind the orientation of the boundary.', 'Attention à l’orientation du bord.'],
+    ['Let’s check it on an example.', 'Vérifions-le sur un exemple.'],
+    ['Take the upper half-sphere.', 'Prenons la demi-sphère supérieure.'],
+    ['Its boundary is the unit circle.', 'Son bord est le cercle unité.'],
+    ['Both sides give two pi.', 'Les deux membres valent deux pi.'],
+  ];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  await writeFile(
+    join(ctx.dir, 'Théorème de Stokes — Cours 7.en.vtt'),
+    `WEBVTT\n\n${cues.map(([en], i) => `00:00:${pad(i * 3)}.000 --> 00:00:${pad(i * 3 + 3)}.000\n${en}`).join('\n\n')}\n`,
+  );
+  const { app, page } = await ctx.launch();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
+  await page.evaluate(() => window.boo.settings.set({ theme: 'dark' }));
+  const { notes } = await page.evaluate((p) => window.boo.library.importFiles(p), [video]);
+  const id = notes[0].id;
+  const t = await page.evaluate((id) => window.boo.library.transcript(id), id);
+  await page.evaluate(
+    ([id, patches]) => window.boo.library.annotateTranscript(id, patches as never),
+    [id, t!.cues.map((c, i) => ({ id: c.id, tr: cues[i][1], ...(i === 3 ? { note: 'Règle de la main droite : normale sortante' } : {}) }))] as const,
+  );
+  await openNote(page, 'Théorème de Stokes — Cours 7');
+  await page.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+  await editor(page).click();
+  await page.keyboard.type('## Théorème de Stokes');
+  await page.keyboard.press('Enter');
+  await page.evaluate(async () => {
+    const v = document.querySelector('video') as HTMLVideoElement;
+    v.currentTime = 3.5;
+    await new Promise((r) => v.addEventListener('seeked', r, { once: true }));
+  });
+  await page.keyboard.type('Circulation = flux du rotationnel');
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => void (document.querySelector('video') as HTMLVideoElement).play());
+  await page.keyboard.press('Alt+I');
+  await page.waitForTimeout(4200);
+  await page.keyboard.press('Alt+O');
+  await expect(page.locator('.cm-boo-img.cm-boo-passage img')).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(async () => {
+    const v = document.querySelector('video') as HTMLVideoElement;
+    v.pause();
+    v.currentTime = 10;
+    await new Promise((r) => v.addEventListener('seeked', r, { once: true }));
+  });
+  await shot(page, 'desktop-passage');
+  await page.getByRole('tab', { name: /Transcription/ }).click();
+  await page.waitForTimeout(800);
+  await shot(page, 'desktop-transcript');
+});

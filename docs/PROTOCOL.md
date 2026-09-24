@@ -38,6 +38,9 @@ alarme par minute tant que des notes attendent).
 | `export` | `requestId`, `noteId`, `target`: `"local"` \| `"notion"` | `export.result { requestId, ok, message }` |
 | `player.active` | `player`: `{ noteId, title, url }` ou `null` | — |
 | `open` | `title` : titre d’une note (clic sur un `[[lien]]` dans le navigateur) | — (l’application s’affiche sur la note, en créant la fiche si besoin) |
+| `transcript.put` | `transcript` : `{ noteId, lang, label, source, target, complete, covered, duration, cues: [{ id, start, end, text, tr?, note? }], updatedAt, rev }` | `transcript.ack { noteId, rev }` |
+| `media.chunk` | `path` (`media/…`), `index` (0, 1, 2…), `data` (base64, 1 Mo par morceau) | — |
+| `media.put` | `path`, `noteId`, `kind` : `"passage"` \| `"audio"`, `mime`, `start` (s), `end` (s), `chunks` (nombre de morceaux) | `media.ack { path }` |
 | `ping` | — (toutes les 20 s) | `pong` |
 
 - `note.id` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<leçon>`,
@@ -55,6 +58,16 @@ alarme par minute tant que des notes attendent).
   dans ce cours › chapitre (créés s’ils n’existent pas, titres comparés sans accents ni casse) si
   ce classement est plus récent que le sien. `placedAt` sans `course` : la note a été **retirée** de
   son cours dans le navigateur (elle devient « non classée »).
+- `transcript.put` : sous-titres horodatés collectés pendant la lecture (voir
+  [TRANSCRIPTION.md](TRANSCRIPTION.md)), envoyés après les notes quand ils changent. `source` :
+  `track` (pistes du lecteur), `platform` (liste de sous-titres de la plateforme), `live` (capture
+  des sous-titres affichés), `file` (fichier `.vtt` / `.srt`). L’application écrit
+  `transcripts/<note>.json`, `.md`, `.vtt` (et `.fr.vtt` quand des traductions existent), et garde
+  sa copie si elle est plus récente (`updatedAt`, `rev`).
+- `media.chunk` puis `media.put` : un **extrait de passage** enregistré (image et son, ou son
+  seul) ou un segment du **son du cours** conservé, écrit dans `media/` (chemin vérifié :
+  `media/<nom>` uniquement). Les morceaux sont envoyés sans attendre, `media.put` en donne le
+  nombre ; l’application répond `media.ack` une fois le fichier écrit.
 - Pour une page lue (`kind: "page"`), `media.progress` porte le **pourcentage lu** : `position`
   0–100, `duration` 100 (point le plus loin atteint).
 - `media.progress` n’est envoyé que pour un média **qui a une note** : à la pause, à la fin, après
@@ -99,6 +112,11 @@ alarme par minute tant que des notes attendent).
 ← library.courses { courses: [{ title: "React", emoji: "⚛️", chapters: ["Hooks", "Contexte"] }] }
 → note.upsert  youtube:dQw4w9WgXcQ rev 8 { course: "React", chapter: "Hooks", placedAt: 1727… }
 ← ack rev 8
+→ transcript.put  youtube:dQw4w9WgXcQ rev 12 (312 répliques, anglais → français)
+← transcript.ack rev 12
+→ media.chunk  media/youtube-dQw4w9WgXcQ-passage-02-05-k3j.webm #0, #1, #2
+→ media.put    media/youtube-dQw4w9WgXcQ-passage-02-05-k3j.webm { kind: "passage", start: 125, end: 367, chunks: 3 }
+← media.ack
 → export  { target: "notion", requestId: "exp-…" }
 ← export.result { ok: true, message: "Envoyé vers Notion" }
 ← notion.link  youtube:dQw4w9WgXcQ { pageId: "…", syncedRev: 7 }

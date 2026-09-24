@@ -33,6 +33,8 @@ export class MediaViewer {
   private markers: number[] = [];
   private destroyed = false;
   private hls: { destroy(): void } | null = null;
+  /** Passage being replayed: playback stops at its end. */
+  private range: { start: number; end: number; at: number } | null = null;
 
   constructor(private readonly opts: MediaViewerOptions) {
     const { item } = opts;
@@ -126,6 +128,13 @@ export class MediaViewer {
     this.opts.onActivity();
   }
 
+  /** Plays [start, end] and pauses at its end (a passage `[02:05–06:07]`). */
+  playRange(start: number, end: number): void {
+    this.range = { start, end, at: Date.now() };
+    this.seek(start);
+    void this.media.play().catch(() => undefined);
+  }
+
   /** Instants noted about this media, drawn on the scrubber. */
   setMarkers(times: number[]): void {
     this.markers = times;
@@ -187,6 +196,14 @@ export class MediaViewer {
     if (document.activeElement !== this.scrubber) this.scrubber.value = String(t);
     this.scrubber.style.setProperty('--fill', d ? `${(t / d) * 100}%` : '0%');
     this.timeEl.textContent = `${formatTimecode(t)} / ${formatTimecode(d)}`;
+    const r = this.range;
+    // Moved elsewhere by the user (not the seek to the passage still landing): the range is forgotten.
+    const settling = this.media.seeking || (r !== null && Date.now() - r.at < 1500);
+    if (r && !settling && (t < r.start - 2 || t > r.end + 3)) this.range = null;
+    else if (r && !this.media.seeking && t >= r.end && t <= r.end + 3) {
+      this.range = null;
+      this.media.pause();
+    }
     this.opts.onTime(t);
     if (!this.media.paused) this.saveProgress(false);
   }

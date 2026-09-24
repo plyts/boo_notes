@@ -69,6 +69,7 @@ export async function toSyncItem(library: Library, note: Note): Promise<SyncItem
     sources: resources.map((r) => ({ id: r.id, kind: r.kind, title: r.title, source: r.source, upload: r.origin === 'file' && r.kind === 'image' })),
     course: where?.course.title ?? null,
     chapter: where?.chapter.title ?? null,
+    transcript: library.transcriptOf(note.id) ? await library.getTranscript(note.id) : null,
   };
 }
 
@@ -124,6 +125,8 @@ export class NotionSync extends EventEmitter<{ state: [NotionState] }> {
       const note = opts.library.getNote(id);
       if (!note?.noteFile) return;
       if (reason === 'content' || reason === 'meta') this.schedule(id, 'content');
+      // A transcript already on a Notion page is rewritten with it.
+      else if (reason === 'transcript' && note.notion) this.schedule(id, 'content');
       else if (reason === 'progress' && note.notion) this.schedule(id, 'progress');
     });
   }

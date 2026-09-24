@@ -105,7 +105,7 @@ class ContentApp {
   /** Passage replayed to record its extract. */
   private rangeRecording: { noteId: string; start: number; end: number; recording: Recording; create: boolean; poster: Shot | null } | null = null;
   /** Passage being replayed (clic on `[02:05–06:07]`): playback stops at its end. */
-  private rangeStop: { start: number; end: number } | null = null;
+  private rangeStop: { start: number; end: number; at: number } | null = null;
   /** Sound of the course being kept (setting « Conserver l’audio »): the current stretch. */
   private trace: { noteId: string; media: HTMLMediaElement; recording: Recording; start: number; last: number } | null = null;
   private traceError = '';
@@ -1288,8 +1288,10 @@ class ContentApp {
     }
     const s = this.rangeStop;
     if (!s) return;
-    if (p.time < s.start - 2 || p.time > s.end + 3) this.rangeStop = null;
-    else if (p.time >= s.end) {
+    // The seek to the passage may still be landing: only a later jump cancels it.
+    const settling = Boolean(this.player.current?.seeking) || Date.now() - s.at < 1500;
+    if (!settling && (p.time < s.start - 2 || p.time > s.end + 3)) this.rangeStop = null;
+    else if (!settling && p.time >= s.end) {
       this.rangeStop = null;
       this.player.pause();
       this.overlay.toast(`Fin du passage ${rangeLabel(s.start, s.end)}`, 'info', 1500, { icon: 'clock' });
@@ -1416,7 +1418,7 @@ class ContentApp {
         void this.bg({ type: 'frames:inject' }).catch(() => undefined);
         return;
       case 'play-range':
-        this.rangeStop = { start: msg.start, end: msg.end };
+        this.rangeStop = { start: msg.start, end: msg.end, at: Date.now() };
         this.player.seek(msg.start);
         this.player.play();
         this.broadcastPlayback();

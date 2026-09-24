@@ -26,6 +26,10 @@ export interface ViewerHandle {
   keystroke?(): void;
   /** Current frame (JPEG data URL), video only. */
   captureFrame?(): string | null;
+  /** Plays a passage and stops at its end. */
+  playRange?(start: number, end: number): void;
+  /** The playing element (recording of passage extracts). */
+  mediaElement?(): HTMLMediaElement;
   selection?(): { text: string; position: Position } | null;
   highlight?(): boolean;
   togglePlacing?(): void;
@@ -325,6 +329,8 @@ export function ResourceViewer({
         skip: (d) => mv.skip(d),
         keystroke: () => mv.autoPause.keystroke(),
         captureFrame: () => (mv.isVideo ? mv.capture() : null),
+        playRange: (start, end) => mv.playRange(start, end),
+        mediaElement: () => mv.media,
         flush,
       });
     }

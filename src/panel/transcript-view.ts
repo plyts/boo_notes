@@ -24,6 +24,8 @@ export interface TranscriptViewHooks {
   listen(seconds: number): void;
   /** Notes of the note anchored in [start, end] (passage summary). */
   notesIn(start: number, end: number): number;
+  /** Adds a .vtt / .srt file as the transcript (desktop app); no button when absent. */
+  importSubtitles?(): void;
 }
 
 interface Row {
@@ -58,6 +60,8 @@ export class TranscriptView {
   private coverage: Array<[number, number]> = [];
   private translating = false;
   private target = 'fr';
+  private readOnly = false;
+  private emptyText: string | null = null;
 
   constructor(private readonly hooks: TranscriptViewHooks) {
     this.labelEl = h('span', { class: 'tx-label' }, 'Transcription');
@@ -77,6 +81,16 @@ export class TranscriptView {
       icon('pin'),
     );
     pinAll.addEventListener('click', () => hooks.pinTranscript());
+    const tools: HTMLElement[] = [searchButton, pinAll];
+    if (hooks.importSubtitles) {
+      const add = h(
+        'button',
+        { type: 'button', class: 'icon-btn tx-import-btn', title: 'Ajouter des sous-titres (.vtt, .srt)', 'aria-label': 'Ajouter des sous-titres (.vtt, .srt)' },
+        icon('plus'),
+      );
+      add.addEventListener('click', () => hooks.importSubtitles?.());
+      tools.push(add);
+    }
     this.searchInput = h('input', { type: 'search', placeholder: 'Rechercher (texte, traduction, commentaires)', 'aria-label': 'Rechercher dans la transcription' });
     this.searchInput.addEventListener('input', () => {
       this.query = this.searchInput.value.trim().toLowerCase();
@@ -107,7 +121,7 @@ export class TranscriptView {
         'div',
         { class: 'tx-head' },
         h('div', { class: 'tx-source' }, icon('subtitles', 15), this.labelEl, this.coverEl),
-        h('div', { class: 'tx-tools' }, this.translateButton, h('span', { class: 'spacer' }), searchButton, pinAll),
+        h('div', { class: 'tx-tools' }, this.translateButton, h('span', { class: 'spacer' }), ...tools),
         this.searchBox,
         this.statusEl,
       ),
@@ -143,6 +157,19 @@ export class TranscriptView {
 
   setTarget(target: string): void {
     this.target = target;
+  }
+
+  /** Message of an empty transcript, instead of the browser's (desktop app). */
+  setEmptyText(text: string | null): void {
+    this.emptyText = text;
+    this.renderHead();
+  }
+
+  /** Look and listen only (a browser note shown in the desktop app: it is annotated in the extension). */
+  setReadOnly(readOnly: boolean): void {
+    this.readOnly = readOnly;
+    this.el.dataset.readonly = String(readOnly);
+    this.renderHead();
   }
 
   set(t: Transcript | null): void {
@@ -232,7 +259,13 @@ export class TranscriptView {
       complete: '',
     };
     this.emptyEl.hidden = count > 0;
-    this.emptyEl.replaceChildren(icon('subtitles', 28), h('p', {}, messages[this.state.status] || messages.searching));
+    const children: Node[] = [icon('subtitles', 28), h('p', {}, this.emptyText ?? (messages[this.state.status] || messages.searching))];
+    if (this.hooks.importSubtitles && !this.readOnly) {
+      const add = h('button', { type: 'button', class: 'btn-quiet tx-import' }, icon('plus', 15), 'Ajouter des sous-titres (.vtt, .srt)');
+      add.addEventListener('click', () => this.hooks.importSubtitles?.());
+      children.push(add);
+    }
+    this.emptyEl.replaceChildren(...children);
     this.el.dataset.status = this.state.status;
   }
 
@@ -351,6 +384,7 @@ export class TranscriptView {
     if (!target) return;
     const cue = this.cueOf(target);
     if (!cue) return;
+    if (this.readOnly && target.dataset.act !== 'seek' && target.dataset.act !== 'listen') return;
     switch (target.dataset.act) {
       case 'seek':
         if (e.shiftKey && this.anchor) this.select(this.anchor, cue);

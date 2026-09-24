@@ -4,6 +4,7 @@ import { explainNotionError, NotionError, type NotionClientOptions } from '../sh
 import { NotionEngine, type NotionLink, type NotionSource, type SyncItem } from '../shared/notion/engine';
 import { positionLabel, progressRatio, studyStatus } from '../shared/study';
 import type { MediaProgress, Note, NoteStore, StorageAreaLike } from '../shared/store';
+import { TranscriptStore } from '../shared/transcript-store';
 
 /**
  * Direct Notion sync from the browser, for when the desktop app is closed
@@ -151,7 +152,9 @@ export class ExtensionNotion {
     return {
       item: async (id) => {
         const note = await store.getNote(id);
-        return note ? noteToSyncItem(note, await store.getProgress(id)) : null;
+        if (!note) return null;
+        const transcript = await new TranscriptStore(area).get(id);
+        return { ...noteToSyncItem(note, await store.getProgress(id)), transcript };
       },
       getLink: (id) => this.link(id),
       setLink: async (id, link) => {

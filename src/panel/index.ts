@@ -893,7 +893,8 @@ class PanelApp {
   /** Title of a passage: the first note taken during it, else its first subtitle. */
   private passageTitle(start: number, end: number): string {
     const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 59).replace(/\s+\S*$/, '')}…` : s);
-    const line = notesInRange(this.editor.content, start, end)[0];
+    // Pinned subtitles (quotes) are not the user's words: the first personal note, else the first line said.
+    const line = notesInRange(this.editor.content, start, end).find((l) => !/^\s*>/.test(l));
     const fromNote = line ? plainText(line.replace(/^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)?\[[^\]\n]*\](?:\([^)\s]*\))?\s*/, '')).trim() : '';
     if (fromNote) return clip(fromNote);
     const cue = cuesInRange(this.transcript?.cues ?? [], start, end)[0];

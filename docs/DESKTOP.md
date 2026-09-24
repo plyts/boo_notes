@@ -90,6 +90,16 @@ discrètement à l’ouverture de session.
 | **Image** (graphe, schéma) | `[pin 3]` | Double-clic ou `Alt+Shift+T` puis clic : repère numéroté ; zoom, déplacement ; clic repère ↔ note |
 | **Page d’une plateforme** (YouTube, Udemy, Coursera…) | — | « Reprendre à 21:00 » / « Ouvrir » dans le navigateur, où l’extension prend les notes |
 
+**Transcription et passages** (vidéo / audio) — détails dans [TRANSCRIPTION.md](TRANSCRIPTION.md) :
+les sous-titres placés à côté d’une vidéo importée (`cours.mp4` + `cours.vtt`, `cours.en.srt`)
+deviennent sa **transcription** (onglet **Transcription** de la note, `Alt+T`) : elle suit la
+lecture, se traduit et se commente réplique par réplique, une réplique s’épingle dans la note
+(`Ctrl+Maj+K`) ; **＋ Ajouter des sous-titres** importe un autre fichier. `Alt+I` / `Alt+O` (bouton
+**Passage**) découpent un **passage** dont l’image et le son sont enregistrés ; un intervalle
+`[02:05–06:07]` rejoue le passage et s’arrête à sa fin ; 🔊 **Extrait** le lit au-dessus des notes.
+
+![Passage et son extrait dans une note de l’application](screenshots/desktop-passage.png)
+
 Le **temps d’étude** (fenêtre au premier plan, activité récente) et la **progression** (≥ 95 % d’un
 média, dernière page d’un PDF = Terminé) sont enregistrés ; le statut se force dans l’inspecteur.
 
@@ -149,7 +159,10 @@ Par défaut `Documents\Boo Notes` (modifiable ; l’extension renvoie alors tout
 Boo Notes/
   Électrocinétique — Chapitre 2.md   une note : front matter YAML + Markdown
   Condensateur.md
-  assets/                             captures (extension, vidéos, flux)
+  assets/                             captures (extension, vidéos, flux), images des passages
+  media/                              extraits de passages et son conservé des cours (WebM / Opus)
+  transcripts/                        transcriptions : <note>.json (répliques, traductions,
+                                      commentaires), <note>.md, <note>.vtt et <note>.fr.vtt
   .boo/library.json                   cours, chapitres, notes, supports, progression, surlignages,
                                       repères, révisions, correspondance Notion (format v2 ; v1 migré)
 ```

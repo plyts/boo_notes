@@ -2,13 +2,26 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button as AriaButton, Tab, TabList, Tabs } from 'react-aria-components';
 import type { AnchorKind } from '../../../../src/panel/editor';
-import { extractCards } from '../../../../src/shared/cards';
+import { extractCards, plainText } from '../../../../src/shared/cards';
 import { captureLine, normalizeTitle, pageRefToken, pinToken, sectionToken, timestampToken } from '../../../../src/shared/markdown';
 import { nextInterval, type ReviewGrade } from '../../../../src/shared/study';
+import {
+  cueIndexAt,
+  cueQuote,
+  notesInRange,
+  passageLine,
+  pinTranscriptLine,
+  rangeLabel,
+  transcriptLine,
+  type Cue,
+  type Transcript,
+} from '../../../../src/shared/transcript';
 import type { NoteView as Note, ResourceView } from '../../ipc';
 import { openTitle, removeNote, syncNotion } from '../actions';
 import { NoteEditor, SAVE_LABELS, type NoteEditorHandle, type SaveState } from '../islands/NoteEditor';
 import { isLocal, ResourceViewer, type Position, type ViewerHandle } from '../islands/ResourceViewer';
+import { TranscriptPanel } from '../islands/TranscriptPanel';
+import { frameOf, passageCard, recordBlocker, Recording, recordRange, seekTo } from '../lib/passages';
 import { dueLabel, errorMessage, formatTimecode, plural } from '../lib/format';
 import { KIND_ICON } from '../lib/kinds';
 import { PageHeader } from '../shell/PageHeader';
@@ -71,6 +84,36 @@ export function ReviewMenu({ note }: { note: Note }) {
   );
 }
 
+/** A recorded extract (or the kept sound of the course) played over the notes. */
+function MediaPop({ path, offset, title, video, onClose }: { path: string; offset: number; title: string; video: boolean; onClose(): void }) {
+  const src = `boo://app/__vault/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const start = (e: React.SyntheticEvent<HTMLMediaElement>) => {
+    const m = e.currentTarget;
+    if (offset > 0) m.currentTime = offset;
+    void m.play().catch(() => undefined);
+  };
+  return (
+    <div className="media-pop glass-thick" role="dialog" aria-label={title} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <div className="mp-head">
+        <Icon name={video ? 'video' : 'volume'} size={15} />
+        <span className="mp-title">{title}</span>
+        <IconButton icon="close" size="s" label="Fermer l’extrait" onPress={onClose} />
+      </div>
+      {video ? <video src={src} controls playsInline onLoadedMetadata={start} /> : <audio src={src} controls onLoadedMetadata={start} />}
+    </div>
+  );
+}
+
+/** Title of a passage: the first note taken during it, else its first subtitle. */
+function passageTitle(markdown: string, start: number, end: number, cue: Cue | null): string {
+  const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 59).replace(/\s+\S*$/, '')}…` : s);
+  // Pinned subtitles (quotes) are not the user's words: the first personal note, else the first line said.
+  const line = notesInRange(markdown, start, end).find((l) => !/^\s*>/.test(l));
+  const fromNote = line ? plainText(line.replace(/^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)?\[[^\]\n]*\](?:\([^)\s]*\))?\s*/, '')).trim() : '';
+  if (fromNote) return clip(fromNote);
+  return cue ? clip(cue.tr?.trim() || cue.text) : '';
+}
+
 export function NoteView({ id, resource: initialResource, anchor }: { id: string; resource?: string; anchor?: Position }) {
   const note = useNote(id);
   const resources = useApp((s) => s.resources);
@@ -91,6 +134,14 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   const viewerRef = useRef<ViewerHandle | null>(null);
   const [viewer, setViewer] = useState<ViewerHandle | null>(null);
   const [notesWidth, setNotesWidth] = useState(() => Number(localStorage.getItem('boo.notesWidth')) || 460);
+  // Transcript (subtitles) next to the notes, passages, recorded extracts.
+  const [pane, setPane] = useState<'notes' | 'transcript'>('notes');
+  const [mediaPop, setMediaPop] = useState<{ path: string; offset: number; title: string; video: boolean } | null>(null);
+  const [passageStart, setPassageStart] = useState<number | null>(null);
+  const passageIn = useRef<{ start: number; poster: string | null; recording: Recording | null; off(): void } | null>(null);
+  const cuesRef = useRef<Cue[]>([]);
+  const markdownRef = useRef('');
+  markdownRef.current = markdown;
 
   const linked: ResourceView[] = useMemo(
     () => (note ? note.resources.flatMap((r) => (resources.get(r) ? [resources.get(r)!] : [])) : []),
@@ -122,6 +173,109 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   }, []);
 
   const qualifier = (res: string | null) => (res && res !== primary ? res : null);
+
+  const timed = (kind?: string) => kind === 'video' || kind === 'audio';
+
+  /** Card picture, recorded extract (when given), and the passage line in the note. */
+  const savePassage = async (
+    start: number,
+    end: number,
+    opts: { poster?: string | null; recorded?: { blob: Blob; mime: string } | null; record?: boolean; cue?: Cue | null },
+  ) => {
+    const v = viewerRef.current;
+    if (!v || !note || readOnly) return;
+    const res = v.resource;
+    const media = v.mediaElement?.();
+    let poster = opts.poster ?? null;
+    let recorded = opts.recorded ?? null;
+    try {
+      if (opts.record && media) {
+        toast(`● Enregistrement du passage ${rangeLabel(start, end)}… continuez d’écrire`);
+        const r = await recordRange(media, start, end);
+        recorded = r;
+        poster ??= r.poster;
+      } else if (!poster && media instanceof HTMLVideoElement) {
+        const back = media.currentTime;
+        await seekTo(media, start);
+        poster = frameOf(media);
+        await seekTo(media, back);
+      }
+      const title = passageTitle(markdownRef.current, start, end, opts.cue ?? null);
+      const image = await window.boo.library.saveCapture(res.id, poster ?? (await passageCard(start, end, res.kind === 'audio' ? 'audio' : 'video', title)).dataUrl, start);
+      let mediaPath: string | null = null;
+      if (recorded?.blob.size) {
+        mediaPath = await window.boo.library.saveMedia(note.id, { kind: 'passage', mime: recorded.mime, start, end }, new Uint8Array(await recorded.blob.arrayBuffer()));
+      }
+      editorRef.current?.insertBlock(passageLine({ start, end, title, image, media: mediaPath }));
+      toast(`Passage ${rangeLabel(start, end)} ajouté à la note${mediaPath ? ' avec son extrait' : ''}`, 'success');
+    } catch (e) {
+      toast(`Passage non enregistré : ${errorMessage(e)}`, 'error');
+    }
+  };
+
+  /** Alt+I then Alt+O: a passage of the media being played, recorded as it plays. */
+  const togglePassage = () => {
+    const v = viewerRef.current;
+    const media = v?.mediaElement?.();
+    if (!v || !media || readOnly) {
+      toast('Les passages découpent une vidéo ou un audio ouvert dans l’app', 'error');
+      return;
+    }
+    const open = passageIn.current;
+    if (!open) {
+      const start = media.currentTime;
+      let recording: Recording | null = null;
+      let why = '';
+      try {
+        recording = recordBlocker(media) ? null : new Recording(media, v.resource.kind === 'audio' ? 'audio' : 'video');
+        if (recording && media.paused) recording.pause();
+      } catch (e) {
+        why = ` (extrait non enregistré : ${errorMessage(e)})`;
+      }
+      // The recording follows the playback: no frozen picture while paused.
+      const pause = () => recording?.pause();
+      const play = () => recording?.resume();
+      media.addEventListener('pause', pause);
+      media.addEventListener('play', play);
+      const off = () => {
+        media.removeEventListener('pause', pause);
+        media.removeEventListener('play', play);
+      };
+      passageIn.current = { start, poster: frameOf(media), recording, off };
+      setPassageStart(start);
+      toast(`${recording ? '● ' : ''}Début du passage ${formatTimecode(start)} — Alt+O pour le terminer${why}`);
+      return;
+    }
+    const end = media.currentTime;
+    if (end - open.start < 1) {
+      toast('Passage trop court : laissez la lecture avancer, puis Alt+O', 'error');
+      return;
+    }
+    passageIn.current = null;
+    setPassageStart(null);
+    open.off();
+    const done = open.recording ? open.recording.stop().then((blob) => ({ blob, mime: open.recording!.mime })) : Promise.resolve(null);
+    void done.then(
+      (recorded) => savePassage(open.start, end, { poster: open.poster, recorded, cue: cuesRef.current.find((c) => c.end > open.start && c.start < end) ?? null }),
+      (e: unknown) => toast(`Extrait non enregistré : ${errorMessage(e)}`, 'error'),
+    );
+  };
+
+  /** The line being spoken, quoted in the note. */
+  const pinCue = (cue: Cue | null) => {
+    if (readOnly) return;
+    if (!cue) {
+      toast('Aucune réplique à cet instant', 'error');
+      return;
+    }
+    editorRef.current?.insertBlock(cueQuote(cue));
+    toast(`Réplique ${formatTimecode(cue.start)} épinglée dans la note`, 'success');
+  };
+
+  const listen = (seconds: number) => {
+    const seg = note?.media.find((m) => m.kind === 'audio' && seconds >= m.start && seconds < m.end);
+    if (seg) setMediaPop({ path: seg.path, offset: seconds - seg.start, title: `Son du cours · ${formatTimecode(seconds)}`, video: false });
+  };
 
   /** Note → resource: an anchor chip shows its place, switching resource if needed. */
   const showAnchor = (kind: AnchorKind | 'time', value: number, res: string | null) => {
@@ -197,6 +351,17 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
       else if (altShift && code === 'KeyS') void capture();
       else if (altShift && code === 'Space') v?.toggle?.();
       else if (altShift && code === 'KeyQ') quoteSelection();
+      else if (e.altKey && !e.shiftKey && !mod && (code === 'KeyI' || code === 'KeyO') && timed(v?.resource.kind)) {
+        if ((code === 'KeyI') === !passageIn.current) togglePassage();
+        else if (code === 'KeyI') toast('Un passage est déjà commencé : Alt+O pour le terminer', 'error');
+        else toast('Commencez par « Début du passage » (Alt+I)', 'error');
+      } else if (e.altKey && !e.shiftKey && !mod && code === 'KeyT' && (note?.transcript || timed(v?.resource.kind))) {
+        setPane((p) => (p === 'notes' ? 'transcript' : 'notes'));
+      } else if (mod && e.shiftKey && !e.altKey && code === 'KeyK') {
+        const t = v?.time();
+        const i = t === null || t === undefined ? -1 : cueIndexAt(cuesRef.current, t);
+        pinCue(i === -1 ? null : cuesRef.current[i]);
+      } else if (e.key === 'Escape' && mediaPop) setMediaPop(null);
       else if (altShift && code === 'KeyH') {
         if (!v?.highlight?.()) toast('Sélectionnez un passage du PDF à surligner');
       } else if (e.altKey && !e.shiftKey && !mod && e.key === 'ArrowLeft' && v?.skip) v.skip(-5);
@@ -214,7 +379,16 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   });
 
   // Leaving the note: pending writes first.
-  useEffect(() => () => void editorRef.current?.flush(), []);
+  useEffect(
+    () => () => {
+      void editorRef.current?.flush();
+      // A passage left open: its recording is dropped.
+      passageIn.current?.off();
+      void passageIn.current?.recording?.stop().catch(() => undefined);
+      passageIn.current = null;
+    },
+    [],
+  );
 
   if (!note) {
     return (
@@ -265,6 +439,16 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
           ...(activeRes.kind === 'video'
             ? [{ id: 'capture', label: 'Capturer', icon: 'camera' as const, run: () => void capture(), title: 'Capturer l’image (Alt+Shift+S)' }]
             : []),
+          {
+            id: 'passage',
+            label: passageStart !== null ? `Fin ${formatTimecode(passageStart)}` : 'Passage',
+            icon: 'passage' as const,
+            run: togglePassage,
+            title:
+              passageStart !== null
+                ? `Terminer le passage commencé à ${formatTimecode(passageStart)} (Alt+O)`
+                : 'Début d’un passage : extrait avec ses sous-titres et vos notes (Alt+I)',
+          },
           { id: 'replay', label: '5 s', icon: 'replay', run: () => viewerRef.current?.skip?.(-5), title: 'Revoir les 5 dernières secondes (Alt+←)' },
         ];
       default:
@@ -273,6 +457,8 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
   };
 
   const hasStage = linked.length > 0;
+  const showTranscript = Boolean(note.transcript) || timed(activeRes?.kind) || timed(note.kind);
+  const coverage = note.media.filter((m) => m.kind === 'audio').map((m) => [m.start, m.end] as [number, number]);
   const crumbs = [
     ...(place
       ? [
@@ -394,8 +580,27 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                 }}
               />
             ) : null}
-            <section className={`notes-pane${hasStage ? '' : ' sheet'}`} aria-label="Notes">
+            <section className={`notes-pane${hasStage ? '' : ' sheet'}`} aria-label="Notes" data-pane={showTranscript ? pane : 'notes'}>
               <header className="notes-head">
+                {showTranscript ? (
+                  <div className="segmented pane-switch" role="tablist" aria-label="Vue">
+                    {(['notes', 'transcript'] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        role="tab"
+                        className="segment"
+                        aria-selected={pane === p}
+                        data-selected={pane === p || undefined}
+                        title={p === 'transcript' ? 'Sous-titres horodatés, traduits et commentés (Alt+T)' : 'Vos notes (Alt+T)'}
+                        onClick={() => setPane(p)}
+                      >
+                        {p === 'notes' ? 'Notes' : 'Transcription'}
+                        {p === 'transcript' && note.transcript?.cues ? <span className="tab-count">{note.transcript.cues}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <span className="notes-stats">
                   {[plural(note.noteCount ?? 0, 'ancre'), cards.length ? plural(cards.length, 'carte') : '', note.links?.length ? plural(note.links.length, 'lien') : '']
                     .filter((x) => x && !x.startsWith('0 '))
@@ -423,7 +628,22 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                     return v && pos ? token(pos, qualifier(v.resource.id)) : null;
                   },
                   onTimestampHover: () => undefined,
-                  onTimestampClick: (s, r) => showAnchor('time', s, r ?? null),
+                  onTimestampClick: (s, r, end) => {
+                    const target = r ?? primary;
+                    // A range `[02:05–06:07]`: the passage is replayed and stops at its end.
+                    if (end !== null && end !== undefined && target === active && viewerRef.current?.playRange) viewerRef.current.playRange(s, end);
+                    else showAnchor('time', s, r ?? null);
+                  },
+                  onMediaClick: (path) => {
+                    const entry = note.media.find((m) => m.path === path);
+                    setMediaPop({
+                      path,
+                      offset: 0,
+                      title: entry ? `Extrait ${rangeLabel(entry.start, entry.end)}` : 'Extrait',
+                      video: entry ? entry.mime.startsWith('video/') : !/-audio-/.test(path),
+                    });
+                  },
+                  onTranscriptClick: () => setPane('transcript'),
                   onAnchorClick: (k, n, r) => showAnchor(k, n, r),
                   resourceBadge: (r) => {
                     if (linked.length < 2) return null;
@@ -449,6 +669,29 @@ export function NoteView({ id, resource: initialResource, anchor }: { id: string
                     : 'Écrivez votre note… [[ relie une autre note. « Question :: Réponse » crée une carte de révision.',
                 }}
               />
+              {showTranscript ? (
+                <TranscriptPanel
+                  noteId={note.id}
+                  readOnly={readOnly}
+                  version={note.transcript?.updatedAt ?? 0}
+                  visible={pane === 'transcript'}
+                  coverage={coverage}
+                  time={() => viewerRef.current?.time() ?? null}
+                  seek={(s) => showAnchor('time', s, null)}
+                  pin={pinCue}
+                  passage={(start, end, record, cue) => void savePassage(start, end, { record, cue })}
+                  pinTranscript={(t: Transcript) => {
+                    const changed = editorRef.current?.editor.transform((md) => pinTranscriptLine(md, transcriptLine(t)));
+                    toast(changed === undefined ? 'Note en lecture seule' : 'Transcription épinglée à la note', changed === undefined ? 'error' : 'success');
+                  }}
+                  listen={listen}
+                  notesIn={(start, end) => notesInRange(markdownRef.current, start, end).length}
+                  onLoaded={(t) => {
+                    cuesRef.current = t?.cues ?? [];
+                  }}
+                />
+              ) : null}
+              {mediaPop ? <MediaPop {...mediaPop} onClose={() => setMediaPop(null)} /> : null}
               {!readOnly ? (
                 <footer className="notes-actions">
                   {actions().map((a) => (

@@ -13,6 +13,12 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
   components, podcasts et radios `new Audio()`, et un **chronomètre** pour ce qu’aucun script ne
   peut lire — plus **toute page à lire** en **mode lecture** (citations liées au passage, surlignées
   dans la page). Chaque note se range dans un cours › chapitre depuis le panneau.
+- **Transcription** ([docs/TRANSCRIPTION.md](docs/TRANSCRIPTION.md)) : pendant la lecture, les
+  **sous-titres horodatés** sont recopiés en arrière-plan dans une transcription à part (onglet
+  **Transcription**), **traduits en français** sur l’appareil ou à la main, **commentés**, une
+  réplique s’**épingle** dans la note d’un geste ; les **passages** (`Alt+I` → `Alt+O`, ex.
+  02:05 → 06:07) gardent leur image, leur son, leurs sous-titres et les notes prises pendant eux ;
+  le **son du cours** peut être conservé. La transcription est épinglée à la note à la fin.
 - **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : cours, chapitres et notes ;
   une note liée à plusieurs supports (**PDF**, **vidéo / audio** locaux ou **flux** par adresse —
   HLS, radios —, **images**, **textes**, pages vues dans le navigateur) ; **carte mentale** de tout
@@ -80,6 +86,9 @@ npm run build        # → dist/
 | Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. **Mode lecture** : capture la partie visible de la page. |
 | Smart Pause | `Alt+Shift+Space` | Pause + focus sur une nouvelle ligne de l’éditeur ; un second appui relance la vidéo et rend le clavier au lecteur. |
 | Saut arrière | `Alt+←` | Recule de 5 s (3 / 5 / 10 / 15 s au choix). |
+| Début / fin du passage | `Alt+I` / `Alt+O` | Découpe un passage (02:05–06:07) : carte dans la note, extrait image + son, sous-titres et notes de l’intervalle. |
+| Épingler la réplique en cours | `Ctrl+Shift+K` (`⌘⇧K`) | Dans le panneau : cite le sous-titre en cours (et sa traduction) dans la note. |
+| Notes ⇄ Transcription | `Alt+T` | Dans le panneau et l’application. |
 | Aide | `Ctrl+/` (`⌘/`) | Dans le panneau : feuille de tous les raccourcis (et `?` hors de l’éditeur). |
 
 Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bouton dans les réglages).
@@ -134,6 +143,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Chronologie des notes** | Dans le pied du panneau : progression de la vidéo, un trait par note, un point par capture. Survol = aperçu sur la barre du lecteur, clic ou flèches = navigation. |
 | **Mise en page « transcription »** | Le texte d’une ligne horodatée s’aligne après l’horodatage ; les crochets n’apparaissent que si le curseur touche l’horodatage. |
 | **Cartes de capture** | Vignette 16:9 avec badge de temps et « ▶ Revoir » au survol. |
+| **Transcription en arrière-plan** | Onglet qui suit la lecture comme un karaoké, bandeau du sous-titre en cours sous les notes, traduction sur l’appareil, commentaires, passages choisis dans la transcription, intervalles `[02:05–06:07]` qui rejouent le passage et s’arrêtent à sa fin. |
 | **État vide pédagogique** | Une note vide explique quoi faire et montre les 4 raccourcis en touches. |
 | **Retour au bon endroit** | « ✓ Copié » sur la pilule du HUD, vignette dans le toast de capture, snackbar pour les exports, « ✓ Enregistré » dans l’en-tête. |
 | **Infobulles rapides** | Sur le HUD, avec les touches (`⌥ ⇧ S` sur macOS). |

@@ -7,6 +7,9 @@
  * screenshots are uploaded as image blocks captioned with their timestamp.
  */
 
+import { formatTimecode } from '../time';
+import { languagesLabel, type Transcript } from '../transcript';
+
 export type Color =
   | 'default'
   | 'gray_background'
@@ -377,3 +380,28 @@ function stableJson(value: unknown): string {
 }
 
 export { text as plainRichText };
+
+/** Cues written to Notion at most (a long lecture stays readable and quick to sync). */
+const MAX_TRANSCRIPT_CUES = 3000;
+
+/**
+ * The « Transcription » section at the end of a Notion page: one paragraph per
+ * line said, its time (linked to the instant when `timeUrl` gives one), the
+ * translation in italics and the user's comment.
+ */
+export function transcriptBlocks(t: Transcript, timeUrl: (seconds: number) => string | null = () => null): BlockSpec[] {
+  if (!t.cues.length) return [];
+  const n = t.cues.length;
+  const out: BlockSpec[] = [
+    { type: 'heading_2', rich: text('Transcription') },
+    { type: 'paragraph', rich: text(`${t.label} · ${languagesLabel(t)} · ${n} réplique${n > 1 ? 's' : ''}`, { italic: true }) },
+  ];
+  for (const c of t.cues.slice(0, MAX_TRANSCRIPT_CUES)) {
+    const rich: RichText[] = [...text(formatTimecode(c.start), { code: true }, safeUrl(timeUrl(c.start))), ...text(` ${c.text}`)];
+    if (c.tr?.trim()) rich.push(...text(`\n${c.tr.trim()}`, { italic: true }));
+    if (c.note?.trim()) rich.push(...text(`\n💬 ${c.note.trim()}`));
+    out.push({ type: 'paragraph', rich });
+  }
+  if (n > MAX_TRANSCRIPT_CUES) out.push({ type: 'paragraph', rich: text(`… ${n - MAX_TRANSCRIPT_CUES} répliques de plus dans Boo Notes`, { italic: true }) });
+  return out;
+}

@@ -157,6 +157,27 @@ Alt+Shift+S ─► content script :
 Repli : source cross-origin sans CORS ─► capture:visible-tab (onglet recadré sur la vidéo)
 ```
 
+### Flow 3 — transcription et passages
+
+```
+lecture ─► content script (toutes les 300 ms) : SubtitleCollector
+  1. video.textTracks (piste masquée chargée, jamais affichée par nous)   → liste complète
+  2. YouTube : "captionTracks" de la page → timedtext &fmt=json3           → liste complète
+  3. sinon : lignes de sous-titres affichées (sélecteurs par lecteur)      → applyLiveSample
+  ─► transcript:put (liste entière, ou répliques nouvelles) ─► SW TranscriptStore
+     (gardé si la note existe ou si le panneau est ouvert ; une meilleure source remplace
+      la précédente en gardant traductions et commentaires)
+  ─► panneau : 'caption' (réplique en cours → bandeau), storage → onglet Transcription
+fin du média ─► panneau : ligne 📄 épinglée (sinon transcript:pin par le SW)
+
+Alt+I ─► captureStream() + MediaRecorder (image + son, ou son) ; première image
+Alt+O ─► asset:save (image) + media:chunk… / media:commit (IndexedDB « boo-notes-media »)
+      ─► panneau : 'insert-passage' → "[02:05–06:07] ![Passage …](assets/…) [Extrait](media/…)"
+```
+
+Les transcriptions (`transcript.put`) et les enregistrements (`media.chunk` / `media.put`) partent
+vers l’application après les notes ([PROTOCOL.md](PROTOCOL.md)).
+
 ## Routage multi-onglets (« un seul lecteur actif »)
 
 Le SW tient dans `chrome.storage.session` la liste des onglets lecteurs et l’**onglet actif** : le
@@ -195,6 +216,11 @@ macOS Option).
 | `desktop:titles` | titres de la bibliothèque Desktop (complétion `[[`) |
 | `desktop:courses` | cours et chapitres de la bibliothèque Desktop (classement depuis le panneau) |
 | `players:allowed` | hôtes de lecteurs intégrés autorisés (agent injecté dans leurs iframes) |
+| `transcript:<noteId>` | transcription : langue, source, répliques `{ id, start, end, text, tr?, note? }`, parts regardées |
+| `sync:transcripts` | `{ noteId: rev }` transcriptions en attente d’acquittement Desktop |
+
+Les **extraits de passages** et le **son conservé** (trop volumineux pour `chrome.storage`) vivent
+dans IndexedDB (`boo-notes-media`, origine de l’extension, partagée par le SW et le panneau).
 
 `noteId` : `youtube:<id>`, `udemy:<cours>/<leçon>`, `coursera:<cours>/<item>`, `notion:<page>`,
 `web:<hôte><chemin>` — une note par vidéo, audio ou page.
