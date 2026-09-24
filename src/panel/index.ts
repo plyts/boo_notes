@@ -161,7 +161,7 @@ class PanelApp {
   private clockEl!: HTMLSpanElement;
   private durationEl!: HTMLSpanElement;
   private readingBar!: HTMLSpanElement;
-  private footerButtons: Record<'timestamp' | 'capture' | 'replay' | 'help' | 'link', HTMLButtonElement> | null = null;
+  private footerButtons: Record<'timestamp' | 'capture' | 'replay' | 'help' | 'link' | 'fullscreen', HTMLButtonElement> | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private contentTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly timeline = new Timeline({
@@ -682,7 +682,9 @@ class PanelApp {
     const swReset = iconButton('close', 'Arrêter le chronomètre', () => this.post({ type: 'stopwatch', action: 'reset' }));
     this.stopwatchEl = h('span', { class: 'stopwatch', hidden: true, role: 'group', 'aria-label': 'Chronomètre' }, swToggle, swReset);
     const link = iconButton('link', 'Lier une fiche ([[)', () => this.editor.insertWikiLink());
-    this.footerButtons = { timestamp, capture, replay, help, link };
+    // The video fullscreen with the notes beside it (the page's own fullscreen may hide them).
+    const fullscreen = iconButton('expand', 'Plein écran avec les notes', () => this.post({ type: 'fullscreen' }));
+    this.footerButtons = { timestamp, capture, replay, help, link, fullscreen };
     capture.classList.add('compact');
     // Passage: first click = its start, second = its end (Alt+I / Alt+O).
     this.passageButton = actionButton('passage', 'Passage', () =>
@@ -746,7 +748,7 @@ class PanelApp {
         { class: 'footer' },
         // Media-player scrubber: current time · notes timeline · duration.
         h('div', { class: 'scrubber' }, this.clockEl, this.stopwatchEl, this.timeline.el, this.readingBar, this.durationEl),
-        h('div', { class: 'controls' }, timestamp, capture, this.passageButton, this.chronoButton, h('span', { class: 'spacer' }), link, replay, help),
+        h('div', { class: 'controls' }, timestamp, capture, this.passageButton, this.chronoButton, h('span', { class: 'spacer' }), link, replay, fullscreen, help),
       ),
       this.noticeEl,
       this.sheet.el,
@@ -776,6 +778,7 @@ class PanelApp {
       h('div', { class: 'menu-sep', role: 'separator' }),
       h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Sur cet appareil'),
       item('download', 'download', 'Télécharger', '.md + captures, extraits et transcription'),
+      item('pdf', 'file', 'Télécharger en PDF', 'Images comprises, instants et passages cliquables'),
       item('copy', 'copy', 'Copier la note', 'Images comprises : Obsidian, Notion, Docs…'),
     );
     menu.addEventListener('keydown', (e) => {
@@ -886,6 +889,8 @@ class PanelApp {
         ? 'Capture indisponible pour un média audio'
         : withKey(page ? 'Capturer la partie visible de la page' : 'Capturer l’image', keys['capture-screenshot']),
     );
+    // A picture to watch: fullscreen with the notes (not for audio, pages, or a detached window).
+    buttons.fullscreen.hidden = page || audio || !this.hasVideo || MODE === 'popout';
     buttons.replay.hidden = page;
     set(buttons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, keys.replay));
     set(buttons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));

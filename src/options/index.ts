@@ -418,6 +418,20 @@ async function main(): Promise<void> {
   callBackground({ type: 'sync:status' }).then(renderStatus, () => undefined);
   renderNotion(undefined);
   callBackground({ type: 'notion:status' }).then(renderNotion, () => undefined);
+  const allPdf = document.getElementById('all-pdf') as HTMLButtonElement;
+  allPdf.addEventListener('click', async () => {
+    allPdf.disabled = true;
+    allPdf.textContent = 'Préparation du PDF…';
+    try {
+      const { message } = await callBackground({ type: 'notes:pdf' });
+      flashSaved(message);
+    } catch (e) {
+      flashSaved(e instanceof Error ? e.message : String(e), false);
+    } finally {
+      allPdf.disabled = false;
+      allPdf.textContent = 'Télécharger le PDF';
+    }
+  });
   const allSites = document.getElementById('all-sites') as HTMLInputElement;
   allSites.addEventListener('change', () => void toggleAllSites(allSites));
   await Promise.all([renderShortcuts(), renderData(), renderSites(), renderAllSites()]);

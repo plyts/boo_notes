@@ -282,6 +282,20 @@ export class MediaController {
     return r && !this.current && r.media.kind === 'video' ? this.frameRect(r, r.media.content ?? r.media.box) : null;
   }
 
+  /**
+   * The element holding the picture and its controls: the site's player
+   * (`#movie_player`…), else the video's closest wrapper of the same size;
+   * the <iframe> of an embedded player. Null for audio.
+   */
+  box(): HTMLElement | null {
+    const v = this.video;
+    if (v) return playerBoxOf(v, this.adapter.playerFocusSelectors);
+    const r = this.remote;
+    if (!r || r.media.kind !== 'video') return null;
+    const iframe = this.frames.get(r.media.token);
+    return iframe?.isConnected ? iframe : null;
+  }
+
   /** On-screen box of the player (a hidden audio element has none). */
   rect(): DOMRect | null {
     const m = this.current;
@@ -371,4 +385,22 @@ function isAudioOnly(m: HTMLMediaElement): boolean {
 function isUsable(media: HTMLMediaElement): boolean {
   if (media instanceof HTMLAudioElement || isAudioOnly(media)) return true;
   return isVisible(media) && area(media) >= MIN_VIDEO_AREA;
+}
+
+/** The site's player around a video, else its closest wrapper of about the same size (controls included). */
+export function playerBoxOf(video: HTMLVideoElement, selectors: string[]): HTMLElement {
+  const vr = video.getBoundingClientRect();
+  for (const sel of selectors) {
+    const el = video.closest<HTMLElement>(sel);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width * r.height <= Math.max(1, vr.width * vr.height) * 1.8) return el;
+  }
+  let box: HTMLElement = video;
+  for (let el = video.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+    const r = el.getBoundingClientRect();
+    if (r.width > vr.width + 48 || r.height > vr.height + 120) break;
+    box = el;
+  }
+  return box;
 }

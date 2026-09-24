@@ -31,6 +31,7 @@ import { formatTimecode } from '../shared/time';
 import { adapterForHost, detectPageTheme, headerInset, queryVisible, type PlatformAdapter } from './adapters';
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
+import { hostsChildren, PlayerFit } from './fit';
 import { looksLikePlayer, playerFrames, scanMedia } from './media-scan';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
@@ -133,6 +134,8 @@ class ContentApp {
   private scorm: ScormState | null = null;
   /** Quoted passages of the note (text fragment links), also highlighted in frames. */
   private passageUrls: string[] = [];
+  /** The player made to fit beside the notes (side by side, fullscreen). */
+  private readonly fit = new PlayerFit();
   /** Passage started with « Début du passage » (Alt+I), recording its picture and sound when possible. */
   private passage: { noteId: string; start: number; poster: Shot | null; recording: Recording | null; what: 'video' | 'audio' } | null = null;
   /** Passage replayed to record its extract. */
@@ -170,7 +173,10 @@ class ContentApp {
       width: this.settings.drawerWidth,
       layout: this.settings.layout,
       topInset: () => headerInset(this.adapter),
-      onResized: (width) => void saveSettings({ drawerWidth: width }).catch(() => undefined),
+      onResized: (width) => {
+        void saveSettings({ drawerWidth: width }).catch(() => undefined);
+        this.scheduleFit();
+      },
     });
     this.subtitles = new SubtitleCollector({
       flush: async (noteId, info, cues, replace, engaged) => {
@@ -261,6 +267,7 @@ class ContentApp {
     }
     this.embeddedPort?.disconnect();
     this.popoutPort?.disconnect();
+    this.fit.clear();
     this.overlay.destroy();
     this.drawer.destroy();
     this.reader.stop();
@@ -299,6 +306,9 @@ class ContentApp {
     this.stopSettingsWatch = onSettingsChanged((s) => this.applySettings(s));
 
     this.intervals.push(setInterval(() => this.checkUrl(), 750));
+    // Players resize themselves (window resized, theatre mode, page reflow): kept beside the notes.
+    this.intervals.push(setInterval(() => this.updateFit(), 700));
+    window.addEventListener('resize', () => this.scheduleFit(), { signal: this.abort.signal });
     // The extension reloaded or updated under this page: this copy is orphaned.
     this.intervals.push(setInterval(() => !chrome.runtime?.id && this.orphan(), 2000));
     document.addEventListener(ALIVE_QUESTION, () => document.dispatchEvent(new CustomEvent(ALIVE_ANSWER)), { signal: this.abort.signal });
@@ -593,12 +603,123 @@ class ContentApp {
 
   private readonly onFullscreenChange = (): void => {
     const fs = document.fullscreenElement;
-    // A bare <video> in fullscreen cannot host children: nothing can be drawn then.
-    const target = fs && !(fs instanceof HTMLVideoElement) ? fs : null;
+    // Fitted again once the page has laid out its fullscreen (or left it).
+    this.fit.clear();
+    // A video (or a frame) fullscreen by itself cannot host anything: with the notes open, its
+    // container takes the fullscreen instead (still the user's gesture), the notes beside it.
+    if (fs instanceof HTMLElement && !hostsChildren(fs) && this.drawer.isOpen && !this.popoutPort) {
+      this.redirectFullscreen(fs);
+      return;
+    }
+    const target = fs && hostsChildren(fs) ? fs : null;
     this.overlay.reparent(target);
-    if (target && this.drawer.isOpen && !this.pinned) this.drawer.close();
+    // The notes stay open in fullscreen, beside the video (which makes room for them).
     this.drawer.setFullscreenTarget(target);
+    if (!fs) {
+      if (this.fullscreenBackdrop) {
+        this.fullscreenBackdrop.el.style.setProperty('background', this.fullscreenBackdrop.value, this.fullscreenBackdrop.priority);
+        this.fullscreenBackdrop = null;
+      }
+      this.fullscreenSubject = null;
+      const redirected = this.fullscreenRedirect;
+      this.fullscreenRedirect = null;
+      if (redirected?.isConnected) {
+        void this.enterFullscreen(redirected).then((error) => {
+          // Without a fresh gesture (a shortcut the browser kept for itself), the button of the panel does it.
+          if (error) this.overlay.toast('Les notes ne peuvent pas s’afficher sur ce plein écran : cliquez sur ⤢ en bas du panneau (« Plein écran avec les notes »)', 'info', 6000);
+        });
+      }
+    }
+    this.scheduleFit();
   };
+
+  /** Leaves the fullscreen of `el` (a bare video, a frame) to put its container fullscreen. */
+  private redirectFullscreen(el: HTMLElement): void {
+    this.fullscreenRedirect = el;
+    void document.exitFullscreen().catch(() => {
+      this.fullscreenRedirect = null;
+    });
+  }
+
+  /** Background of the element Boo Notes put fullscreen, as it was. */
+  private fullscreenBackdrop: { el: HTMLElement; value: string; priority: string } | null = null;
+  /** What fills the screen beside the notes, in a fullscreen Boo Notes asked for. */
+  private fullscreenSubject: HTMLElement | null = null;
+  /** A bare video / frame whose fullscreen is being moved to its container. */
+  private fullscreenRedirect: HTMLElement | null = null;
+  private fitFrame = 0;
+
+  private scheduleFit(): void {
+    if (this.fitFrame) return;
+    // After the page's own layout (players resize on the next frames).
+    this.fitFrame = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        this.fitFrame = 0;
+        this.updateFit();
+      }),
+    );
+  }
+
+  /**
+   * The whole picture stays visible: side by side, a player still under the
+   * notes is scaled to end where they begin; in fullscreen, it fills the
+   * screen beside the notes (split screen), or the whole screen without them.
+   */
+  private updateFit(): void {
+    if (this.dead) return;
+    const fs = document.fullscreenElement;
+    // Floating notes (« superposé » layout) sit over the video by choice.
+    const notes = this.drawer.layoutMode === 'side-by-side' ? this.drawer.rect() : null;
+    if (fs && fs !== document.documentElement && fs !== document.body) {
+      const area = new DOMRect(0, 0, notes ? notes.left : innerWidth, innerHeight);
+      const subject = this.fullscreenSubject;
+      if (!hostsChildren(fs) || !(fs instanceof HTMLElement)) this.fit.clear();
+      // What Boo Notes put fullscreen: it fills the screen beside the notes.
+      else if (subject && subject !== fs && fs.contains(subject)) this.fit.apply(subject, area, 'fill');
+      // The page's own fullscreen player: all of it, controls included; the notes and the HUD it holds stay as they are.
+      else this.fit.apply(fs, area, 'fill', [this.drawer.host, this.overlay.host]);
+      return;
+    }
+    if (notes) this.fit.apply(this.player.box(), new DOMRect(0, 0, notes.left - 8, innerHeight), 'shrink');
+    else this.fit.clear();
+  }
+
+  /** « Plein écran avec les notes »: the player's container fullscreen, the notes beside the video. */
+  private async fullscreenWithNotes(): Promise<void> {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const box = this.player.box();
+    if (!box) {
+      this.overlay.toast('Aucune vidéo à afficher en plein écran', 'error');
+      return;
+    }
+    if (!this.drawer.isOpen && !this.popoutPort) this.openDrawer(null);
+    const error = await this.enterFullscreen(box);
+    if (error) this.overlay.toast(`Plein écran refusé : ${error}`, 'error');
+  }
+
+  /**
+   * Puts `subject`'s container fullscreen: `subject` can then be scaled into
+   * the part of the screen the notes leave. Resolves to the error, if refused.
+   */
+  private async enterFullscreen(subject: HTMLElement): Promise<string | null> {
+    const parent = subject.parentElement;
+    const root = parent && parent !== document.body ? parent : document.documentElement;
+    this.fullscreenBackdrop = { el: root, value: root.style.getPropertyValue('background'), priority: root.style.getPropertyPriority('background') };
+    this.fullscreenSubject = subject;
+    root.style.setProperty('background', '#000', 'important');
+    try {
+      await root.requestFullscreen({ navigationUI: 'hide' });
+      return null;
+    } catch (e) {
+      root.style.setProperty('background', this.fullscreenBackdrop.value, this.fullscreenBackdrop.priority);
+      this.fullscreenBackdrop = null;
+      this.fullscreenSubject = null;
+      return errorMessage(e);
+    }
+  }
 
   // --- Page / video context ---------------------------------------------------------
 
@@ -958,7 +1079,12 @@ class ContentApp {
         // With a pop-out, the background switches window focus instead.
         if (!this.popoutPort) {
           if (this.drawer.isOpen) this.closeDrawer();
-          else this.openDrawer('keep');
+          else {
+            this.openDrawer('keep');
+            // A bare video fullscreen hides everything else: its container takes over, the notes beside it.
+            const fs = document.fullscreenElement;
+            if (fs instanceof HTMLElement && !hostsChildren(fs)) this.redirectFullscreen(fs);
+          }
         }
         break;
       case 'insert-timestamp':
@@ -987,6 +1113,7 @@ class ContentApp {
     void this.ensureRegistered(true);
     this.drawer.open();
     this.notifyFrames();
+    this.scheduleFit();
     this.postPanels({ type: 'page-theme', theme: detectPageTheme(this.adapter) });
     if (focus) {
       this.drawer.focus();
@@ -997,6 +1124,7 @@ class ContentApp {
   private closeDrawer(): void {
     this.drawer.close();
     this.notifyFrames();
+    this.scheduleFit();
     this.overlay.hideMarker();
     this.overlay.hideQuoteButton();
     queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
@@ -1684,6 +1812,9 @@ class ContentApp {
         break;
       case 'captions:show':
         this.showCaptions();
+        break;
+      case 'fullscreen':
+        void this.fullscreenWithNotes();
         break;
     }
     this.markInteraction();

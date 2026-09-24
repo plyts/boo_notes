@@ -522,7 +522,7 @@ test.describe('Copier et télécharger « tout compris »', () => {
     // Downloaded: the note, its card, its recorded extract and its transcript (Markdown + WebVTT).
     await sw.evaluate(() => chrome.downloads.erase({}));
     await p.getByRole('button', { name: 'Exporter la note' }).click();
-    await p.getByRole('menuitem', { name: /Télécharger/ }).click();
+    await p.getByRole('menuitem', { name: /^Télécharger \.md/ }).click();
     await expect(p.locator('.notice')).toContainText('Téléchargé dans');
     const files = await sw.evaluate(async () => {
       for (let i = 0; i < 80; i++) {

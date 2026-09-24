@@ -260,7 +260,7 @@ test.describe('Export hors-ligne', () => {
     await p.getByRole('button', { name: 'Exporter la note' }).click();
     // Desktop targets are disabled while the app is offline.
     await expect(p.getByRole('menuitem', { name: /Envoyer vers Notion/ })).toBeDisabled();
-    await p.getByRole('menuitem', { name: /Télécharger/ }).click();
+    await p.getByRole('menuitem', { name: /^Télécharger \.md/ }).click();
     // Accented name, or its ASCII fallback on systems refusing Unicode file names.
     await expect(p.locator('.notice')).toHaveText(/^Téléchargé dans « Boo Notes\/Vid[ée]o de test E2E »$/);
     // Playwright stores downloads under random names: check what was downloaded instead.

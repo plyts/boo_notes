@@ -26,6 +26,16 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
 - **Copier la note « tout compris »** : captures, images et cartes des passages **intégrées**,
   horodatages liés à l’instant, transcription — à coller dans **Obsidian**, **Notion**, Google Docs,
   Word… (Markdown et HTML à la fois) ; **Télécharger** ajoute les extraits vidéo et la transcription.
+- **Télécharger en PDF** : la note en cours (menu **Exporter** du panneau), ou **toutes les notes**
+  en un seul PDF (Réglages → Données) avec page de garde et **sommaire cliquable** rangé par
+  cours › chapitre. Captures et images **intégrées** ; chaque horodatage, capture (« › Revoir à
+  04:12 ») et **passage / extrait vidéo** est un **lien cliquable** vers cet instant de la vidéo ;
+  une section **Références** en fin de note reprend la source, les passages et les liens.
+- **La vidéo n’est jamais cachée par les notes** : côte à côte, un lecteur qui garde sa largeur
+  (YouTube, lecteurs en `100vw`) est réduit pour finir où commencent les notes ; en **plein écran**,
+  les notes **restent affichées** à côté de la vidéo (écran partagé) — tout le lecteur, commandes
+  comprises, est réduit dans la place libre. Le bouton **⤢ Plein écran avec les notes** (bas du
+  panneau) le fait en un clic, et le plein écran natif d’une vidéo seule est repris par son lecteur.
 - **Copier / coller riche** dans les notes ([détails](docs/TRANSCRIPTION.md#copier--coller-dans-les-notes-extension-et-application)) :
   coller (ou glisser) une **capture d’écran**, une **image** du web, une **vidéo** ou un **audio**, du
   **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
@@ -136,7 +146,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Non-intrusivité** | Le lecteur n’est jamais modifié : HUD, toasts, flash et marqueur sont dessinés dans un calque séparé (Shadow DOM) positionné d’après la géométrie de la vidéo. En mode « côte à côte », la page est décalée de la largeur du panneau et le panneau commence sous l’en-tête fixe de YouTube. |
 | **Flow 1** | `Alt+Shift+N` → panneau + focus ; la première lettre tapée sur une ligne vide ajoute `[MM:SS]` (après `- `, `1. `, `## `, `> ` si présents) ; `Échap` ferme ou panneau laissé ouvert. |
 | **Flow 2** | `Alt+Shift+S` → extraction `<canvas>` en résolution native, flash blanc 100 ms, toast `04:15 - Capture sauvegardée`, ligne `[04:15] ![Capture 04:15](assets/…)` rendue en vignette. |
-| **Drawer** | À droite, 300–500 px (360 par défaut, poignée de redimensionnement), badge de synchronisation (vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion — via l’app ou directement —, `.md` + captures, presse-papier). |
+| **Drawer** | À droite, 300–500 px (360 par défaut, poignée de redimensionnement), badge de synchronisation (vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion — via l’app ou directement —, `.md` + captures, **PDF**, presse-papier). |
 | **Éditeur** | CodeMirror 6 : Markdown rendu sur les lignes inactives (titres, gras, code, citations), horodatages cliquables, vignettes, listes continuées. |
 | **HUD** | `[ 04:15 ]` copie `[04:15](URL#t=255)` ; 📸 capture ; 📌 épingle le panneau ; ⚙️ paramètres. |
 | **Auto-pause (option)** | Pause après 1,5 s de frappe continue, reprise 1 s après la dernière touche — uniquement si c’est l’extension qui a mis en pause. |
@@ -174,6 +184,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Retour au bon endroit** | « ✓ Copié » sur la pilule du HUD, vignette dans le toast de capture, snackbar pour les exports, « ✓ Enregistré » dans l’en-tête. |
 | **Infobulles rapides** | Sur le HUD, avec les touches (`⌥ ⇧ S` sur macOS). |
 | **Disposition superposée** | Carte flottante arrondie au-dessus de la page (et en plein écran). Double-clic sur le bord : largeur par défaut. |
+| **Écran partagé** | Côte à côte et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à gauche des notes — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. |
 | **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
@@ -216,7 +227,9 @@ npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 
 Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Shift+T` (y compris le
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
-lien, épinglage, plein écran, liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
+lien, épinglage, plein écran (notes à côté de la vidéo, lecteur réduit, plein écran natif d’une vidéo
+seule repris par son lecteur, bouton « Plein écran avec les notes »), lecteur large réduit côte à
+côte, **export PDF** (note et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu,
@@ -265,8 +278,14 @@ docs/         architecture, protocole, design, Desktop, Notion
 - **Mode côte à côte** : la page est décalée via une marge sur `<html>` ; les éléments en
   `position: fixed` d’un site restent calés sur la fenêtre (le panneau démarre sous l’en-tête fixe de
   YouTube pour ne pas le masquer).
-- **Plein écran** : le HUD et le panneau épinglé sont déplacés dans l’élément plein écran (seule façon
-  d’être visibles) puis remis en place à la sortie.
+- **Plein écran** : le HUD et le panneau sont déplacés dans l’élément plein écran (seule façon
+  d’être visibles : Chrome rend inerte tout ce qui est hors de lui) puis remis en place à la sortie.
+  Une `<video>` ou une iframe mise seule en plein écran ne peut rien afficher d’autre : notes
+  ouvertes, son lecteur (l’élément parent) prend le relais, grâce au geste de l’utilisateur. Si ce
+  geste manque (raccourci gardé par le navigateur), un message propose le bouton ⤢ du panneau.
+- **Export PDF** : polices standard du PDF (Helvetica, jeu Latin-1 étendu : français, accents,
+  guillemets, tirets) — les emoji sont omis et les écritures non latines remplacées par « ? » ; les
+  extraits vidéo sont des **liens** vers l’instant de la vidéo (un PDF ne lit pas de vidéo).
 - **Maquettes Figma** (étape 1) : ce dépôt fournit les tokens, mesures, états et captures dans
   [docs/DESIGN.md](docs/DESIGN.md) pour les reporter dans Figma ; aucun fichier Figma n’est inclus.
 - **Noms de fichiers exportés** : si Chrome refuse les caractères accentués (certaines locales

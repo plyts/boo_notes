@@ -29,7 +29,8 @@
     "scripting",
     "downloads",
     "alarms",
-    "clipboardWrite"
+    "clipboardWrite",
+    "offscreen"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

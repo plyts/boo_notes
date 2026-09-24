@@ -46,9 +46,10 @@
 | Contexte | Fichier d’entrée | Responsabilités |
 | --- | --- | --- |
 | **Service worker** | `src/background/index.ts` | Reçoit les raccourcis globaux (`chrome.commands`) et le clic sur l’icône ; choisit le lecteur cible ; seul écrivain du stockage (`NoteStore`) ; captures de repli (`captureVisibleTab`) ; export `.md` ; fenêtre pop-out ; synchronisation Desktop (`DesktopSync`) ; synchronisation Notion directe quand l’application est fermée (`ExtensionNotion`, `src/background/notion.ts`, même moteur que l’application : `src/shared/notion/`) ; ouverture des `[[liens]]`. |
-| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes ; **mode lecture** (`src/content/reader.ts`) pour une page sans média. |
+| **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes ; **mode lecture** (`src/content/reader.ts`) pour une page sans média ; **écran partagé** (`src/content/fit.ts`) : le lecteur est réduit (`scale` / `translate`) pour que les notes ne le cachent jamais, côte à côte comme en plein écran. |
 | **Panneau** | `src/panel/index.ts` | Éditeur de notes ; tourne soit dans l’iframe du drawer, soit dans la fenêtre pop-out. Communique avec le script de contenu de l’onglet vidéo par un *port*. |
-| **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données. |
+| **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données (dont « Télécharger toutes les notes en PDF »). |
+| **Document hors écran** | `src/offscreen/pdf.ts` | Mise en page des PDF (`src/shared/pdf-notes.ts`, pdf-lib) : le service worker (`src/background/pdf.ts`) rassemble les notes et leurs images, l’ouvre le temps d’un export (`chrome.offscreen`) puis télécharge le résultat. La bibliothèque PDF reste ainsi hors du service worker, que Chrome relance souvent. |
 
 La logique pure est dans `src/shared/` et couverte par les tests unitaires. L’application Desktop
 (`desktop/`, voir [DESKTOP.md](DESKTOP.md)) réutilise `src/shared/`, l’éditeur `src/panel/editor.ts`
@@ -239,6 +240,13 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
   Une copie vivante dans le même monde isolé est conservée ; une copie d’une version précédente
   (autre monde) est démontée via l’événement `boo-notes:teardown`, et le démarrage s’interrompt si
   ce démontage survient pendant une étape asynchrone.
+- **Plein écran** : Chrome ne dessine que l’élément plein écran et ses descendants, et rend tout
+  le reste inerte (même un *popover* de la top layer, visible, n’y reçoit aucun clic). Le drawer
+  et le HUD sont donc déplacés dans cet élément, qui est réduit par `scale` / `translate` (Chrome y
+  force `transform: none`, pas ces propriétés) ; le drawer et le HUD reçoivent la transformation
+  inverse (boîte fixe couvrant l’élément) et gardent taille et place. Une `<video>` ou une iframe
+  seule en plein écran ne peut rien contenir : notes ouvertes, Boo Notes quitte ce plein écran et
+  le redemande pour son parent tant que l’activation du clic de l’utilisateur est valable.
 - L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
 
 ## Sécurité

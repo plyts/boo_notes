@@ -31,7 +31,7 @@ export interface SyncStatus {
   at: number;
 }
 
-export type ExportTarget = 'desktop' | 'notion' | 'download';
+export type ExportTarget = 'desktop' | 'notion' | 'download' | 'pdf';
 
 /** Notion as seen by the extension: through the desktop app, or directly (app closed). */
 export interface NotionStatus {
@@ -199,6 +199,8 @@ export type BackgroundRequest =
   | { type: 'sync:status' }
   | { type: 'sync:retry' }
   | { type: 'notes:list' }
+  /** Every note as one PDF, downloaded. */
+  | { type: 'notes:pdf' }
   | { type: 'notes:clear' }
   /** Sites where Boo Notes is always active (optional host permission already granted). */
   | { type: 'sites:list' }
@@ -280,6 +282,7 @@ export interface BackgroundResponses {
   'sync:status': SyncStatus;
   'sync:retry': SyncStatus;
   'notes:list': Record<string, NoteSummary>;
+  'notes:pdf': { message: string };
   'notes:clear': void;
   'sites:list': string[];
   'sites:enable': string[];
@@ -420,4 +423,6 @@ export type PanelToContent =
   /** Replays a passage of the note and records its extract. */
   | { type: 'passage:record'; start: number; end: number }
   /** « Afficher les sous-titres »: the player's captions are switched on (then collected). */
-  | { type: 'captions:show' };
+  | { type: 'captions:show' }
+  /** « Plein écran avec les notes »: the player fullscreen, the notes beside it (a second click leaves). */
+  | { type: 'fullscreen' };

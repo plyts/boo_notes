@@ -16,6 +16,7 @@ const CSS = `
 :host { all: initial; }
 .drawer {
   position: fixed; top: var(--top, 0px); right: 0; bottom: 0; width: var(--w, 360px); display: flex; box-sizing: border-box;
+  pointer-events: auto; /* its host may be a box over the whole player (see PlayerFit) */
   transform: translateX(100%); visibility: hidden;
   transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.18s;
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.28); border-left: 1px solid rgba(127, 127, 127, 0.25);
@@ -144,6 +145,10 @@ export class Drawer {
     this.applyDock();
   }
 
+  get layoutMode(): DrawerLayout {
+    return this.layout;
+  }
+
   /** On-screen box of the open drawer, null when closed. */
   rect(): DOMRect | null {
     return this.opened ? this.panel.getBoundingClientRect() : null;
@@ -196,7 +201,8 @@ export class Drawer {
   }
 
   private applyFloating(): void {
-    this.panel.classList.toggle('floating', this.layout === 'overlay' || this.fullscreenTarget !== null);
+    // Fullscreen: the notes stand beside the video (which makes room, see PlayerFit), full height.
+    this.panel.classList.toggle('floating', this.layout === 'overlay');
   }
 
   /** Side-by-side layout: reserve the drawer width on the right of the page. */

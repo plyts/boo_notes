@@ -20,6 +20,7 @@ import { findMediaRefs, pinTranscriptLine, transcriptLine, transcriptPath, trans
 import { TranscriptStore } from '../shared/transcript-store';
 import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
+import { downloadPdf } from './pdf';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
 
@@ -432,6 +433,7 @@ const handlers: Handlers = {
 
   export: async (msg) => {
     if (msg.target === 'download') return { message: await downloadNote(msg.noteId) };
+    if (msg.target === 'pdf') return { message: await downloadPdf(store, [msg.noteId]) };
     if (msg.target === 'notion' && !sync.appHandlesNotion) {
       // App closed (or without Notion): the extension writes to Notion itself.
       if (await notion.isConfigured()) {
@@ -683,6 +685,8 @@ const handlers: Handlers = {
     await chrome.permissions.remove({ origins: [`${origin}/*`] }).catch(noop);
     return sites;
   },
+
+  'notes:pdf': async () => ({ message: await downloadPdf(store, null) }),
 
   'wiki:titles': async () => {
     const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_TITLES)]);
