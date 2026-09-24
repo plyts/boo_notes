@@ -49,6 +49,20 @@ la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie un
 
 ![Mode lecture sur un article](docs/screenshots/reading-mode.png)
 
+**Modules de cours (SCORM, e-learning)** — une leçon d’un LMS (Docebo / Databricks Academy,
+Moodle, Cornerstone, TalentLMS…) affichée dans des cadres imbriqués (Articulate Rise / Storyline,
+Captivate, iSpring) :
+
+- la **bulle « Citer »** apparaît dans le module sur le texte sélectionné (ou `Alt+Maj+T`) ; la
+  citation est liée à la leçon et **surlignée dans le module**, un clic dans la note l’y retrouve ;
+- sans sélection, `Alt+Maj+T` ancre la ligne au **titre lu dans le module** ; `Alt+Maj+S` capture
+  **le module seul** (pas l’en-tête du LMS) ;
+- ce que le module déclare à son LMS (SCORM 1.2 / 2004, xAPI) s’affiche avec la note —
+  « Module SCORM · En cours · 50 % », « Terminé · score 90 » — et compte comme **progression** de
+  la leçon ;
+- un cadre d’un autre site dans le module (contenu, vidéo) est signalé : **Autoriser** une fois, ou
+  **Activer sur tous les sites** dans les options ; ses vidéos s’horodatent alors comme les autres.
+
 | Note vide : le mode d’emploi | Raccourcis (`Ctrl/⌘ + /`) | Toast de capture |
 | --- | --- | --- |
 | ![Note vide](docs/screenshots/panel-empty.png) | ![Raccourcis](docs/screenshots/panel-shortcuts.png) | ![Toast](docs/screenshots/capture-toast.png) |
@@ -95,7 +109,7 @@ npm run build        # → dist/
 | --- | --- | --- |
 | Ouvrir / réduire le panneau | `Alt+Shift+N` | Ouvre le panneau et donne le focus à l’éditeur ; `Échap` le referme. |
 | Insérer l’horodatage | `Alt+Shift+T` | Injecte `[MM:SS]` au curseur, sans interrompre la lecture. **Mode lecture** : cite le passage sélectionné (`> texte [↗](URL#:~:text=…)`), ou, sans sélection, ancre la ligne à la section lue (`[↗ Titre](…)`). |
-| Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. **Mode lecture** : capture la partie visible de la page. |
+| Capture d’écran | `Alt+Shift+S` | Capture la frame, flash 100 ms, toast, vignette `![](assets/…)` dans la note. **Mode lecture** : capture la partie visible de la page (le module seul pour une leçon d’un LMS). |
 | Smart Pause | `Alt+Shift+Space` | Pause + focus sur une nouvelle ligne de l’éditeur ; un second appui relance la vidéo et rend le clavier au lecteur. |
 | Saut arrière | `Alt+←` | Recule de 5 s (3 / 5 / 10 / 15 s au choix). |
 | Début / fin du passage | `Alt+I` / `Alt+O` | Découpe un passage (02:05–06:07) : carte dans la note, extrait image + son, sous-titres et notes de l’intervalle. |
@@ -261,8 +275,9 @@ docs/         architecture, protocole, design, Desktop, Notion
 - **Mode lecture** : une citation est retrouvée par son texte ; si la page change ce passage, le
   lien ouvre la page sans le surligner (« Passage introuvable »). Les longues citations sont liées
   par leurs 5 premiers et 5 derniers mots (fragments de texte standard, compris par Chrome, Edge et
-  Safari). Dans les pages qui rendent leur contenu dans des iframes, seul le document principal est
-  lu.
+  Safari). Le texte des iframes (modules de cours) se cite et se surligne une fois leur site
+  autorisé ; un module dessiné en image ou en canvas (certaines diapositives Storyline) ne se
+  sélectionne pas : capture et notes restent possibles.
 - **Notion depuis l’extension** : le secret de l’intégration est alors conservé dans le stockage
   local de l’extension (voir [docs/NOTION.md](docs/NOTION.md)).
 - **Lecteurs intégrés** (iframes) : pris en charge dès que l’extension peut lire l’hôte du lecteur

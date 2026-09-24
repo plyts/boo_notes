@@ -16,10 +16,12 @@ import {
   type PanelMode,
   type PanelToContent,
   type PlaybackState,
+  type ScormState,
   type SyncStatus,
 } from '../shared/messages';
 import { detectVideoContext, PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
 import { buildRichCopy, renderRichCopy, type RichCopyInput } from '../shared/rich-copy';
+import { scormLabel } from '../shared/scorm';
 import { loadSettings, normalizeSettings, saveSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, CourseOption, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
@@ -147,6 +149,8 @@ class PanelApp {
   private statusLabel!: HTMLSpanElement;
   private titleEl!: HTMLHeadingElement;
   private platformEl!: HTMLSpanElement;
+  /** A course module (SCORM, xAPI) in the page: its completion, progress, score. */
+  private scorm: ScormState | null = null;
   private statsEl!: HTMLSpanElement;
   private saveEl!: HTMLSpanElement;
   private noticeEl!: HTMLDivElement;
@@ -382,6 +386,10 @@ class PanelApp {
           this.editor.insertBlock(msg.text);
           if (msg.focus) this.editor.focus();
         });
+        break;
+      case 'scorm':
+        this.scorm = msg.state;
+        this.renderKind();
         break;
       case 'reading':
         this.reading = { ratio: msg.ratio, passage: msg.passage };
@@ -843,7 +851,10 @@ class PanelApp {
     const page = this.kind === 'page';
     const platform = this.ctx ? PLATFORM_LABELS[this.ctx.platform] : '';
     const via = this.source === 'stopwatch' ? ' · Chronomètre' : this.source === 'frame' ? ' · Lecteur intégré' : '';
-    this.platformEl.textContent = (audio ? `${platform} · Audio` : page ? `${platform} · Lecture` : platform) + via;
+    // A course module (SCORM): what it reports to the LMS, next to the platform.
+    const lesson = this.scorm ? ` · Module ${this.scorm.version === 'xapi' ? 'xAPI' : 'SCORM'}${scormLabel(this.scorm) ? ` · ${scormLabel(this.scorm)}` : ''}` : '';
+    this.platformEl.textContent = (audio ? `${platform} · Audio` : page && !lesson ? `${platform} · Lecture` : platform) + via + lesson;
+    this.platformEl.title = this.scorm?.location ? `Repère du module : ${this.scorm.location}` : '';
     this.renderSource();
     document.documentElement.dataset.kind = page ? 'page' : audio ? 'audio' : 'video';
     document.documentElement.dataset.source = this.source ?? 'none';
@@ -1292,8 +1303,8 @@ class PanelApp {
     this.playersHint.hidden = missing.length === 0;
     (this.playersHint.querySelector('.site-text') as HTMLElement).textContent =
       missing.length === 1
-        ? `Lecteur intégré (${missing[0]}) : autorisez Boo Notes à le suivre pour horodater vos notes.`
-        : `${missing.length} lecteurs intégrés (${missing.join(', ')}) : autorisez Boo Notes à les suivre.`;
+        ? `Contenu intégré (${missing[0]}) — lecteur vidéo ou module de cours : autorisez Boo Notes à le lire (horodatage, citations, captures).`
+        : `${missing.length} contenus intégrés (${missing.join(', ')}) — lecteurs ou modules de cours : autorisez Boo Notes à les lire.`;
   }
 
   private async allowPlayers(): Promise<void> {

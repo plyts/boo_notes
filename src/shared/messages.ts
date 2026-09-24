@@ -1,4 +1,5 @@
 import type { MediaKind, VideoContext } from './platforms';
+import type { InPageBinding } from './shortcuts';
 import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
 import type { Cue, Transcript, TranscriptSource } from './transcript';
 import type { CuePatch, TranscriptInfo } from './transcript-store';
@@ -100,13 +101,53 @@ export type FrameCaptions =
   | { kind: 'file'; cues: Cue[]; lang: string; label: string; source: 'platform' | 'track'; complete: boolean }
   | { kind: 'lines'; lines: string[] | null };
 
+/** What a SCORM module tells its LMS (cmi.* values), as seen by Boo Notes. */
+export interface ScormState {
+  /** `1.2` or `2004`. */
+  version: string;
+  /** `completed`, `incomplete`, `passed`, `failed`, `browsed`, `not attempted`… */
+  status: string;
+  /** 0–1, when the module reports it (`cmi.progress_measure`). */
+  progress: number | null;
+  /** Score, as the module gives it (`85`, or `0.85` scaled → 85). */
+  score: number | null;
+  /** Where the learner is (`cmi.location`): the module's own bookmark. */
+  location: string;
+}
+
+/**
+ * Reading inside a sub-frame: a course module (SCORM, e-learning) or any
+ * embedded page. `where`: the heading being read there.
+ */
+export type FrameEvent =
+  /** Text selected in the frame ('' when none). */
+  | { kind: 'selection'; text: string; where: string }
+  /** « Citer » pressed in the frame: quote this text in the note. */
+  | { kind: 'quote'; text: string; where: string }
+  /** The frame holds text being read (a course page): its heading in view and how far it is read. */
+  | { kind: 'reading'; where: string; ratio: number }
+  /** Large frames inside this frame that Boo Notes cannot read yet (their hosts). */
+  | { kind: 'frames'; hosts: string[] }
+  /** The SCORM runtime of this frame reported new values. */
+  | { kind: 'scorm'; state: ScormState }
+  /** A page shortcut pressed inside the frame (focus is there, not in the page). */
+  | { kind: 'command'; command: CommandId }
+  /** A frame agent started: it wants to know whether notes are open. */
+  | { kind: 'hello' };
+
 export type FrameToBackground =
   | { type: 'media'; media: FrameMedia }
   | { type: 'gone' }
   | { type: 'shot'; id: number; shot: FrameShot | null; error: string | null }
-  | { type: 'captions'; captions: FrameCaptions };
+  | { type: 'captions'; captions: FrameCaptions }
+  | { type: 'event'; event: FrameEvent };
 
-export type BackgroundToFrame = { type: 'command'; command: FrameCommand };
+/** What the page tells its frames: the notes (open or not), their quoted passages; find a quote. */
+export type FrameNotice =
+  | { kind: 'notes'; open: boolean; page: string; passages: string[]; shortcut: string; bindings: InPageBinding[] }
+  | { kind: 'reveal'; url: string };
+
+export type BackgroundToFrame = { type: 'command'; command: FrameCommand } | { type: 'notice'; notice: FrameNotice };
 
 /** Messages sent to the background service worker (chrome.runtime.sendMessage). */
 export type BackgroundRequest =
@@ -145,6 +186,8 @@ export type BackgroundRequest =
   | { type: 'frame:command'; frameId: number; command: FrameCommand }
   /** Injects the frame agent into every sub-frame of the sender's tab the extension may read. */
   | { type: 'frames:inject' }
+  /** Tells every frame agent of the sender's tab (notes open, quoted passages, find a quote). */
+  | { type: 'frames:notify'; notice: FrameNotice }
   /** Embedded players the user allowed (origins): the agent is injected there from now on. */
   | { type: 'players:allow'; origins: string[]; tabId: number }
   /** A video or audio pasted into a note was stored (IndexedDB) by the panel: to send to the desktop app. */
@@ -227,6 +270,7 @@ export interface BackgroundResponses {
   export: { message: string };
   'frame:command': void;
   'frames:inject': void;
+  'frames:notify': void;
   'players:allow': void;
   'media:stored': void;
   'popout:open': { windowId: number };
@@ -277,7 +321,8 @@ export type TabMessage =
   /** State of the media of a sub-frame (null: gone). */
   | { type: 'frame:media'; frameId: number; media: FrameMedia | null }
   | { type: 'frame:shot'; id: number; shot: FrameShot | null; error: string | null }
-  | { type: 'frame:captions'; frameId: number; captions: FrameCaptions };
+  | { type: 'frame:captions'; frameId: number; captions: FrameCaptions }
+  | { type: 'frame:event'; frameId: number; event: FrameEvent };
 
 // --- Panel (iframe / pop-out window) <-> content script port -------------
 
@@ -327,6 +372,8 @@ export type ContentToPanel =
    * quoted passage being read (`[↗](URL#:~:text=…)` of the note), if any.
    */
   | { type: 'reading'; ratio: number; passage: string | null }
+  /** A course module (SCORM) in the page: what it reports to its LMS. */
+  | { type: 'scorm'; state: ScormState | null }
   /** Subtitle being spoken (null: none), and the state of the collection. */
   | { type: 'caption'; cue: Cue | null; state: CaptionState }
   /**

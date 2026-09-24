@@ -10,6 +10,7 @@ import {
 } from '../shared/messages';
 import { adapterForHost } from './adapters';
 import { captureVideoFrame, probeFrame } from './capture';
+import { FrameReading } from './frame-reading';
 import { MediaController } from './player';
 import { captionFile, readLiveLines, readTextTrack, SubtitleCollector } from './subtitles';
 
@@ -36,12 +37,15 @@ class FrameAgent {
   /** Last subtitles file found, sent again whenever the media is announced again. */
   private file: Extract<FrameCaptions, { kind: 'file' }> | null = null;
   private lines = '';
+  /** Reading in this frame (course modules): quotes, anchors, SCORM, shortcuts. */
+  private readonly reading: FrameReading;
 
   constructor() {
     this.player = new MediaController(adapterForHost(location.hostname), {
       onEvent: () => this.schedule(0),
       send: () => undefined,
     });
+    this.reading = new FrameReading((event) => this.post({ type: 'event', event }), this.token, this.abort.signal, () => this.port !== null);
   }
 
   start(): void {
@@ -63,6 +67,7 @@ class FrameAgent {
     document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
     const captions = setInterval(() => this.sampleCaptions(), 400);
     this.abort.signal.addEventListener('abort', () => clearInterval(captions));
+    this.reading.start();
     this.report();
   }
 
@@ -158,6 +163,10 @@ class FrameAgent {
   }
 
   private async onMessage(msg: BackgroundToFrame): Promise<void> {
+    if (msg.type === 'notice') {
+      this.reading.onNotice(msg.notice);
+      return;
+    }
     if (msg.type !== 'command') return;
     await this.run(msg.command);
     this.lastSent = '';

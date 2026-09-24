@@ -172,6 +172,7 @@ chrome.runtime.onConnect.addListener((port) => {
     else if (msg.type === 'gone') void sendToTab(tabId, { type: 'frame:media', frameId, media: null });
     else if (msg.type === 'shot') void sendToTab(tabId, { type: 'frame:shot', id: msg.id, shot: msg.shot, error: msg.error });
     else if (msg.type === 'captions') void sendToTab(tabId, { type: 'frame:captions', frameId, captions: msg.captions });
+    else if (msg.type === 'event') void sendToTab(tabId, { type: 'frame:event', frameId, event: msg.event });
   });
   port.onDisconnect.addListener(() => {
     if (framePorts.get(key) === port) framePorts.delete(key);
@@ -607,6 +608,18 @@ const handlers: Handlers = {
     await injectFrames(requireTab(sender).id);
   },
 
+  'frames:notify': async (msg, sender) => {
+    const prefix = `${requireTab(sender).id}:`;
+    for (const [key, port] of framePorts) {
+      if (!key.startsWith(prefix)) continue;
+      try {
+        port.postMessage({ type: 'notice', notice: msg.notice } satisfies BackgroundToFrame);
+      } catch {
+        framePorts.delete(key);
+      }
+    }
+  },
+
   'players:allow': async (msg) => {
     const granted: string[] = [];
     for (const o of msg.origins) {
@@ -742,7 +755,7 @@ async function captureVisibleArea(
   } catch (e) {
     // Needs the activeTab grant, which Chrome gives when an extension shortcut is pressed.
     if (/activeTab|all_urls/.test(String(e))) {
-      throw new Error('ce site protège sa vidéo ; utilisez le raccourci clavier de capture pour l’autoriser');
+      throw new Error('Chrome ne l’autorise qu’après un clic sur l’icône Boo Notes ou le raccourci de capture (Alt+Maj+S)');
     }
     throw e;
   }

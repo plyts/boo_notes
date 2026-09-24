@@ -1,6 +1,7 @@
 import { CAPTIONS_EVENT, CAPTIONS_REQUEST_EVENT, readCaptionPayload } from '../shared/caption-bridge';
+import { applyScorm, readScormValue, SCORM_EVENT, SCORM_REQUEST_EVENT, scormDone } from '../shared/scorm';
 import { bytesToBase64 } from '../shared/encoding';
-import { captureLine, findFragmentLinks } from '../shared/markdown';
+import { captureLine, findFragmentLinks, quoteLine, textFragmentUrl } from '../shared/markdown';
 import {
   callBackground,
   isCommand,
@@ -11,7 +12,10 @@ import {
   type CommandId,
   type ContentToPanel,
   type FrameCaptions,
+  type FrameEvent,
   type FrameMedia,
+  type FrameNotice,
+  type ScormState,
   type MediaMeta,
   type PanelToContent,
   type PlaybackState,
@@ -118,6 +122,17 @@ class ContentApp {
   private frameFileUsed: Extract<FrameCaptions, { kind: 'file' }> | null = null;
   /** When the current media page started (subtitle files replayed from before are left out). */
   private contextSince = 0;
+  /** Reading inside frames (course modules): the last selection, the heading being read. */
+  private frameSelection: { frameId: number; text: string; where: string; at: number } | null = null;
+  private frameReading: { frameId: number; where: string; ratio: number; at: number } | null = null;
+  /** Large frames inside frames that Boo Notes cannot read yet, by reporting frame. */
+  private readonly nestedBlocked = new Map<number, string[]>();
+  /** Windows of the page's frames that run an agent (course pages without media included). */
+  private readonly agentWindows = new WeakSet<object>();
+  /** What the course module (SCORM, xAPI) reports to its LMS. */
+  private scorm: ScormState | null = null;
+  /** Quoted passages of the note (text fragment links), also highlighted in frames. */
+  private passageUrls: string[] = [];
   /** Passage started with « Début du passage » (Alt+I), recording its picture and sound when possible. */
   private passage: { noteId: string; start: number; poster: Shot | null; recording: Recording | null; what: 'video' | 'audio' } | null = null;
   /** Passage replayed to record its extract. */
@@ -226,6 +241,7 @@ class ContentApp {
     if (this.dead) return;
     // Those the player downloaded before this script started are sent again.
     document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
+    document.dispatchEvent(new CustomEvent(SCORM_REQUEST_EVENT));
     if (this.pinned && this.ctx) this.openDrawer(null);
   }
 
@@ -267,6 +283,8 @@ class ContentApp {
     window.addEventListener('message', this.onFrameHello, { signal: this.abort.signal });
     // Subtitle files downloaded by the page's player (main-world bridge).
     document.addEventListener(CAPTIONS_EVENT, this.onCaptionFile, { signal: this.abort.signal });
+    // A course module's reports to an LMS living in this page (SCORM API, xAPI).
+    document.addEventListener(SCORM_EVENT, this.onScormValue, { signal: this.abort.signal });
     document.addEventListener('fullscreenchange', this.onFullscreenChange, opts);
     // Reading mode: "Citer" bubble next to the selected text while the notes are open.
     document.addEventListener('selectionchange', () => this.scheduleQuoteBubble(), { signal: this.abort.signal });
@@ -377,6 +395,69 @@ class ContentApp {
     if (found) this.subtitles.offerFile(found);
   };
 
+  /** Reading inside a frame (a course module): selection, quote, heading read, SCORM, shortcuts. */
+  private onFrameEvent(frameId: number, event: FrameEvent): void {
+    if (this.dead) return;
+    switch (event.kind) {
+      case 'hello':
+        this.notifyFrames();
+        return;
+      case 'selection':
+        if (event.text) this.frameSelection = { frameId, text: event.text, where: event.where, at: Date.now() };
+        else if (this.frameSelection?.frameId === frameId) this.frameSelection = null;
+        return;
+      case 'quote':
+        void this.quoteText(event.text);
+        return;
+      case 'reading':
+        this.frameReading = { frameId, where: event.where, ratio: event.ratio, at: Date.now() };
+        if (this.reading) this.onReadingProgress(Math.max(this.reader.progress, event.ratio));
+        return;
+      case 'frames':
+        if (event.hosts.length) this.nestedBlocked.set(frameId, event.hosts);
+        else this.nestedBlocked.delete(frameId);
+        this.checkPlayers();
+        return;
+      case 'scorm':
+        this.setScorm(event.state);
+        return;
+      case 'command':
+        void this.onCommand(event.command);
+    }
+  }
+
+  /** What the page's notes tell its frames: open or not, the quoted passages, the shortcuts. */
+  private notifyFrames(notice?: FrameNotice): void {
+    if (this.dead || !this.ctx) return;
+    const n: FrameNotice = notice ?? {
+      kind: 'notes',
+      open: this.drawer.isOpen || this.popoutPort !== null,
+      page: this.ctx.canonicalUrl,
+      passages: this.passageUrls,
+      shortcut: this.quoteShortcut,
+      bindings: this.settings.pageShortcuts ? this.pageBindings : [],
+    };
+    void this.bg({ type: 'frames:notify', notice: n }).catch(() => undefined);
+  }
+
+  /** The course module reported to its LMS (completion, progress, score): shown with the notes, counted as progress. */
+  private setScorm(state: ScormState): void {
+    const before = this.scorm;
+    this.scorm = state;
+    this.postPanels({ type: 'scorm', state });
+    const ctx = this.ctx;
+    if (!ctx || !this.reading) return;
+    const ratio = scormDone(state) ? 1 : state.progress;
+    if (ratio === null || (before && (scormDone(before) ? 1 : before.progress) === ratio)) return;
+    void this.bg({ type: 'player:progress', noteId: ctx.noteId, position: Math.round(ratio * 1000) / 10, duration: 100, kind: 'page' }).catch(() => undefined);
+  }
+
+  /** SCORM values of a module whose LMS lives in the page itself. */
+  private readonly onScormValue = (e: Event): void => {
+    const v = readScormValue((e as CustomEvent<unknown>).detail);
+    if (v && !this.dead) this.setScorm(applyScorm(this.scorm, v));
+  };
+
   /** Subtitles read in an embedded player: used while it is the media followed. */
   private onFrameCaptions(frameId: number, captions: FrameCaptions): void {
     if (captions.kind === 'lines') this.frameLines.set(frameId, captions.lines);
@@ -384,6 +465,11 @@ class ContentApp {
   }
 
   private readonly onFrameHello = (e: MessageEvent): void => {
+    const agent = (e.data as { booNotesAgent?: unknown } | null)?.booNotesAgent;
+    if (typeof agent === 'string' && e.source) {
+      this.agentWindows.add(e.source);
+      return;
+    }
     const token = (e.data as { booNotesFrame?: unknown } | null)?.booNotesFrame;
     if (typeof token !== 'string' || !e.source) return;
     const frames = [...document.querySelectorAll('iframe'), ...scanMedia(document, 8000).roots.flatMap((r) => [...r.querySelectorAll('iframe')])];
@@ -398,13 +484,15 @@ class ContentApp {
     if (!this.player.current && !this.player.remote) {
       const reporting = this.player.reportingFrames();
       hosts = [
-        ...new Set(
-          playerFrames(PLAYER_FRAME_AREA)
-            .filter((f) => !reporting.has(f) && f.src && /^https?:/.test(f.src))
+        ...new Set([
+          ...playerFrames(PLAYER_FRAME_AREA)
+            .filter((f) => !reporting.has(f) && !(f.contentWindow && this.agentWindows.has(f.contentWindow)) && f.src && /^https?:/.test(f.src))
             .filter((f) => looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen|encrypted-media/.test(f.allow) || isLargeFrame(f))
             .map((f) => new URL(f.src, location.href).host)
             .filter((h) => h !== location.host),
-        ),
+          // Frames inside frames (an LMS player holding the course module).
+          ...[...this.nestedBlocked.values()].flat(),
+        ]),
       ];
     }
     const key = hosts.join(' ');
@@ -466,6 +554,7 @@ class ContentApp {
     else if (msg.type === 'popout:closed') this.popoutPort = null;
     else if (msg.type === 'frame:media') this.onFrameMedia(msg.frameId, msg.media);
     else if (msg.type === 'frame:captions') this.onFrameCaptions(msg.frameId, msg.captions);
+    else if (msg.type === 'frame:event') this.onFrameEvent(msg.frameId, msg.event);
     else if (msg.type === 'frame:shot') {
       this.shots.get(msg.id)?.({ shot: msg.shot, error: msg.error });
       this.shots.delete(msg.id);
@@ -478,7 +567,10 @@ class ContentApp {
     port.onMessage.addListener((msg: PanelToContent) => this.onPanelMessage(port, msg));
     port.onDisconnect.addListener(() => {
       if (port === this.embeddedPort) this.embeddedPort = null;
-      if (port === this.popoutPort) this.popoutPort = null;
+      if (port === this.popoutPort) {
+        this.popoutPort = null;
+        this.notifyFrames();
+      }
       this.overlay.hideMarker();
     });
   };
@@ -527,6 +619,12 @@ class ContentApp {
     if (prev) void this.leaveMedia(prev.noteId);
     this.subtitles.reset(ctx?.noteId ?? null, ctx?.platform ?? null);
     this.frameFileUsed = null;
+    this.frameSelection = null;
+    this.frameReading = null;
+    if (prev) {
+      this.scorm = null;
+      this.postPanels({ type: 'scorm', state: null });
+    }
     // Files of the first media page all count; after a navigation, only the new ones.
     this.contextSince = prev ? Date.now() : 0;
     // The player may have downloaded the new media's subtitles already.
@@ -600,14 +698,22 @@ class ContentApp {
     }
     if (this.dead || this.ctx?.noteId !== noteId || !note) return;
     if (start) this.reader.start();
-    this.reader.setPassages(findFragmentLinks(note.markdown).map((f) => f.url));
+    this.setPassageUrls(findFragmentLinks(note.markdown).map((f) => f.url));
+  }
+
+  /** Quoted passages: highlighted in the page and in its frames (course modules). */
+  private setPassageUrls(urls: string[]): void {
+    this.passageUrls = urls;
+    this.reader.setPassages(urls);
+    this.notifyFrames();
   }
 
   private readonly onStorageChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
     const id = this.ctx?.noteId;
     if (area !== 'local' || !id || !changes[`note:${id}`] || !this.reading) return;
     const note = changes[`note:${id}`].newValue as Note | undefined;
-    this.reader.setPassages(note ? findFragmentLinks(note.markdown).map((f) => f.url) : []);
+    const urls = note ? findFragmentLinks(note.markdown).map((f) => f.url) : [];
+    if (urls.join('\n') !== this.passageUrls.join('\n')) this.setPassageUrls(urls);
   };
 
   private onReadingProgress(ratio: number): void {
@@ -636,19 +742,61 @@ class ContentApp {
     else this.overlay.showQuoteButton(rect, this.quoteShortcut, () => void this.quote());
   }
 
-  /** Alt+Shift+T in reading mode: quote the selection, or anchor a new line to the section being read. */
+  /**
+   * Alt+Shift+T in reading mode: quote the selection — of the page, or of a
+   * course module in a frame —, or anchor a new line to the section being read.
+   */
   private async quote(): Promise<void> {
     const line = this.reader.quote();
-    const port = await this.inputEditor();
     if (line) {
+      const port = await this.inputEditor();
       port.postMessage({ type: 'insert-block', text: line, focus: true } satisfies ContentToPanel);
       // Quoted: the selection has done its job (and the bubble goes away with it).
       document.getSelection()?.removeAllRanges();
       this.overlay.hideQuoteButton();
       this.overlay.toast('Passage cité dans la note', 'success', 1500, { icon: 'quote' });
-    } else {
-      port.postMessage({ type: 'insert-anchor', token: this.reader.anchor(), focus: true } satisfies ContentToPanel);
+      return;
     }
+    const inFrame = this.frameSelection;
+    if (inFrame && inFrame.text.length >= 2 && Date.now() - inFrame.at < 10 * 60_000) {
+      await this.quoteText(inFrame.text);
+      return;
+    }
+    const port = await this.inputEditor();
+    port.postMessage({ type: 'insert-anchor', token: this.readingAnchor(), focus: true } satisfies ContentToPanel);
+  }
+
+  /** A passage of a frame (course module) quoted in the note, linked to the lesson. */
+  private async quoteText(text: string): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || text.trim().length < 2) return;
+    this.frameSelection = null;
+    const port = await this.inputEditor();
+    port.postMessage({ type: 'insert-block', text: quoteLine(text, ctx.canonicalUrl), focus: true } satisfies ContentToPanel);
+    this.overlay.toast('Passage cité dans la note', 'success', 1500, { icon: 'quote' });
+  }
+
+  /** Anchor of a new line: the heading read in the course module when there is one, else in the page. */
+  private readingAnchor(): string {
+    const f = this.frameReading;
+    if (f?.where && this.ctx && Date.now() - f.at < 30 * 60_000) {
+      const words = f.where.split(' ').slice(0, 12).join(' ');
+      return `[↗ ${words.replace(/[[\]]/g, '')}](${textFragmentUrl(this.ctx.canonicalUrl, words)})`;
+    }
+    return this.reader.anchor();
+  }
+
+  /** The frame holding the lesson (an LMS player, a SCORM module), when it fills most of the view. */
+  private courseFrame(): DOMRect | null {
+    let best: DOMRect | null = null;
+    for (const f of document.querySelectorAll('iframe')) {
+      const r = f.getBoundingClientRect();
+      const w = Math.min(r.right, innerWidth) - Math.max(r.left, 0);
+      const hgt = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+      if (w < 320 || hgt < 200) continue;
+      if (!best || w * hgt > best.width * best.height) best = new DOMRect(Math.max(r.left, 0), Math.max(r.top, 0), w, hgt);
+    }
+    return best && best.width * best.height >= innerWidth * innerHeight * 0.3 ? best : null;
   }
 
   /** Alt+Shift+S in reading mode: screenshot of the visible page (the notes drawer excluded). */
@@ -660,9 +808,11 @@ class ContentApp {
     try {
       const drawer = this.drawer.rect();
       const width = drawer && drawer.left > innerWidth * 0.3 ? drawer.left : innerWidth;
-      const area = new DOMRect(0, 0, width, innerHeight);
-      const anchor = this.reader.anchor();
-      const section = this.reader.sectionLabel();
+      // A lesson played in a frame (SCORM module, LMS player): its picture only.
+      const course = this.courseFrame();
+      const area = course ? new DOMRect(course.x, course.y, Math.min(course.width, width - course.x), course.height) : new DOMRect(0, 0, width, innerHeight);
+      const anchor = this.readingAnchor();
+      const section = (this.frameReading && course ? this.frameReading.where : '') || this.reader.sectionLabel();
       this.overlay.setHidden(true);
       let shot: Shot;
       try {
@@ -836,6 +986,7 @@ class ContentApp {
     if (this.popoutPort) return;
     void this.ensureRegistered(true);
     this.drawer.open();
+    this.notifyFrames();
     this.postPanels({ type: 'page-theme', theme: detectPageTheme(this.adapter) });
     if (focus) {
       this.drawer.focus();
@@ -845,6 +996,7 @@ class ContentApp {
 
   private closeDrawer(): void {
     this.drawer.close();
+    this.notifyFrames();
     this.overlay.hideMarker();
     this.overlay.hideQuoteButton();
     queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
@@ -1423,6 +1575,7 @@ class ContentApp {
           this.popoutPort = port;
           this.drawer.destroyFrame();
           this.embeddedPort = null;
+          this.notifyFrames();
         } else {
           this.embeddedPort = port;
           for (const resolve of this.embeddedWaiters.splice(0)) resolve(port);
@@ -1440,6 +1593,7 @@ class ContentApp {
         } satisfies ContentToPanel);
         if (this.reading) port.postMessage({ type: 'reading', ratio: this.reader.progress, passage: this.lastPassage } satisfies ContentToPanel);
         if (this.blockedPlayers) port.postMessage({ type: 'players', hosts: this.blockedPlayers.split(' ') } satisfies ContentToPanel);
+        if (this.scorm) port.postMessage({ type: 'scorm', state: this.scorm } satisfies ContentToPanel);
         port.postMessage({ type: 'caption', cue: this.caption.cue, state: this.caption.state } satisfies ContentToPanel);
         this.broadcastRecording();
         return;
@@ -1504,7 +1658,10 @@ class ContentApp {
         if (this.reading) void this.quote();
         return;
       case 'reveal':
-        if (!this.reader.reveal(msg.url)) this.overlay.toast('Passage introuvable dans cette page (modifiée ?)', 'error', 3000);
+        if (this.reader.reveal(msg.url)) return;
+        // Maybe in the course module (a frame): its agent looks for it.
+        if (this.frameReading) this.notifyFrames({ kind: 'reveal', url: msg.url });
+        else this.overlay.toast('Passage introuvable dans cette page (modifiée ?)', 'error', 3000);
         return;
       case 'stopwatch':
         this.onStopwatch(msg.action);
