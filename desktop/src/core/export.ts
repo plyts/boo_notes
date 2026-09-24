@@ -217,20 +217,21 @@ function portableNote(lib: Library, e: ExportNote, assetPrefix: string): string 
   let body = e.body;
   // Timestamps of an online video become links to the instant.
   if (primary && /^https?:\/\//.test(primary.source) && primary.origin !== 'url') {
-    body = body.replace(/(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})\](?!\()/g, (_all, tc: string) => {
+    body = body.replace(/(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})((?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?)\](?!\()/g, (_all, tc: string, end: string) => {
       const s = tc.split(':').reduce((acc, p) => acc * 60 + Number(p), 0);
-      return `[${tc}](${timestampUrl(primary.source, s)})`;
+      return `[${tc}${end}](${timestampUrl(primary.source, s)})`;
     });
   }
   // Anchors about another resource: its name, and its link when it is online.
   body = body.replace(/(?<!!)\[([^\]\n]+)\]\(res:([^()\s]+)\)/g, (_all, label: string, id: string) => {
     const res = lib.getResource(id);
     if (!res) return `[${label}]`;
-    const tc = /^(?:\d+:)?\d{1,3}:\d{2}$/.test(label) ? label.split(':').reduce((acc, p) => acc * 60 + Number(p), 0) : null;
+    const start = /^((?:\d+:)?\d{1,3}:\d{2})(?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?$/.exec(label)?.[1];
+    const tc = start ? start.split(':').reduce((acc, p) => acc * 60 + Number(p), 0) : null;
     const url = /^https?:\/\//.test(res.source) ? (tc !== null && res.origin !== 'url' ? timestampUrl(res.source, tc) : res.source) : null;
     return url ? `[${res.title} · ${label}](${url})` : `[${res.title} · ${label}]`;
   });
-  body = body.replace(/\]\((assets\/[^)\s]+)\)/g, (_all, path: string) => `](${assetPrefix}${path})`);
+  body = body.replace(/\]\(((?:assets|media|transcripts)\/[^)\s]+)\)/g, (_all, path: string) => `](${assetPrefix}${path})`);
   return lines.join('\n') + body;
 }
 

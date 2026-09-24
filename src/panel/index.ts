@@ -1,9 +1,12 @@
 import { TypingAutoPause } from '../shared/autopause';
+import { plainText } from '../shared/cards';
+import { getMedia, listMedia } from '../shared/media-db';
 import { h, icon, type IconName } from '../shared/icons';
 import { findAssetRefs, findFragmentLinks, linkedTitles, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import {
   callBackground,
   PANEL_PORT,
+  type CaptionState,
   type ContentToPanel,
   type ExportTarget,
   type MediaSource,
@@ -15,14 +18,30 @@ import {
   type SyncStatus,
 } from '../shared/messages';
 import { PLATFORM_LABELS, type MediaKind, type VideoContext } from '../shared/platforms';
-import { loadSettings, normalizeSettings, type Settings } from '../shared/settings';
+import { loadSettings, normalizeSettings, saveSettings, type Settings } from '../shared/settings';
 import type { AssetRecord, CourseOption, Note, NoteMeta } from '../shared/store';
 import { IS_MAC } from '../shared/keycaps';
 import { DEFAULT_SHORTCUTS, findBinding, formatShortcut, inPageBindings, type InPageBinding } from '../shared/shortcuts';
 import { formatTimecode } from '../shared/time';
+import {
+  annotateCues,
+  cueQuote,
+  cuesInRange,
+  notesInRange,
+  passageLine,
+  pinTranscriptLine,
+  rangeLabel,
+  setPassageMedia,
+  transcriptLine,
+  type Cue,
+  type Transcript,
+} from '../shared/transcript';
+import type { CuePatch } from '../shared/transcript-store';
 import { NotesEditor } from './editor';
 import { EmptyState, ShortcutsSheet, type ShortcutMap } from './sheet';
 import { Timeline } from './timeline';
+import { TranscriptView } from './transcript-view';
+import { CueTranslator, type TranslateStatus } from './translator';
 
 /**
  * The notes panel. The same page runs embedded in the drawer iframe and in
@@ -132,6 +151,44 @@ class PanelApp {
   });
   private readonly emptyState = new EmptyState(IS_MAC);
 
+  // Transcript (subtitles collected in the background), passages, recordings.
+  private view: 'notes' | 'transcript' = 'notes';
+  private transcript: Transcript | null = null;
+  private caption: { cue: Cue | null; state: CaptionState } = { cue: null, state: { status: 'searching', source: null, label: '' } };
+  private recording: { passage: { start: number; end?: number; recording: boolean } | null; audio: boolean } = { passage: null, audio: false };
+  /** Kept sound of the course (IndexedDB): stretches that can be listened to. */
+  private audioTrace: Array<{ path: string; start: number; end: number }> = [];
+  private tabs!: HTMLDivElement;
+  private notesTab!: HTMLButtonElement;
+  private transcriptTab!: HTMLButtonElement;
+  private editorHost!: HTMLElement;
+  private liveEl!: HTMLDivElement;
+  private recPill!: HTMLButtonElement;
+  private passageButton!: HTMLButtonElement;
+  private mediaPop!: HTMLDivElement;
+  private mediaUrl: string | null = null;
+  private translateStatus: TranslateStatus = { state: 'off' };
+  private readonly transcriptView = new TranscriptView({
+    seek: (seconds) => this.post({ type: 'seek', seconds }),
+    pin: (cue) => this.pinCue(cue),
+    annotate: (id, field, value) => this.annotate([{ id, [field]: value }]),
+    passage: (start, end, record) => {
+      this.post({ type: 'passage:create', start, end, record });
+      this.notify(record ? `Passage ${rangeLabel(start, end)} : lecture et enregistrement de l’extrait…` : `Passage ${rangeLabel(start, end)} ajouté à la note`);
+    },
+    toggleTranslate: (on) => void this.setTranslate(on, true),
+    pinTranscript: () => this.pinTranscript(true),
+    listen: (seconds) => void this.listen(seconds),
+    notesIn: (start, end) => notesInRange(this.editor.content, start, end).length,
+  });
+  private readonly translator = new CueTranslator({
+    patch: (patches, lang) => this.annotate(patches, lang),
+    status: (s) => {
+      this.translateStatus = s;
+      this.transcriptView.setTranslate(this.settings.autoTranslate, s);
+    },
+  });
+
   async start(): Promise<void> {
     this.settings = await loadSettings();
     this.autoPause.enabled = this.settings.autoPause;
@@ -142,7 +199,10 @@ class PanelApp {
       now: () => (this.hasVideo ? this.now() : null),
       autoTimestamp: () => this.settings.autoTimestamp,
       onTimestampHover: (seconds) => this.post({ type: 'mark', seconds }),
-      onTimestampClick: (seconds) => this.post({ type: 'seek', seconds }),
+      onTimestampClick: (seconds, _res, end) =>
+        this.post(end !== null && end !== undefined ? { type: 'play-range', start: seconds, end } : { type: 'seek', seconds }),
+      onMediaClick: (path) => void this.openMedia(path),
+      onTranscriptClick: () => this.setView('transcript'),
       onKeystroke: () => this.autoPause.keystroke(),
       onChange: () => this.scheduleSave(),
       onContentChanged: () => this.scheduleContentRefresh(),
@@ -167,6 +227,9 @@ class PanelApp {
     callBackground({ type: 'notion:status' }).then((n) => (this.notionStatus = n), () => undefined);
     void this.loadWikiTitles();
     callBackground({ type: 'sync:status' }).then((s) => this.renderStatus(s), () => undefined);
+    this.transcriptView.setTarget(this.settings.translateTo);
+    this.transcriptView.setTranslate(this.settings.autoTranslate, this.translateStatus);
+    if (this.settings.autoTranslate) void this.setTranslate(true, false);
     setInterval(() => this.tick(), 250);
   }
 
@@ -262,6 +325,31 @@ class PanelApp {
       case 'typing-release':
         this.autoPause.release();
         break;
+      case 'caption':
+        this.caption = { cue: msg.cue, state: msg.state };
+        this.transcriptView.setState(msg.state);
+        this.renderLive();
+        break;
+      case 'recording':
+        this.recording = { passage: msg.passage, audio: msg.audio };
+        this.renderRecording();
+        void this.loadAudioTrace();
+        break;
+      case 'insert-passage':
+        void this.loading.then(() => {
+          if (!this.note) return;
+          const title = this.passageTitle(msg.start, msg.end);
+          this.editor.insertBlock(passageLine({ start: msg.start, end: msg.end, title, image: msg.image, media: msg.media }));
+        });
+        break;
+      case 'passage-media':
+        void this.loading.then(() => {
+          if (this.note && this.editor.transform((md) => setPassageMedia(md, msg.start, msg.media))) this.notify('Extrait ajouté au passage', 'success');
+        });
+        break;
+      case 'media-ended':
+        void this.loading.then(() => this.pinTranscript(false));
+        break;
     }
   }
 
@@ -290,6 +378,7 @@ class PanelApp {
     this.durationEl.textContent = t !== null && duration > 0 ? formatTimecode(duration) : '';
     this.timeline.update(t, duration);
     this.editor.setPlaybackTime(t);
+    this.transcriptView.setTime(t);
   }
 
   /** Stats, timeline ticks and empty state follow the content (debounced). */
@@ -311,8 +400,9 @@ class PanelApp {
       parts = [passages ? plural(passages, 'passage') : '', captures ? plural(captures, 'capture') : ''];
     } else {
       const notes = markers.filter((m) => m.kind === 'note').length;
-      const captures = markers.length - notes;
-      parts = [notes ? plural(notes, 'note') : '', captures ? plural(captures, 'capture') : ''];
+      const captures = markers.filter((m) => m.kind === 'capture').length;
+      const passages = markers.filter((m) => m.kind === 'passage').length;
+      parts = [notes ? plural(notes, 'note') : '', captures ? plural(captures, 'capture') : '', passages ? plural(passages, 'passage') : ''];
     }
     const links = linkedTitles(this.editor.content).length;
     if (links) parts.push(plural(links, 'lien'));
@@ -353,6 +443,10 @@ class PanelApp {
     this.title = title;
     this.note = null;
     this.reading = { ratio: 0, passage: null };
+    this.setTranscript(null);
+    this.audioTrace = [];
+    this.timeline.setCoverage([]);
+    this.closeMedia();
     this.renderHeader();
     void this.loadWikiTitles();
     if (!ctx) {
@@ -373,6 +467,8 @@ class PanelApp {
       this.hideBanner();
       this.setSaveState(note.rev > 0 ? 'saved' : 'idle');
       this.renderHeader();
+      void this.loadTranscript(ctx.noteId);
+      void this.loadAudioTrace();
     } catch (e) {
       this.showBanner(`Impossible de charger la note : ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -500,20 +596,54 @@ class PanelApp {
     this.stopwatchEl = h('span', { class: 'stopwatch', hidden: true, role: 'group', 'aria-label': 'Chronomètre' }, swToggle, swReset);
     const link = iconButton('link', 'Lier une fiche ([[)', () => this.editor.insertWikiLink());
     this.footerButtons = { timestamp, capture, replay, help, link };
+    capture.classList.add('compact');
+    // Passage: first click = its start, second = its end (Alt+I / Alt+O).
+    this.passageButton = actionButton('passage', 'Passage', () =>
+      this.post({ type: 'command', command: this.recording.passage && this.recording.passage.end === undefined ? 'passage-end' : 'passage-start' }),
+    );
+    this.passageButton.classList.add('compact', 'passage-btn');
 
-    const editorHost = h('main', { class: 'editor', 'aria-label': 'Éditeur de notes (Markdown)' });
+    // Recording in progress (sound of the course kept, passage being recorded).
+    this.recPill = h('button', { type: 'button', class: 'rec-pill', hidden: true }, icon('rec', 10), h('span', {}, 'REC'));
+    this.recPill.addEventListener('click', () => this.setView('transcript'));
+
+    // Notes │ Transcription
+    const tab = (id: 'notes' | 'transcript', label: string) => {
+      const b = h('button', { type: 'button', role: 'tab', class: 'tab', id: `tab-${id}`, 'aria-selected': String(id === 'notes'), 'aria-controls': `view-${id}` }, h('span', {}, label));
+      b.addEventListener('click', () => this.setView(id));
+      return b;
+    };
+    this.notesTab = tab('notes', 'Notes');
+    this.transcriptTab = tab('transcript', 'Transcription');
+    this.transcriptTab.append(h('span', { class: 'tab-count', hidden: true }));
+    this.tabs = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Vue du panneau' }, this.notesTab, this.transcriptTab);
+    this.tabs.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      this.setView(this.view === 'notes' ? 'transcript' : 'notes');
+      (this.view === 'notes' ? this.notesTab : this.transcriptTab).focus();
+    });
+
+    const editorHost = h('main', { class: 'editor', id: 'view-notes', role: 'tabpanel', 'aria-labelledby': 'tab-notes', 'aria-label': 'Éditeur de notes (Markdown)' });
     editorHost.append(this.emptyState.el);
     this.emptyState.el.hidden = true;
+    this.editorHost = editorHost;
+    this.transcriptView.el.id = 'view-transcript';
+    this.transcriptView.el.setAttribute('role', 'tabpanel');
+    this.transcriptView.el.setAttribute('aria-labelledby', 'tab-transcript');
+    this.liveEl = this.buildLive();
+    this.mediaPop = h('div', { class: 'media-pop', role: 'dialog', 'aria-label': 'Extrait', hidden: true });
 
     this.root.append(
       h(
         'header',
         { class: 'header' },
-        h('div', { class: 'toolbar' }, this.statusButton, h('span', { class: 'spacer' }), ...actions),
+        h('div', { class: 'toolbar' }, this.statusButton, this.recPill, h('span', { class: 'spacer' }), ...actions),
         // Course › chapter of the library, as a breadcrumb above the title.
         this.placeButton,
         this.titleEl,
         h('div', { class: 'meta' }, this.platformEl, this.statsEl, h('span', { class: 'spacer' }), this.saveEl),
+        this.tabs,
         this.siteHint,
         this.playersHint,
         this.menu,
@@ -521,12 +651,15 @@ class PanelApp {
       ),
       this.banner,
       editorHost,
+      this.transcriptView.el,
+      this.liveEl,
+      this.mediaPop,
       h(
         'footer',
         { class: 'footer' },
         // Media-player scrubber: current time · notes timeline · duration.
         h('div', { class: 'scrubber' }, this.clockEl, this.stopwatchEl, this.timeline.el, this.readingBar, this.durationEl),
-        h('div', { class: 'controls' }, timestamp, capture, this.chronoButton, h('span', { class: 'spacer' }), link, replay, help),
+        h('div', { class: 'controls' }, timestamp, capture, this.passageButton, this.chronoButton, h('span', { class: 'spacer' }), link, replay, help),
       ),
       this.noticeEl,
       this.sheet.el,
@@ -639,6 +772,10 @@ class PanelApp {
     if (this.editor) this.scheduleContentRefresh();
     this.timeline.el.hidden = page;
     this.readingBar.hidden = !page;
+    this.tabs.hidden = page || !this.ctx;
+    this.passageButton.hidden = page || !this.hasVideo;
+    if (page && this.view !== 'notes') this.setView('notes');
+    this.renderLive();
     this.clockEl.title = page ? 'Lu jusqu’ici' : 'Position de la vidéo';
     this.durationEl.title = page ? '' : 'Durée de la vidéo';
     const buttons = this.footerButtons;
@@ -662,6 +799,221 @@ class PanelApp {
     buttons.replay.hidden = page;
     set(buttons.replay, withKey(`Revoir les ${this.settings.replaySeconds} dernières secondes`, keys.replay));
     set(buttons.help, withKey('Raccourcis clavier', IS_MAC ? '⌘/' : 'Ctrl+/'));
+    this.renderRecording();
+  }
+
+  // --- Transcript, live subtitle, passages ---------------------------------------------------
+
+  private setView(view: 'notes' | 'transcript'): void {
+    if (view === 'transcript' && (this.kind === 'page' || !this.ctx)) return;
+    const changed = view !== this.view;
+    this.view = view;
+    this.notesTab.setAttribute('aria-selected', String(view === 'notes'));
+    this.transcriptTab.setAttribute('aria-selected', String(view === 'transcript'));
+    this.notesTab.tabIndex = view === 'notes' ? 0 : -1;
+    this.transcriptTab.tabIndex = view === 'transcript' ? 0 : -1;
+    this.editorHost.hidden = view !== 'notes';
+    this.transcriptView.show(view === 'transcript');
+    document.documentElement.dataset.view = view;
+    this.renderLive();
+    if (!changed) return;
+    if (view === 'transcript') this.transcriptView.focus();
+    else this.editor.focus();
+  }
+
+  private setTranscript(t: Transcript | null): void {
+    this.transcript = t;
+    this.transcriptView.set(t);
+    const count = this.transcriptTab.querySelector<HTMLElement>('.tab-count')!;
+    count.textContent = t?.cues.length ? String(t.cues.length) : '';
+    count.hidden = !t?.cues.length;
+    this.translator.update(t, this.hasVideo ? this.now() : null);
+    this.renderLive();
+  }
+
+  private async loadTranscript(noteId: string): Promise<void> {
+    try {
+      const t = await callBackground({ type: 'transcript:get', noteId });
+      if (this.ctx?.noteId === noteId) this.setTranscript(t);
+    } catch {
+      // No transcript yet.
+    }
+  }
+
+  /** Translations and comments: shown at once, stored by the background. */
+  private annotate(patches: CuePatch[], lang?: string): void {
+    const t = this.transcript;
+    if (!t) return;
+    if (patches.length) {
+      this.transcript = { ...t, cues: annotateCues(t.cues, patches), ...(lang ? { lang } : {}) };
+      this.transcriptView.set(this.transcript);
+      this.renderLive();
+    }
+    void callBackground({ type: 'transcript:annotate', noteId: t.noteId, patches, lang, target: this.settings.translateTo }).catch((e: unknown) =>
+      this.notify(`Transcription non enregistrée : ${e instanceof Error ? e.message : String(e)}`, 'error'),
+    );
+  }
+
+  private async setTranslate(on: boolean, fromUser: boolean): Promise<void> {
+    if (fromUser && on !== this.settings.autoTranslate) {
+      this.settings = await saveSettings({ autoTranslate: on });
+    }
+    this.transcriptView.setTarget(this.settings.translateTo);
+    if (on) {
+      this.transcriptView.setTranslate(true, this.translateStatus);
+      await this.translator.enable(this.settings.translateTo);
+    } else this.translator.disable();
+    this.transcriptView.setTranslate(on, this.translator.state);
+  }
+
+  /** The line being spoken, quoted in the note (with its translation). */
+  private pinCue(cue: Cue | null): void {
+    if (!this.note) return;
+    if (!cue) {
+      this.notify('Aucune réplique en cours à épingler', 'error');
+      return;
+    }
+    const full = this.transcript?.cues.find((c) => c.id === cue.id) ?? cue;
+    this.editor.insertBlock(cueQuote(full));
+    this.notify(`Réplique ${formatTimecode(full.start)} épinglée dans la note`, 'success');
+  }
+
+  /** The transcript line at the end of the note: added, or updated where it is. */
+  private pinTranscript(fromUser: boolean): void {
+    const t = this.transcript;
+    if (!this.note || !t?.cues.length) {
+      if (fromUser) this.notify('Pas encore de sous-titres à épingler', 'error');
+      return;
+    }
+    const line = transcriptLine(t);
+    const changed = this.editor.transform((md) => pinTranscriptLine(md, line));
+    if (changed || fromUser) this.notify('Transcription épinglée à la note', 'success');
+  }
+
+  /** Title of a passage: the first note taken during it, else its first subtitle. */
+  private passageTitle(start: number, end: number): string {
+    const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 59).replace(/\s+\S*$/, '')}…` : s);
+    const line = notesInRange(this.editor.content, start, end)[0];
+    const fromNote = line ? plainText(line.replace(/^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)?\[[^\]\n]*\](?:\([^)\s]*\))?\s*/, '')).trim() : '';
+    if (fromNote) return clip(fromNote);
+    const cue = cuesInRange(this.transcript?.cues ?? [], start, end)[0];
+    return cue ? clip(cue.tr?.trim() || cue.text) : '';
+  }
+
+  private buildLive(): HTMLDivElement {
+    const time = h('button', { type: 'button', class: 'lc-time', title: 'Aller à ce moment' });
+    time.addEventListener('click', () => {
+      const cue = this.caption.cue;
+      if (cue) this.post({ type: 'seek', seconds: cue.start });
+    });
+    const body = h('button', { type: 'button', class: 'lc-body', title: 'Ouvrir la transcription (Alt+T)' }, h('span', { class: 'lc-text' }), h('span', { class: 'lc-tr' }));
+    body.addEventListener('click', () => this.setView('transcript'));
+    const pin = h(
+      'button',
+      { type: 'button', class: 'icon-btn lc-pin', title: `Épingler dans la note (${IS_MAC ? '⌘⇧K' : 'Ctrl+Maj+K'})`, 'aria-label': 'Épingler la réplique dans la note' },
+      icon('plus', 16),
+    );
+    pin.addEventListener('click', () => this.pinCue(this.caption.cue));
+    return h('div', { class: 'live-caption', hidden: true, 'aria-live': 'off', 'aria-label': 'Sous-titre en cours' }, time, body, pin);
+  }
+
+  private renderLive(): void {
+    if (!this.liveEl) return;
+    const cue = this.caption.cue;
+    const show = Boolean(cue) && this.settings.transcribe && this.view === 'notes' && this.kind !== 'page' && Boolean(this.note);
+    this.liveEl.hidden = !show;
+    if (!show || !cue) return;
+    const full = this.transcript?.cues.find((c) => c.id === cue.id);
+    (this.liveEl.querySelector('.lc-time') as HTMLElement).textContent = formatTimecode(cue.start);
+    (this.liveEl.querySelector('.lc-text') as HTMLElement).textContent = cue.text;
+    const tr = this.liveEl.querySelector('.lc-tr') as HTMLElement;
+    tr.textContent = full?.tr ?? '';
+    tr.hidden = !full?.tr;
+  }
+
+  private renderRecording(): void {
+    if (!this.passageButton) return;
+    const p = this.recording.passage;
+    const open = p !== null && p.end === undefined;
+    const rec = this.recording.audio || Boolean(p?.recording);
+    this.recPill.hidden = !rec;
+    this.recPill.title = [
+      this.recording.audio ? 'Son du cours conservé pendant la lecture' : '',
+      p?.recording ? `Passage ${formatTimecode(p.start)} en cours d’enregistrement` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    this.recPill.setAttribute('aria-label', this.recPill.title || 'Enregistrement');
+    const keys = this.shortcuts;
+    const label = open ? `Fin ${formatTimecode(p.start)}` : 'Passage';
+    const title = open
+      ? `Terminer le passage commencé à ${formatTimecode(p.start)}${keys['passage-end'] ? ` (${keys['passage-end']})` : ''}`
+      : p?.end !== undefined
+        ? `Enregistrement du passage ${rangeLabel(p.start, p.end)}…`
+        : `Début d’un passage (extrait avec ses sous-titres et vos notes)${keys['passage-start'] ? ` (${keys['passage-start']})` : ''}`;
+    this.passageButton.dataset.state = open ? 'open' : p ? 'recording' : 'idle';
+    this.passageButton.title = title;
+    this.passageButton.setAttribute('aria-label', title);
+    this.passageButton.setAttribute('aria-pressed', String(open));
+    const text = this.passageButton.querySelector('.action-label');
+    if (text) text.textContent = label;
+    this.timeline.setPending(p ? { start: p.start, end: p.end } : null);
+  }
+
+  private async loadAudioTrace(): Promise<void> {
+    const noteId = this.ctx?.noteId;
+    if (!noteId) return;
+    try {
+      const media = (await listMedia(noteId)).filter((m) => m.kind === 'audio');
+      if (this.ctx?.noteId !== noteId) return;
+      this.audioTrace = media.map((m) => ({ path: m.path, start: m.start, end: m.end }));
+      const ranges = this.audioTrace.map((m) => [m.start, m.end] as [number, number]);
+      this.timeline.setCoverage(ranges);
+      this.transcriptView.setCoverage(ranges);
+    } catch {
+      // IndexedDB unavailable: nothing to listen to.
+    }
+  }
+
+  /** The kept sound of the course, from `seconds`. */
+  private async listen(seconds: number): Promise<void> {
+    const seg = this.audioTrace.find((m) => seconds >= m.start && seconds < m.end);
+    if (seg) await this.openMedia(seg.path, seconds - seg.start, `Son du cours · ${formatTimecode(seconds)}`);
+  }
+
+  /** Recorded extract (or kept sound) played in the panel. */
+  private async openMedia(path: string, offset = 0, title?: string): Promise<void> {
+    const record = await getMedia(path).catch(() => null);
+    if (!record) {
+      this.notify('Extrait introuvable dans ce navigateur (il est peut-être dans l’app Desktop)', 'error');
+      return;
+    }
+    this.closeMedia();
+    this.mediaUrl = URL.createObjectURL(record.blob);
+    const isVideo = record.mime.startsWith('video/');
+    const player = h(isVideo ? 'video' : 'audio', { controls: true, playsinline: true, src: this.mediaUrl, preload: 'auto' }) as HTMLMediaElement;
+    player.addEventListener('loadedmetadata', () => {
+      if (offset > 0) player.currentTime = offset;
+      void player.play().catch(() => undefined);
+    });
+    const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer l’extrait', title: 'Fermer (Échap)' }, icon('close', 16));
+    close.addEventListener('click', () => this.closeMedia());
+    const label = title ?? `${record.kind === 'passage' ? 'Extrait' : 'Son du cours'} ${rangeLabel(record.start, record.end)}`;
+    this.mediaPop.replaceChildren(h('div', { class: 'mp-head' }, icon(isVideo ? 'video' : 'volume', 15), h('span', { class: 'mp-title' }, label), close), player);
+    this.mediaPop.dataset.kind = isVideo ? 'video' : 'audio';
+    this.mediaPop.hidden = false;
+    // The course itself pauses while the extract plays.
+    this.post({ type: 'pause' });
+    close.focus();
+  }
+
+  private closeMedia(): void {
+    if (!this.mediaPop) return;
+    this.mediaPop.querySelector('video, audio')?.remove();
+    this.mediaPop.replaceChildren();
+    this.mediaPop.hidden = true;
+    if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
+    this.mediaUrl = null;
   }
 
   // --- Course › chapter filing -------------------------------------------------------------
@@ -1072,6 +1424,27 @@ class PanelApp {
           this.sheet.open();
           return;
         }
+        const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+        // Ctrl/⌘+Maj+K: the line being spoken, quoted in the note.
+        if (mod && e.shiftKey && !e.altKey && e.code === 'KeyK') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.pinCue(this.caption.cue);
+          return;
+        }
+        // Alt+T: Notes ⇄ Transcription.
+        if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyT' && this.kind !== 'page' && this.ctx) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.setView(this.view === 'notes' ? 'transcript' : 'notes');
+          return;
+        }
+        if (e.key === 'Escape' && !this.mediaPop.hidden) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeMedia();
+          return;
+        }
         const altLeft = e.key === 'ArrowLeft' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
         const binding = this.settings.pageShortcuts ? findBinding(this.pageBindings, e) : undefined;
         // On macOS, ⌥← moves by word inside the editor: keep that.
@@ -1115,9 +1488,18 @@ class PanelApp {
         this.notionStatus = (changes['notion:status'].newValue as NotionStatus | undefined) ?? null;
       }
       if (area === 'sync' && changes.settings) {
+        const before = this.settings;
         this.settings = normalizeSettings(changes.settings.newValue);
         this.autoPause.enabled = this.settings.autoPause;
         this.applyTheme();
+        this.renderLive();
+        if (before.autoTranslate !== this.settings.autoTranslate || before.translateTo !== this.settings.translateTo) {
+          void this.setTranslate(this.settings.autoTranslate, false);
+        }
+      }
+      if (area === 'local' && this.ctx && changes[`transcript:${this.ctx.noteId}`]) {
+        const t = changes[`transcript:${this.ctx.noteId}`].newValue as Transcript | undefined;
+        this.setTranscript(t ?? null);
       }
       if (area === 'local' && this.note) {
         const change = changes[`note:${this.note.id}`];

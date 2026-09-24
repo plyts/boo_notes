@@ -19,7 +19,7 @@ export interface Flashcard {
 export function plainText(markdown: string): string {
   return markdown
     .replace(/\[\[([^[\]\n|]+?)(?:\|([^[\]\n]+?))?\]\]/g, (_all, title: string, alias?: string) => alias ?? title)
-    .replace(/(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})\](?:\([^()\s]*\))?/g, '$1')
+    .replace(/(?<!!)\[((?:\d+:)?\d{1,3}:\d{2}(?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?)\](?:\([^()\s]*\))?/g, '$1')
     .replace(/(?<!!)\[(p\.\s?\d+|§\s?\d+)\](?:\(res:[^()\s]+\))?/g, '$1')
     .replace(/(?<!!)\[pin\s?(\d+)\](?:\(res:[^()\s]+\))?/gi, '◉ $1')
     .replace(/!\[[^\]\n]*\]\([^)\s]+\)/g, '')
@@ -31,7 +31,7 @@ export function plainText(markdown: string): string {
     .trim();
 }
 
-const LEADING_ANCHORS = /^(?:\[(?:(?:\d+:)?\d{1,3}:\d{2}|p\.\s?\d+|§\s?\d+|pin\s?\d+)\](?:\([^()\s]*\))?\s*)+/i;
+const LEADING_ANCHORS = /^(?:\[(?:(?:\d+:)?\d{1,3}:\d{2}(?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?|p\.\s?\d+|§\s?\d+|pin\s?\d+)\](?:\([^()\s]*\))?\s*)+/i;
 
 /** Stable id of a card (same note, same question → same id), in Node and in browsers. */
 function cardId(noteId: string, front: string): string {

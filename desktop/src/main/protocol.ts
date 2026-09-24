@@ -130,6 +130,7 @@ export function handleScheme(rendererDir: string, getLibrary: () => Library): vo
             if (res.origin === 'url') return remoteResponse(res.source, range);
             return notFound();
           }
+          if (path.startsWith('__vault/media/')) return fileResponse(getLibrary().mediaPath(path.slice('__vault/'.length)), range);
           if (path.startsWith('__vault/')) return fileResponse(getLibrary().assetPath(path.slice('__vault/'.length)), range);
           const file = normalize(join(root, path || 'index.html'));
           if (!file.startsWith(root + sep)) return notFound();

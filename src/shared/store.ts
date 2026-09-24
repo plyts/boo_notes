@@ -125,6 +125,15 @@ export class NoteStore {
     return this.exclusive(() => this.write(id, meta, (current) => appendBlock(current, block), writer));
   }
 
+  /** Rewrites an existing note (null when there is none, or nothing changed). */
+  transformNote(id: string, update: (markdown: string) => string, writer?: string): Promise<Note | null> {
+    return this.exclusive(async () => {
+      const prev = await this.getNote(id);
+      if (!prev || update(prev.markdown) === prev.markdown) return null;
+      return this.write(id, { platform: prev.platform, url: prev.url, title: prev.title, kind: prev.kind }, update, writer);
+    });
+  }
+
   /** Files the note in a course › chapter (null: unfiled). */
   placeNote(id: string, meta: NoteMeta, place: { course: string; chapter: string } | null): Promise<Note> {
     const course = place?.course.trim().slice(0, 120);
@@ -312,6 +321,8 @@ export class NoteStore {
           k.startsWith('note:') ||
           k.startsWith('asset:') ||
           k.startsWith('progress:') ||
+          k.startsWith('transcript:') ||
+          k === 'sync:transcripts' ||
           [INDEX, OUTBOX, SYNCED_ASSETS, PENDING_PROGRESS].includes(k),
       );
       if (keys.length) await this.area.remove(keys);

@@ -70,7 +70,7 @@ const INLINE = new RegExp(
   [
     '\\[\\[(?<wiki>[^\\[\\]\\n|]{1,200}?)(?:\\|(?<wikiAlias>[^\\[\\]\\n]{1,200}?))?\\]\\]',
     '(?<code>`+)(?<codeText>.+?)\\k<code>',
-    '(?<!!)\\[(?<ts>(?:\\d+:)?\\d{1,3}:\\d{2})\\](?:\\((?<tsUrl>[^()\\s]*)\\))?',
+    '(?<!!)\\[(?<ts>(?:\\d+:)?\\d{1,3}:\\d{2})(?:\\s?[–-]\\s?(?<tsEnd>(?:\\d+:)?\\d{1,3}:\\d{2}))?\\](?:\\((?<tsUrl>[^()\\s]*)\\))?',
     '(?<!!)\\[p\\.\\s?(?<page>\\d{1,5})\\](?:\\(res:(?<pageRes>[^()\\s]+)\\))?',
     '(?<!!)\\[§\\s?(?<section>\\d{1,5})\\](?:\\(res:(?<sectionRes>[^()\\s]+)\\))?',
     '(?<!!)\\[pin\\s?(?<pin>\\d{1,4})\\](?:\\(res:(?<pinRes>[^()\\s]+)\\))?',
@@ -143,7 +143,7 @@ export function parseInline(
       const res = g.tsUrl?.startsWith('res:') ? g.tsUrl.slice(4) : null;
       const a = ctx.anchor?.('time', timecodeSeconds(g.ts), res) ?? null;
       const url = res ? (a?.url ?? null) : (safeUrl(g.tsUrl) ?? a?.url ?? null);
-      out.push(...text(`${a?.prefix ?? ''}${g.ts}`, { ...annotations, code: true }, safeUrl(url) ?? link));
+      out.push(...text(`${a?.prefix ?? ''}${g.ts}${g.tsEnd ? `–${g.tsEnd}` : ''}`, { ...annotations, code: true }, safeUrl(url) ?? link));
     } else if (g.page !== undefined || g.section !== undefined || g.pin !== undefined) {
       const kind = g.page !== undefined ? 'page' : g.section !== undefined ? 'section' : 'pin';
       const value = Number(g.page ?? g.section ?? g.pin);
@@ -200,8 +200,9 @@ function timecodeSeconds(tc: string): number {
   return tc.split(':').reduce((acc, part) => acc * 60 + Number(part), 0);
 }
 
+/** `[04:15] ![…](assets/…)`, or a passage `[02:05–06:07] ![Passage …](assets/…) [Extrait](media/…)` (the extract stays local). */
 const IMAGE_LINE =
-  /^\s*(?:\[((?:\d+:)?\d{1,3}:\d{2})\](?:\(([^()\s]*)\))?\s+)?!\[([^\]\n]*)\]\(([^()\s]+)\)\s*$/;
+  /^\s*(?:\[((?:\d+:)?\d{1,3}:\d{2}(?:\s?[–-]\s?(?:\d+:)?\d{1,3}:\d{2})?)\](?:\(([^()\s]*)\))?\s+)?!\[([^\]\n]*)\]\(([^()\s]+)\)(?:\s+\[[^\]\n]*\]\(media\/[^()\s]+\))?\s*$/;
 
 export function markdownToBlocks(markdown: string, ctx: InlineContext = {}): BlockSpec[] {
   const parseInline = (t: string) => parseInlineCtx(t, {}, null, ctx);
@@ -249,8 +250,21 @@ export function markdownToBlocks(markdown: string, ctx: InlineContext = {}): Blo
     }
     const image = IMAGE_LINE.exec(line);
     if (image) {
-      const [, tc, tcUrl, alt, src] = image;
-      const caption = tc ? text(tc, { code: true }, safeUrl(tcUrl)) : alt ? text(alt) : [];
+      const [, range, tcUrl, alt, src] = image;
+      const tc = range?.split(/\s?[–-]\s?/)[0];
+      const passageTitle = /^Passage\b[^·]*·\s*(.+)$/.exec(alt)?.[1]?.trim();
+      const res = tcUrl?.startsWith('res:') ? tcUrl.slice(4) : null;
+      const a = tc ? (ctx.anchor?.('time', timecodeSeconds(tc), res) ?? null) : null;
+      const url = res ? (a?.url ?? null) : (safeUrl(tcUrl) ?? a?.url ?? null);
+      const label = range?.replace(/\s?[–-]\s?/, '–');
+      const caption = label
+        ? [
+            ...text(`${range && label !== tc ? 'Passage ' : ''}${label}`, { code: true }, safeUrl(url)),
+            ...(passageTitle ? text(` · ${passageTitle}`) : []),
+          ]
+        : alt
+          ? text(alt)
+          : [];
       if (src.startsWith('assets/')) out.push({ type: 'image', asset: src, caption });
       else if (safeUrl(src)) out.push({ type: 'external_image', url: safeUrl(src)!, caption });
       else out.push({ type: 'paragraph', rich: parseInline(line.trim()) });

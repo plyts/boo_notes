@@ -32,16 +32,20 @@ describe('inPageBindings', () => {
       { name: 'capture-screenshot', shortcut: 'Alt+Shift+S' },
       { name: 'smart-pause', shortcut: 'Alt+Shift+Space' },
       { name: 'replay', shortcut: '' }, // no default: over Chrome's limit of four
+      { name: 'passage-start', shortcut: '' },
+      { name: 'passage-end', shortcut: 'Ctrl+Shift+9' }, // bound by the user
     ];
-    expect(inPageBindings(registered).map((b) => b.command)).toEqual(['insert-timestamp', 'replay']);
+    expect(inPageBindings(registered).map((b) => b.command)).toEqual(['insert-timestamp', 'replay', 'passage-start']);
   });
 
   it('leaves re-bound commands to Chrome', () => {
     expect(inPageBindings([{ name: 'replay', shortcut: 'Ctrl+Shift+Left' }]).map((b) => b.command)).not.toContain('replay');
   });
 
-  it('covers every command of the spec', () => {
-    expect(Object.keys(DEFAULT_SHORTCUTS)).toHaveLength(5);
+  it('covers every command of the spec, passages included', () => {
+    expect(Object.keys(DEFAULT_SHORTCUTS)).toHaveLength(7);
+    expect(DEFAULT_SHORTCUTS['passage-start']).toBe('Alt+I');
+    expect(DEFAULT_SHORTCUTS['passage-end']).toBe('Alt+O');
   });
 });
 

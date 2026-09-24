@@ -1,6 +1,6 @@
 import { positionLabel, progressRatio, studyStatus, type StudyShape } from '../../../src/shared/study';
 import { isDue, type Library } from './library';
-import type { Course, MediaKind, Note, Platform, Resource, StudyStatus } from './types';
+import type { Course, MediaEntry, MediaKind, Note, Platform, Resource, StudyStatus, TranscriptSummary } from './types';
 
 /** A resource as displayed: derived status, progress, and the notes about it. */
 export interface ResourceView extends Resource {
@@ -26,6 +26,10 @@ export interface NoteView extends Note {
   due: boolean;
   courseId: string | null;
   chapterId: string | null;
+  /** Subtitles collected for it (browser, subtitles file), null when none. */
+  transcript: TranscriptSummary | null;
+  /** Recorded passage extracts and kept sound. */
+  media: MediaEntry[];
 }
 
 export interface CourseView extends Course {
@@ -73,6 +77,8 @@ export function noteView(lib: Library, note: Note, now = Date.now()): NoteView {
     due: isDue(note, now),
     courseId: placement?.courseId ?? null,
     chapterId: placement?.chapterId ?? null,
+    transcript: lib.transcriptOf(note.id),
+    media: lib.mediaOf(note.id),
   };
 }
 

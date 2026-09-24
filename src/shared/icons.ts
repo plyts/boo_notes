@@ -33,6 +33,24 @@ const ICONS = {
     ['path', { d: 'M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4' }],
   ],
   close: [['path', { d: 'M6 6l12 12M18 6L6 18' }]],
+  subtitles: [
+    ['rect', { x: '3', y: '5', width: '18', height: '14', rx: '2.5' }],
+    ['path', { d: 'M7 13h4M13 13h4M7 16h7' }],
+  ],
+  translate: [
+    ['path', { d: 'M4 6h8M8 4v2M6 6c.5 3 2.5 5.5 5 6.5M10.5 6c-.6 3.4-3 6-6 7' }],
+    ['path', { d: 'M13 20l3.5-8 3.5 8M14.2 17.5h4.6' }],
+  ],
+  comment: [['path', { d: 'M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z' }]],
+  passage: [
+    ['path', { d: 'M7 5H5v14h2M17 5h2v14h-2' }],
+    ['path', { d: 'M10 9.5v5l4.5-2.5z', fill: 'currentColor' }],
+  ],
+  rec: [['circle', { cx: '12', cy: '12', r: '6', fill: 'currentColor' }]],
+  volume: [
+    ['path', { d: 'M4 9.5h3.5L12 5.5v13l-4.5-4H4z' }],
+    ['path', { d: 'M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11' }],
+  ],
   clock: [
     ['circle', { cx: '12', cy: '12', r: '9' }],
     ['path', { d: 'M12 7v5l3 2' }],

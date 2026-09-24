@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -18,7 +19,9 @@ import {
   Tray,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { timestampUrl } from '../../../src/shared/platforms';
+import { noteSlug, timestampUrl } from '../../../src/shared/platforms';
+import { formatTimecode } from '../../../src/shared/time';
+import type { CuePatch } from '../../../src/shared/transcript';
 import { ConfigStore, plainBox, type SecretBox } from '../core/config';
 import { writeExport, type ExportFormat, type ExportOptions } from '../core/export';
 import { kindForFile, Library, OPEN_FILE_FILTERS } from '../core/library';
@@ -532,6 +535,40 @@ function registerIpc(): void {
     if (!m) throw new Error('Image invalide');
     const ext = m[1] === 'jpeg' ? 'jpg' : (m[1] as 'png' | 'webp');
     return library.saveCapture(str(id, 'id'), Buffer.from(m[2], 'base64'), Number(seconds) || 0, ext);
+  });
+  handle(C.transcript, (noteId: string) => library.getTranscript(str(noteId, 'id')));
+  handle(C.annotateTranscript, (noteId: string, patches: CuePatch[], langs?: { lang?: string; target?: string }) =>
+    library.annotateTranscript(
+      str(noteId, 'id'),
+      (Array.isArray(patches) ? patches : [])
+        .filter((p) => p && typeof p.id === 'string')
+        .map((p) => ({
+          id: p.id,
+          ...(typeof p.tr === 'string' || p.tr === null ? { tr: p.tr } : {}),
+          ...(typeof p.note === 'string' || p.note === null ? { note: p.note } : {}),
+        })),
+      { lang: typeof langs?.lang === 'string' ? langs.lang : undefined, target: typeof langs?.target === 'string' ? langs.target : undefined },
+    ),
+  );
+  handle(C.importSubtitles, async (noteId: string) => {
+    const res = await dialog.showOpenDialog(win!, {
+      title: 'Ajouter des sous-titres à la note',
+      buttonLabel: 'Ajouter',
+      properties: ['openFile'],
+      filters: [{ name: 'Sous-titres', extensions: ['vtt', 'srt'] }],
+    });
+    return res.canceled || !res.filePaths[0] ? null : library.importSubtitles(str(noteId, 'id'), res.filePaths[0]);
+  });
+  handle(C.saveMedia, async (noteId: string, entry: { kind: string; mime: string; start: number; end: number }, bytes: Uint8Array) => {
+    const id = str(noteId, 'id');
+    if (!(bytes instanceof Uint8Array) || !bytes.length) throw new Error('Enregistrement vide');
+    const mime = str(entry?.mime, 'type').split(';')[0];
+    const nonce = randomBytes(3).toString('hex');
+    const ext = mime.includes('ogg') ? 'ogg' : 'webm';
+    const start = Number(entry.start) || 0;
+    const path = `media/${noteSlug(id)}-${entry.kind === 'audio' ? 'audio' : 'passage'}-${formatTimecode(start).replace(/:/g, '-')}-${nonce}.${ext}`;
+    await library.putMedia(id, { path, kind: entry.kind === 'audio' ? 'audio' : 'passage', mime, start, end: Number(entry.end) || 0 }, Buffer.from(bytes));
+    return path;
   });
   handle(C.openSource, async (id: string, seconds?: number) => {
     const res = library.requireResource(str(id, 'id'));

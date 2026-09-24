@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { normalizeTranscript } from '../../../src/shared/transcript';
 import type { Library } from './library';
 import type { ActivePlayer, ExtensionNote, MediaKind } from './types';
 
@@ -43,6 +44,8 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
   private wss: WebSocketServer | null = null;
   private readonly authed = new Set<WebSocket>();
   private activePlayer: ActivePlayer | null = null;
+  /** Recordings being received in chunks (path → parts). */
+  private readonly uploads = new Map<string, { parts: Buffer[]; size: number; at: number }>();
 
   constructor(private readonly opts: ServerOptions) {
     super();
@@ -197,6 +200,51 @@ export class ExtensionServer extends EventEmitter<ServerEvents> {
         const portable = typeof msg.portableMarkdown === 'string' ? msg.portableMarkdown : undefined;
         await library.upsertFromExtension(note, portable);
         send(ws, { type: 'ack', noteId: note.id, rev: note.rev });
+        return;
+      }
+      case 'transcript.put': {
+        const t = normalizeTranscript(msg.transcript);
+        if (!t) throw new Error('Transcription invalide');
+        await library.saveTranscript(t);
+        send(ws, { type: 'transcript.ack', noteId: t.noteId, rev: t.rev });
+        return;
+      }
+      case 'media.chunk': {
+        const path = String(msg.path ?? '');
+        library.mediaPath(path);
+        const now = Date.now();
+        for (const [p, u] of this.uploads) if (now - u.at > 10 * 60_000) this.uploads.delete(p);
+        const u = Number(msg.index) === 0 ? { parts: [], size: 0, at: now } : this.uploads.get(path);
+        if (!u) throw new Error('Enregistrement incomplet');
+        const part = Buffer.from(String(msg.data ?? ''), 'base64');
+        u.parts[Number(msg.index)] = part;
+        u.size += part.length;
+        u.at = now;
+        if (u.size > 512 * 1024 * 1024) {
+          this.uploads.delete(path);
+          throw new Error('Enregistrement trop volumineux');
+        }
+        this.uploads.set(path, u);
+        return;
+      }
+      case 'media.put': {
+        const path = String(msg.path ?? '');
+        const u = this.uploads.get(path);
+        this.uploads.delete(path);
+        const count = Number(msg.chunks);
+        if (!u || u.parts.length !== count || u.parts.some((p) => !p)) throw new Error('Enregistrement incomplet');
+        await library.putMedia(
+          String(msg.noteId ?? ''),
+          {
+            path,
+            kind: msg.kind === 'audio' ? 'audio' : 'passage',
+            mime: String(msg.mime ?? '').split(';')[0],
+            start: Number(msg.start) || 0,
+            end: Number(msg.end) || 0,
+          },
+          Buffer.concat(u.parts),
+        );
+        send(ws, { type: 'media.ack', path });
         return;
       }
       case 'media.progress': {

@@ -1,17 +1,29 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { countNotes, findAnchors, linkedTitles, normalizeTitle, RESOURCE_SCHEME, toPortableMarkdown } from '../../../src/shared/markdown';
 import { detectVideoContext } from '../../../src/shared/platforms';
 import { formatTimecode } from '../../../src/shared/time';
 import { nextInterval } from '../../../src/shared/study';
+import {
+  annotateCues,
+  carryAnnotations,
+  emptyTranscript,
+  parseVtt,
+  transcriptPath,
+  transcriptToMarkdown,
+  transcriptToVtt,
+  type CuePatch,
+  type Transcript,
+} from '../../../src/shared/transcript';
 import { parseFrontMatter, serializeFrontMatter } from './frontmatter';
 import type {
   Chapter,
   Course,
   ExtensionNote,
   Highlight,
+  MediaEntry,
   MediaKind,
   Note,
   NotionLink,
@@ -21,6 +33,7 @@ import type {
   ResourceKind,
   ReviewAction,
   StudyStatus,
+  TranscriptSummary,
 } from './types';
 
 const LIBRARY_FILE = join('.boo', 'library.json');
@@ -143,14 +156,22 @@ interface LibraryFileV2 {
   notes: Record<string, Note>;
   resources: Record<string, Resource>;
   courses: Course[];
+  /** Recorded extracts and kept sound, per note id (a browser note may send them before itself). */
+  media?: Record<string, MediaEntry[]>;
+  /** Transcripts, per note id. */
+  transcripts?: Record<string, TranscriptSummary>;
 }
+
+/** Subtitles next to a video: `cours.vtt`, `cours.srt`, `cours.en.vtt`… */
+const SUBTITLE_EXT = /\.(vtt|srt)$/i;
+const MEDIA_PATH = /^media\/[\w][\w.-]{0,200}$/;
 
 /**
  * What changed. `id` is a note id when the change concerns a note (content,
  * filing, progress of one of its resources): the Notion sync reacts to those,
  * never to its own `notion` updates. `structure`: courses / chapters / resources.
  */
-export type ChangeReason = 'reload' | 'content' | 'progress' | 'meta' | 'notion' | 'removed' | 'structure';
+export type ChangeReason = 'reload' | 'content' | 'progress' | 'meta' | 'notion' | 'removed' | 'structure' | 'transcript' | 'media';
 
 export interface LibraryEvents {
   changed: [id: string | null, reason: ChangeReason];
@@ -178,6 +199,8 @@ export class Library extends EventEmitter<LibraryEvents> {
   private courses: Course[] = [];
   /** noteId → where it is filed (rebuilt from the courses). */
   private placements = new Map<string, Placement>();
+  private media: Record<string, MediaEntry[]> = {};
+  private transcripts: Record<string, TranscriptSummary> = {};
   private chain: Promise<unknown> = Promise.resolve();
   /** Positions received before their note (extension). */
   private pendingProgress = new Map<string, { position: number; duration: number; updatedAt: number }>();
@@ -213,6 +236,8 @@ export class Library extends EventEmitter<LibraryEvents> {
       this.notes = data?.notes ?? {};
       this.resources = data?.resources ?? {};
       this.courses = data?.courses ?? [];
+      this.media = data?.media ?? {};
+      this.transcripts = data?.transcripts ?? {};
       this.indexPlacements();
     }
     this.emit('changed', null, 'reload');
@@ -540,6 +565,11 @@ export class Library extends EventEmitter<LibraryEvents> {
           const existing = this.notesOf(res.id)[0];
           const note = existing ?? (await this.createNoteNow({ title: res.title, resources: [res.id], placement }));
           notes.push(note);
+          // Subtitles next to the video become its transcript.
+          if ((res.kind === 'video' || res.kind === 'audio') && !this.transcripts[note.id]) {
+            const sidecar = await findSidecar(res.source);
+            if (sidecar) await this.importSubtitlesNow(note.id, sidecar).catch(() => undefined);
+          }
         } catch (e) {
           errors.push(e instanceof Error ? e.message : String(e));
         }
@@ -710,6 +740,116 @@ export class Library extends EventEmitter<LibraryEvents> {
       await this.persist();
       this.emit('changed', id, 'meta');
       return next;
+    });
+  }
+
+  // --- Transcripts and recorded media ----------------------------------------------------------
+
+  transcriptOf(noteId: string): TranscriptSummary | null {
+    return this.transcripts[noteId] ?? null;
+  }
+
+  /** The note's transcript (`transcripts/<note>.json`), null when it has none. */
+  async getTranscript(noteId: string): Promise<Transcript | null> {
+    try {
+      return JSON.parse(await readFile(this.inside(transcriptPath(noteId, 'json')), 'utf8')) as Transcript;
+    } catch {
+      return null;
+    }
+  }
+
+  /** A transcript from the browser extension: kept unless the vault holds a more recent one. */
+  saveTranscript(t: Transcript): Promise<Transcript> {
+    return this.exclusive(async () => {
+      const current = await this.getTranscript(t.noteId);
+      if (current && current.updatedAt > t.updatedAt && current.rev >= t.rev) return current;
+      return this.writeTranscript(t);
+    });
+  }
+
+  /** Translations and comments typed in the app. */
+  annotateTranscript(noteId: string, patches: CuePatch[], langs: { lang?: string; target?: string } = {}): Promise<Transcript> {
+    return this.exclusive(async () => {
+      const t = await this.getTranscript(noteId);
+      if (!t) throw new Error('Cette note n’a pas de transcription');
+      return this.writeTranscript({
+        ...t,
+        cues: annotateCues(t.cues, patches),
+        lang: langs.lang ?? t.lang,
+        target: langs.target ?? t.target,
+        rev: t.rev + 1,
+        updatedAt: Date.now(),
+      });
+    });
+  }
+
+  /** A .vtt / .srt file becomes the note's transcript (translations and comments carried over). */
+  importSubtitles(noteId: string, file: string): Promise<Transcript> {
+    return this.exclusive(() => this.importSubtitlesNow(noteId, file));
+  }
+
+  private async importSubtitlesNow(noteId: string, file: string): Promise<Transcript> {
+    const cues = parseVtt(await readFile(file, 'utf8'));
+    if (!cues.length) throw new Error(`Aucun sous-titre lisible dans ${basename(file)}`);
+    const prev = await this.getTranscript(noteId);
+    // `cours.en.vtt` → English.
+    const lang = /\.([a-z]{2,3}(?:-[A-Za-z]{2,4})?)\.(?:vtt|srt)$/i.exec(basename(file))?.[1] ?? '';
+    return this.writeTranscript({
+      ...emptyTranscript(noteId, { lang, label: `Fichier de sous-titres · ${basename(file)}`, source: 'file', complete: true }),
+      target: prev?.target ?? 'fr',
+      duration: prev?.duration ?? 0,
+      cues: carryAnnotations(prev?.cues ?? [], cues),
+      rev: (prev?.rev ?? 0) + 1,
+    });
+  }
+
+  /** JSON for the app, Markdown and WebVTT (original, translation) for people and players. */
+  private async writeTranscript(t: Transcript): Promise<Transcript> {
+    const note = this.notes[t.noteId];
+    const res = note?.resources[0] ? this.resources[note.resources[0]] : undefined;
+    const title = note?.title || res?.title || t.noteId;
+    const url = res && /^https?:\/\//.test(res.source) ? res.source : undefined;
+    await this.writeText(transcriptPath(t.noteId, 'json'), `${JSON.stringify(t)}\n`);
+    await this.writeText(transcriptPath(t.noteId, 'md'), transcriptToMarkdown(t, { title, url }));
+    await this.writeText(transcriptPath(t.noteId, 'vtt'), transcriptToVtt(t));
+    const translated = t.cues.some((c) => c.tr);
+    if (translated) await this.writeText(transcriptPath(t.noteId, 'vtt').replace(/\.vtt$/, `.${t.target || 'fr'}.vtt`), transcriptToVtt(t, true));
+    this.transcripts[t.noteId] = { cues: t.cues.length, lang: t.lang, label: t.label, translated, updatedAt: t.updatedAt };
+    await this.persist();
+    this.emit('changed', t.noteId, 'transcript');
+    return t;
+  }
+
+  mediaOf(noteId: string): MediaEntry[] {
+    return this.media[noteId] ?? [];
+  }
+
+  mediaPath(rel: string): string {
+    if (!MEDIA_PATH.test(rel)) throw new Error('Nom d’enregistrement invalide');
+    return this.inside(rel);
+  }
+
+  /** A recorded extract or stretch of sound (browser extension), stored in `media/`. */
+  async putMedia(noteId: string, entry: Omit<MediaEntry, 'size' | 'createdAt'>, data: Buffer): Promise<MediaEntry> {
+    const file = this.mediaPath(entry.path);
+    if (!/^(audio|video)\/[\w.+-]+$/.test(entry.mime)) throw new Error('Type d’enregistrement invalide');
+    return this.exclusive(async () => {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, data);
+      const record: MediaEntry = {
+        path: entry.path,
+        kind: entry.kind === 'audio' ? 'audio' : 'passage',
+        mime: entry.mime,
+        start: Number(entry.start) || 0,
+        end: Number(entry.end) || 0,
+        size: data.length,
+        createdAt: Date.now(),
+      };
+      const list = (this.media[noteId] ?? []).filter((m) => m.path !== record.path);
+      this.media[noteId] = [...list, record].sort((a, b) => a.start - b.start);
+      await this.persist();
+      this.emit('changed', noteId, 'media');
+      return record;
     });
   }
 
@@ -1103,7 +1243,14 @@ export class Library extends EventEmitter<LibraryEvents> {
   private async persist(): Promise<void> {
     // Placeholders created while filing a browser note that is not written yet are not saved.
     const notes = Object.fromEntries(Object.entries(this.notes).filter(([, n]) => n.noteFile));
-    const data: LibraryFileV2 = { version: 2, notes, resources: this.resources, courses: this.courses };
+    const data: LibraryFileV2 = {
+      version: 2,
+      notes,
+      resources: this.resources,
+      courses: this.courses,
+      ...(Object.keys(this.media).length ? { media: this.media } : {}),
+      ...(Object.keys(this.transcripts).length ? { transcripts: this.transcripts } : {}),
+    };
     await this.writeText(LIBRARY_FILE, `${JSON.stringify(data, null, 2)}\n`);
   }
 
@@ -1164,4 +1311,23 @@ function applyProgress(res: Resource, position: number, duration: number, update
   res.progress = { position: pos, duration: dur, updatedAt };
   res.furthest = Math.max(res.furthest ?? 0, pos);
   res.updatedAt = Math.max(res.updatedAt, updatedAt);
+}
+
+/** Subtitles next to a media file: same name, `.vtt` / `.srt` (a language suffix allowed), the one without suffix first. */
+export async function findSidecar(mediaFile: string): Promise<string | null> {
+  const dir = dirname(mediaFile);
+  const stem = basename(mediaFile, extname(mediaFile)).toLowerCase();
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return null;
+  }
+  const candidates = names.filter((n) => {
+    if (!SUBTITLE_EXT.test(n)) return false;
+    const base = n.toLowerCase().replace(SUBTITLE_EXT, '');
+    return base === stem || (base.startsWith(`${stem}.`) && /^[a-z]{2,3}(?:-[a-z]{2,4})?$/.test(base.slice(stem.length + 1)));
+  });
+  candidates.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  return candidates[0] ? join(dir, candidates[0]) : null;
 }

@@ -8,8 +8,11 @@ export interface TimestampMatch {
   to: number;
   /** End of the `[MM:SS]` part. */
   labelTo: number;
+  /** Start label (`04:15`); for a range `[02:05–06:07]`, the start. */
   label: string;
   seconds: number;
+  /** End of a range (`[02:05–06:07]`: a passage), null for an instant. */
+  end: number | null;
   url: string | null;
   /** Resource the instant belongs to (`[04:15](res:<id>)`); null: the note's main resource. */
   resource: string | null;
@@ -30,8 +33,11 @@ function target(resource?: string | null): string {
   return resource ? `(${RESOURCE_SCHEME}${resource})` : '';
 }
 
-/** `[04:15]` or `[04:15](https://…#t=255)`, but not the alt text of an image (`![04:15](…)`). */
-const TIMESTAMP_RE = /(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})\](?:\(([^()\s]*)\))?/g;
+/**
+ * `[04:15]`, `[04:15](https://…#t=255)` or a range `[02:05–06:07]` (a passage),
+ * but not the alt text of an image (`![04:15](…)`).
+ */
+const TIMESTAMP_RE = /(?<!!)\[((?:\d+:)?\d{1,3}:\d{2})(?:\s?[–-]\s?((?:\d+:)?\d{1,3}:\d{2}))?\](?:\(([^()\s]*)\))?/g;
 const ASSET_RE = /!\[[^\]\n]*\]\((assets\/[^)\s]+)\)/g;
 
 export function findTimestamps(text: string, offset = 0): TimestampMatch[] {
@@ -39,15 +45,18 @@ export function findTimestamps(text: string, offset = 0): TimestampMatch[] {
   for (const m of text.matchAll(TIMESTAMP_RE)) {
     const seconds = parseTimecode(m[1]);
     if (seconds === null) continue;
+    const end = m[2] === undefined ? null : parseTimecode(m[2]);
+    if (m[2] !== undefined && (end === null || end <= seconds)) continue;
     const from = offset + (m.index ?? 0);
     out.push({
       from,
       to: from + m[0].length,
-      labelTo: from + m[1].length + 2,
+      labelTo: from + m[0].indexOf(']') + 1,
       label: m[1],
       seconds,
-      url: m[2] ?? null,
-      resource: resourceOf(m[2]),
+      end,
+      url: m[3] ?? null,
+      resource: resourceOf(m[3]),
     });
   }
   return out;
@@ -377,10 +386,10 @@ function linkBareTimestamps(markdown: string, url: string): string {
         .map((seg, i) =>
           i % 2 === 1
             ? seg
-            : seg.replace(TIMESTAMP_RE, (all, label: string, link?: string) => {
+            : seg.replace(TIMESTAMP_RE, (all, label: string, _end: string | undefined, link?: string) => {
                 if (link !== undefined) return all;
                 const seconds = parseTimecode(label);
-                return seconds === null ? all : `[${label}](${timestampUrl(url, seconds)})`;
+                return seconds === null ? all : `${all}(${timestampUrl(url, seconds)})`;
               }),
         )
         .join('');

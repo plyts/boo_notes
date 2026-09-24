@@ -156,3 +156,80 @@ ${filler(6)}</main></body></html>`,
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/reading-mode.png` });
 });
+
+test('transcript tab, live subtitle and passage card', async ({ context, page, sw }) => {
+  await mkdir(OUT, { recursive: true });
+  const vtt = [
+    'WEBVTT',
+    '',
+    ...[
+      [0, 'So today we look at Stokes’ theorem.', 'Aujourd’hui, nous étudions le théorème de Stokes.'],
+      [3, 'The circulation of F around the boundary…', 'La circulation de F le long du bord…'],
+      [6, '…equals the flux of its curl through S.', '…est égale au flux de son rotationnel à travers S.'],
+      [9, 'Mind the orientation of the boundary.', 'Attention à l’orientation du bord.'],
+      [12, 'Let’s check it on an example.', 'Vérifions-le sur un exemple.'],
+      [15, 'Take the upper half-sphere.', 'Prenons la demi-sphère supérieure.'],
+      [18, 'Its boundary is the unit circle.', 'Son bord est le cercle unité.'],
+      [21, 'Both sides give two pi.', 'Les deux membres valent deux pi.'],
+    ].flatMap(([s, en]) => [`00:00:${String(s).padStart(2, '0')}.000 --> 00:00:${String(Number(s) + 3).padStart(2, '0')}.000`, en as string, '']),
+  ].join('\n');
+  const fr: Record<string, string> = {};
+  await context.route('https://www.youtube.com/__fixtures/stokes.vtt', (route) => route.fulfill({ contentType: 'text/vtt', body: vtt }));
+  await context.addInitScript(() => {
+    if (location.protocol !== 'chrome-extension:') return;
+    const table: Record<string, string> = {
+      'So today we look at Stokes’ theorem.': 'Aujourd’hui, nous étudions le théorème de Stokes.',
+      'The circulation of F around the boundary…': 'La circulation de F le long du bord…',
+      '…equals the flux of its curl through S.': '…est égale au flux de son rotationnel à travers S.',
+      'Mind the orientation of the boundary.': 'Attention à l’orientation du bord.',
+      'Let’s check it on an example.': 'Vérifions-le sur un exemple.',
+      'Take the upper half-sphere.': 'Prenons la demi-sphère supérieure.',
+      'Its boundary is the unit circle.': 'Son bord est le cercle unité.',
+      'Both sides give two pi.': 'Les deux membres valent deux pi.',
+    };
+    Object.assign(globalThis, {
+      Translator: { availability: async () => 'available', create: async () => ({ translate: async (t: string) => table[t] ?? t }) },
+    });
+  });
+  void fr;
+  await page.setViewportSize({ width: 1180, height: 760 });
+  await openWatch(page, '&theme=dark');
+  await page.evaluate(() => {
+    const t = document.createElement('track');
+    Object.assign(t, { kind: 'subtitles', srclang: 'en', label: 'English', src: '/__fixtures/stokes.vtt' });
+    document.querySelector('video')!.append(t);
+    document.querySelector('h1')!.textContent = 'Théorème de Stokes — Cours 7';
+  });
+  await setVideo(page, 1);
+  await openNotes(sw, page);
+  const p = panel(page);
+  await page.keyboard.type('## Théorème de Stokes');
+  await page.keyboard.press('Enter');
+  await setVideo(page, 3.5);
+  await page.waitForTimeout(300);
+  await page.keyboard.type('Circulation = flux du ==rotationnel==');
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => document.querySelector('video')!.play());
+  await page.keyboard.press('Alt+I');
+  await page.waitForTimeout(4200);
+  await page.keyboard.press('Alt+O');
+  await expect(p.locator('.cm-boo-img.cm-boo-passage img')).toHaveAttribute('src', /^data:/, { timeout: 15_000 });
+  await page.keyboard.press('Alt+T');
+  await p.getByRole('switch', { name: /Traduire/ }).click();
+  await expect(p.locator('.cue .cue-tr:not(.empty)')).toHaveCount(8);
+  const row = p.locator('.cue', { hasText: 'Mind the orientation' });
+  await row.hover();
+  await row.getByRole('button', { name: 'Commenter' }).click();
+  await row.locator('textarea').fill('Règle de la main droite : normale sortante');
+  await row.locator('textarea').press('Enter');
+  await setVideo(page, 10);
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(2600);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-transcript.png` });
+  await page.keyboard.press('Alt+T');
+  await setVideo(page, 7);
+  await p.locator('.cm-content').press('Control+End');
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(600);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-passage.png` });
+});

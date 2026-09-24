@@ -21,6 +21,8 @@ function note(id: string, title: string, extra: Partial<NoteView> = {}): NoteVie
     due: false,
     courseId: null,
     chapterId: null,
+    transcript: null,
+    media: [],
     ...extra,
   };
 }

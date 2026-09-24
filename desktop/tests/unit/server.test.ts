@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { DesktopSync } from '../../../src/background/sync';
 import { NoteStore } from '../../../src/shared/store';
+import { TranscriptStore } from '../../../src/shared/transcript-store';
 import { MemoryArea } from '../../../tests/unit/helpers';
 import { Library } from '../../src/core/library';
 import { ExtensionServer, isAllowedOrigin } from '../../src/core/server';
@@ -157,5 +158,63 @@ describe('ExtensionServer', () => {
     );
     const status = await sync.status();
     expect(status).toMatchObject({ state: 'connected', app: { name: 'Boo Notes Desktop' } });
+  });
+
+  it('receives transcripts and recordings (passage extracts, kept sound) from the extension', async () => {
+    const area = new MemoryArea();
+    const store = new NoteStore(area);
+    const transcripts = new TranscriptStore(area);
+    const meta = { platform: 'youtube' as const, url: 'https://www.youtube.com/watch?v=abcdefghijk', title: 'Stokes' };
+    await store.saveNote('youtube:abcdefghijk', meta, '[00:02–00:05] ![Passage 00:02–00:05](assets/p.jpg) [Extrait](media/p.webm)');
+    await transcripts.put(
+      'youtube:abcdefghijk',
+      { lang: 'en', label: 'Sous-titres YouTube · anglais', source: 'platform', complete: true, duration: 30 },
+      [
+        { id: 'c100', start: 1, end: 3, text: 'hello everyone' },
+        { id: 'c300', start: 3, end: 6, text: 'the curl of F' },
+      ],
+      true,
+    );
+    await transcripts.annotate('youtube:abcdefghijk', [{ id: 'c300', tr: 'le rotationnel de F', note: 'à retenir' }]);
+    // 2.5 MB: three chunks.
+    const bytes = new Uint8Array(2_500_000).map((_, i) => i % 251);
+    const media = new Map([['media/p.webm', { blob: new Blob([bytes], { type: 'video/webm' }), synced: false }]]);
+    const sync = new DesktopSync({
+      store,
+      transcripts,
+      media: {
+        unsynced: async () =>
+          [...media].filter(([, m]) => !m.synced).map(([path]) => ({ path, noteId: 'youtube:abcdefghijk', kind: 'passage' as const, mime: 'video/webm', start: 2, end: 5 })),
+        read: async (path) => media.get(path)?.blob ?? null,
+        markSynced: async (path) => void (media.get(path)!.synced = true),
+        requeueAll: async () => undefined,
+      },
+      clientVersion: '0.1.0',
+      getConfig: async () => ({ url: `ws://127.0.0.1:${server.port}`, token: 'ABCD-EFGH-JKLM-NPQR' }),
+      WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket,
+    });
+    await sync.connect();
+    await vi.waitFor(() => expect(media.get('media/p.webm')!.synced).toBe(true), { timeout: 5000 });
+    expect(await transcripts.getOutbox()).toEqual({});
+
+    const t = await lib.getTranscript('youtube:abcdefghijk');
+    expect(t?.cues[1]).toMatchObject({ text: 'the curl of F', tr: 'le rotationnel de F', note: 'à retenir' });
+    expect(lib.transcriptOf('youtube:abcdefghijk')).toMatchObject({ cues: 2, lang: 'en', translated: true });
+    const md = await readFile(join(lib.path, 'transcripts/youtube-abcdefghijk.md'), 'utf8');
+    expect(md).toContain('[00:03] the curl of F\n*le rotationnel de F*\n💬 à retenir');
+    expect(await readFile(join(lib.path, 'transcripts/youtube-abcdefghijk.fr.vtt'), 'utf8')).toContain('le rotationnel de F');
+    expect(Buffer.compare(await readFile(join(lib.path, 'media/p.webm')), Buffer.from(bytes))).toBe(0);
+    expect(lib.mediaOf('youtube:abcdefghijk')).toMatchObject([{ path: 'media/p.webm', kind: 'passage', start: 2, end: 5, size: 2_500_000 }]);
+  });
+
+  it('refuses recordings outside media/ and invalid transcripts', async () => {
+    const { ws, next } = await connect();
+    ws.send(JSON.stringify({ type: 'hello', protocol: 1, token: 'ABCD-EFGH-JKLM-NPQR' }));
+    await next();
+    ws.send(JSON.stringify({ type: 'media.chunk', path: '../evil.webm', index: 0, data: 'AAAA' }));
+    expect(await next()).toMatchObject({ type: 'error', code: 'internal' });
+    ws.send(JSON.stringify({ type: 'transcript.put', transcript: { noteId: 'x' } }));
+    expect(await next()).toMatchObject({ type: 'error', message: 'Transcription invalide' });
+    ws.close();
   });
 });

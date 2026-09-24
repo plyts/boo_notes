@@ -385,3 +385,37 @@ describe('Export', () => {
     expect(res.sheetsHtml).toBe(join(out, 'Fiches de révision.html'));
   });
 });
+
+describe('Transcripts and recordings', () => {
+  it('imports the subtitles next to a video, keeps translations and comments, writes readable copies', async () => {
+    const media = join(dir, 'Cours 7.mp4');
+    await writeFile(media, 'fake');
+    await writeFile(join(dir, 'Cours 7.en.vtt'), 'WEBVTT\n\n00:01.000 --> 00:03.000\nThe curl of F\n\n00:03.000 --> 00:05.000\nthrough S\n');
+    await writeFile(join(dir, 'Autre.vtt'), 'WEBVTT\n\n00:01.000 --> 00:02.000\nno\n');
+    const { notes } = await lib.importFiles([media]);
+    const id = notes[0].id;
+    expect(lib.transcriptOf(id)).toMatchObject({ cues: 2, lang: 'en', label: 'Fichier de sous-titres · Cours 7.en.vtt' });
+    const t = await lib.getTranscript(id);
+    await lib.annotateTranscript(id, [{ id: t!.cues[0].id, tr: 'Le rotationnel de F', note: 'formule' }]);
+    // A new subtitles file replaces the lines, the annotations follow the moment they were about.
+    await writeFile(join(dir, 'fixed.srt'), '1\n00:00:01,000 --> 00:00:03,000\nThe curl of F.\n');
+    const after = await lib.importSubtitles(id, join(dir, 'fixed.srt'));
+    expect(after.cues).toEqual([{ id: 'c100', start: 1, end: 3, text: 'The curl of F.', tr: 'Le rotationnel de F', note: 'formule' }]);
+    expect(snapshot(lib).notes.find((n) => n.id === id)?.transcript).toMatchObject({ cues: 1, translated: true });
+    const vtt = await readFile(join(lib.path, `transcripts/${id.replace(/[^\w-]+/g, '-')}.fr.vtt`), 'utf8');
+    expect(vtt).toContain('Le rotationnel de F');
+    await expect(lib.importSubtitles(id, join(dir, 'Cours 7.mp4'))).rejects.toThrow('Aucun sous-titre');
+  });
+
+  it('stores recordings in media/ only', async () => {
+    const entry = await lib.putMedia('youtube:abc', { path: 'media/a-audio-00-10-x.webm', kind: 'audio', mime: 'audio/webm', start: 10, end: 70 }, Buffer.from('ogg'));
+    expect(entry).toMatchObject({ size: 3, kind: 'audio' });
+    expect(lib.mediaOf('youtube:abc')).toHaveLength(1);
+    await expect(lib.putMedia('youtube:abc', { path: 'assets/x.webm', kind: 'audio', mime: 'audio/webm', start: 0, end: 1 }, Buffer.from(''))).rejects.toThrow('invalide');
+    // Kept across restarts.
+    const again = new Library(lib.path);
+    await again.open();
+    expect(again.mediaOf('youtube:abc')[0].path).toBe('media/a-audio-00-10-x.webm');
+  });
+});
+

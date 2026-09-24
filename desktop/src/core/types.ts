@@ -171,3 +171,24 @@ export interface ActivePlayer {
   title: string;
   url: string;
 }
+
+/** A recorded extract of a passage, or a stretch of the course's sound kept while it played (`media/…`). */
+export interface MediaEntry {
+  path: string;
+  kind: 'passage' | 'audio';
+  mime: string;
+  /** Media time range (s). */
+  start: number;
+  end: number;
+  size: number;
+  createdAt: number;
+}
+
+/** What the library knows of a note's transcript (the cues live in `transcripts/<note>.json`). */
+export interface TranscriptSummary {
+  cues: number;
+  lang: string;
+  label: string;
+  translated: boolean;
+  updatedAt: number;
+}

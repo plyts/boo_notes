@@ -11,6 +11,8 @@ const COMMAND_LABELS: Record<CommandId, string> = {
   'capture-screenshot': 'Capturer l’image de la vidéo ou de la page',
   'smart-pause': 'Pause & écrire (Smart Pause)',
   replay: 'Revoir les dernières secondes',
+  'passage-start': 'Début du passage (extrait 02:05 → 06:07)',
+  'passage-end': 'Fin du passage : carte, extrait, sous-titres et notes',
 };
 
 const FORMAT_DESC: Record<string, string> = {
@@ -45,7 +47,7 @@ function checkRadio(name: string, value: string): void {
 }
 
 function renderSettings(s: Settings): void {
-  for (const key of ['autoTimestamp', 'autoPause', 'pageShortcuts', 'hudEnabled'] as const) {
+  for (const key of ['autoTimestamp', 'autoPause', 'pageShortcuts', 'hudEnabled', 'transcribe', 'autoTranslate', 'recordPassages', 'keepAudio'] as const) {
     field(key)[0].checked = s[key];
   }
   checkRadio('layout', s.layout);
@@ -76,6 +78,10 @@ function readPatch(target: HTMLInputElement | HTMLSelectElement): Partial<Settin
     case 'autoPause':
     case 'pageShortcuts':
     case 'hudEnabled':
+    case 'transcribe':
+    case 'autoTranslate':
+    case 'recordPassages':
+    case 'keepAudio':
       return { [name]: (target as HTMLInputElement).checked };
     case 'replaySeconds':
     case 'drawerWidth':

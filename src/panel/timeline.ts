@@ -22,6 +22,10 @@ export class Timeline {
   private readonly ticks: HTMLDivElement;
   private readonly tip: HTMLDivElement;
   private markers: NoteMarker[] = [];
+  private readonly coverage: HTMLDivElement;
+  private readonly pending: HTMLDivElement;
+  private coverageRanges: Array<[number, number]> = [];
+  private pendingRange: { start: number; end?: number } | null = null;
   private duration = 0;
   private time = 0;
   private renderedFor = '';
@@ -31,6 +35,9 @@ export class Timeline {
     this.playhead = h('div', { class: 'tl-playhead' });
     this.ticks = h('div', { class: 'tl-ticks', 'aria-hidden': 'true' });
     this.tip = h('div', { class: 'tl-tip', 'aria-hidden': 'true' });
+    // Sound of the course kept (thin bar under the track), passage being made (band from its start).
+    this.coverage = h('div', { class: 'tl-coverage', 'aria-hidden': 'true' });
+    this.pending = h('div', { class: 'tl-pending', 'aria-hidden': 'true', hidden: true });
     this.el = h(
       'div',
       {
@@ -41,6 +48,8 @@ export class Timeline {
         'aria-valuemin': '0',
       },
       h('div', { class: 'tl-track' }, this.progress),
+      this.coverage,
+      this.pending,
       this.ticks,
       this.playhead,
       this.tip,
@@ -54,6 +63,38 @@ export class Timeline {
     this.renderTicks();
   }
 
+  /** Stretches whose sound is kept (seconds). */
+  setCoverage(ranges: Array<[number, number]>): void {
+    this.coverageRanges = ranges;
+    this.renderOverlays();
+  }
+
+  /** Passage started (and not yet ended), or being recorded afterwards. */
+  setPending(range: { start: number; end?: number } | null): void {
+    this.pendingRange = range;
+    this.renderOverlays();
+  }
+
+  private renderOverlays(): void {
+    const d = this.duration;
+    if (!(d > 0)) return;
+    const pct = (s: number) => `${Math.min(100, Math.max(0, (s / d) * 100))}%`;
+    this.coverage.replaceChildren(
+      ...this.coverageRanges.map(([a, b]) => {
+        const seg = h('span', {});
+        seg.style.left = pct(a);
+        seg.style.width = `${Math.max(0.4, ((Math.min(b, d) - a) / d) * 100)}%`;
+        return seg;
+      }),
+    );
+    const p = this.pendingRange;
+    this.pending.hidden = !p;
+    if (p) {
+      this.pending.style.left = pct(p.start);
+      this.pending.style.width = `${Math.max(0, (((p.end ?? this.time) - p.start) / d) * 100)}%`;
+    }
+  }
+
   update(time: number | null, duration: number): void {
     const visible = time !== null && duration > 0;
     this.el.hidden = !visible;
@@ -63,7 +104,9 @@ export class Timeline {
       this.duration = duration;
       this.el.setAttribute('aria-valuemax', String(Math.round(duration)));
       this.renderTicks();
+      this.renderOverlays();
     }
+    if (this.pendingRange && this.pendingRange.end === undefined) this.renderOverlays();
     const pct = `${Math.min(100, (time / duration) * 100)}%`;
     this.progress.style.width = pct;
     this.playhead.style.left = pct;
@@ -73,7 +116,7 @@ export class Timeline {
 
   private renderTicks(): void {
     if (!(this.duration > 0)) return;
-    const key = `${this.duration}|${this.markers.map((m) => `${m.kind[0]}${m.seconds}`).join(',')}`;
+    const key = `${this.duration}|${this.markers.map((m) => `${m.kind[0]}${m.seconds}-${m.end ?? ''}`).join(',')}`;
     if (key === this.renderedFor) return;
     this.renderedFor = key;
     this.ticks.replaceChildren(
@@ -82,6 +125,8 @@ export class Timeline {
         .map((m) => {
           const tick = h('span', { class: 'tl-tick', 'data-kind': m.kind, 'data-t': String(m.seconds) });
           tick.style.left = `${(m.seconds / this.duration) * 100}%`;
+          // A passage is a band from its start to its end.
+          if (m.end !== undefined) tick.style.width = `${((Math.min(m.end, this.duration) - m.seconds) / this.duration) * 100}%`;
           return tick;
         }),
     );
@@ -108,7 +153,9 @@ export class Timeline {
       const { seconds, snapped } = this.secondsAt(e.clientX);
       const r = this.el.getBoundingClientRect();
       this.tip.textContent = snapped
-        ? `${formatTimecode(seconds)} · ${snapped.kind === 'capture' ? 'capture' : 'note'}`
+        ? snapped.kind === 'passage' && snapped.end !== undefined
+          ? `passage ${formatTimecode(snapped.seconds)}–${formatTimecode(snapped.end)}`
+          : `${formatTimecode(seconds)} · ${snapped.kind === 'capture' ? 'capture' : 'note'}`
         : formatTimecode(seconds);
       this.tip.style.left = `${Math.min(r.width - 8, Math.max(8, ((seconds / this.duration) * r.width)))}px`;
       this.el.classList.add('hover');

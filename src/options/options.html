@@ -124,6 +124,46 @@
           </div>
         </section>
 
+        <section id="transcription" class="group" aria-labelledby="h-transcript">
+          <header class="group-head"><h2 id="h-transcript">Transcription et passages</h2></header>
+          <div class="card rows">
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Transcrire les sous-titres en arrière-plan</span>
+                <span class="row-desc">
+                  Pendant la lecture, les sous-titres horodatés sont recopiés dans une transcription à part (onglet
+                  « Transcription »), épinglée à la note à la fin. Rien n’est gardé pour une vidéo sans note.
+                </span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="transcribe" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Traduire en français</span>
+                <span class="row-desc">Sur l’appareil (Chrome 138 et plus), réplique par réplique ; chaque traduction reste modifiable.</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="autoTranslate" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Enregistrer l’extrait des passages</span>
+                <span class="row-desc">
+                  Entre « Début » (<code>Alt + I</code>) et « Fin du passage » (<code>Alt + O</code>) : image et son
+                  (vidéo) ou son seul (audio). Impossible sur les lecteurs protégés (DRM).
+                </span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="recordPassages" />
+            </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Conserver l’audio du cours</span>
+                <span class="row-desc">Le son est enregistré pendant la lecture des médias notés (Opus, ≈ 20 Mo par heure).</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" name="keepAudio" />
+            </label>
+          </div>
+        </section>
+
         <section id="panneau" class="group" aria-labelledby="h-layout">
           <header class="group-head"><h2 id="h-layout">Panneau de notes</h2></header>
           <div class="card rows">

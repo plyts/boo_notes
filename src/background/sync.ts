@@ -1,7 +1,9 @@
+import { bytesToBase64 } from '../shared/encoding';
 import { findAssetRefs, toPortableMarkdown } from '../shared/markdown';
-import type { SyncState, SyncStatus } from '../shared/messages';
+import type { MediaMeta, SyncState, SyncStatus } from '../shared/messages';
 import type { NotionLink } from '../shared/notion/engine';
 import type { NoteStore } from '../shared/store';
+import type { TranscriptStore } from '../shared/transcript-store';
 import type { SharedNotionConfig } from './notion';
 
 /**
@@ -16,6 +18,8 @@ export type DesktopMessage =
   | { type: 'welcome'; protocol: number; app?: { name: string; version: string } }
   | { type: 'error'; code: string; message?: string; requestId?: string }
   | { type: 'ack'; noteId: string; rev: number }
+  | { type: 'transcript.ack'; noteId: string; rev: number }
+  | { type: 'media.ack'; path: string }
   | { type: 'asset.ack'; path: string }
   | { type: 'asset.request'; path: string }
   | { type: 'resync' }
@@ -40,8 +44,20 @@ interface Waiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** Recorded media of the extension (IndexedDB), as the sync needs it. */
+export interface MediaOutbox {
+  unsynced(): Promise<MediaMeta[]>;
+  read(path: string): Promise<Blob | null>;
+  markSynced(path: string): Promise<void>;
+  requeueAll(): Promise<void>;
+}
+
 export interface DesktopSyncOptions {
   store: NoteStore;
+  /** Transcripts (subtitles collected in the browser), sent after the notes. */
+  transcripts?: TranscriptStore;
+  /** Passage extracts and kept sound, sent in chunks after the notes. */
+  media?: MediaOutbox;
   getConfig: () => Promise<{ url: string; token: string }>;
   clientVersion: string;
   onStatus?: (status: SyncStatus) => void;
@@ -241,6 +257,8 @@ export class DesktopSync {
           await this.opts.store.markSynced(noteId, note.rev);
         }
       } while (this.flushAgain && this.connected);
+      await this.flushTranscripts();
+      await this.flushMedia();
       // Positions saved while offline, once their notes are known to the app.
       for (const noteId of await this.opts.store.pendingProgress()) await this.sendProgress(noteId);
     } catch (e) {
@@ -250,6 +268,38 @@ export class DesktopSync {
     } finally {
       this.flushing = false;
       await this.emitStatus();
+    }
+  }
+
+  private async flushTranscripts(): Promise<void> {
+    const store = this.opts.transcripts;
+    if (!store) return;
+    for (const noteId of Object.keys(await store.getOutbox())) {
+      const t = await store.get(noteId);
+      if (!t) {
+        await store.markSynced(noteId, Number.MAX_SAFE_INTEGER);
+        continue;
+      }
+      await this.request({ type: 'transcript.put', transcript: t }, (m) => m.type === 'transcript.ack' && m.noteId === noteId && m.rev >= t.rev, 30_000);
+      await store.markSynced(noteId, t.rev);
+    }
+  }
+
+  /** Recordings, in 1 MB chunks (the app assembles them in `media/`). */
+  private async flushMedia(): Promise<void> {
+    const media = this.opts.media;
+    if (!media) return;
+    for (const meta of await media.unsynced()) {
+      const blob = await media.read(meta.path);
+      if (!blob) continue;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const CHUNK = 1024 * 1024;
+      let chunks = 0;
+      for (let i = 0; i < bytes.length || chunks === 0; i += CHUNK) {
+        this.send({ type: 'media.chunk', path: meta.path, index: chunks++, data: bytesToBase64(bytes.subarray(i, i + CHUNK)) });
+      }
+      await this.request({ type: 'media.put', ...meta, chunks }, (m) => m.type === 'media.ack' && m.path === meta.path, 60_000);
+      await media.markSynced(meta.path);
     }
   }
 
@@ -307,7 +357,7 @@ export class DesktopSync {
         void this.sendAsset(msg.path).catch(() => undefined);
         break;
       case 'resync':
-        void this.opts.store.requeueAll().then(() => this.flush());
+        void Promise.all([this.opts.store.requeueAll(), this.opts.transcripts?.requeueAll(), this.opts.media?.requeueAll()]).then(() => this.flush());
         break;
       case 'notion.config':
         this.appNotion = msg.connected ?? msg.config !== null;

@@ -1,5 +1,7 @@
 import type { MediaKind, VideoContext } from './platforms';
 import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
+import type { Cue, Transcript, TranscriptSource } from './transcript';
+import type { CuePatch, TranscriptInfo } from './transcript-store';
 
 /** Keyboard commands declared in manifest.json (configurable in chrome://extensions/shortcuts). */
 export const COMMANDS = [
@@ -8,6 +10,8 @@ export const COMMANDS = [
   'capture-screenshot',
   'smart-pause',
   'replay',
+  'passage-start',
+  'passage-end',
 ] as const;
 export type CommandId = (typeof COMMANDS)[number];
 
@@ -151,7 +155,43 @@ export type BackgroundRequest =
   | { type: 'notion:status' }
   | { type: 'notion:connect'; token: string; target: string }
   | { type: 'notion:disconnect' }
-  | { type: 'notion:sync-all' };
+  | { type: 'notion:sync-all' }
+  /**
+   * Subtitles collected by the page. `replace`: the whole list (subtitles file), else new or
+   * updated cues (live capture). Kept once the note exists, or while the user takes notes (`engaged`).
+   */
+  | { type: 'transcript:put'; noteId: string; meta: NoteMeta; info: TranscriptInfo; cues: Cue[]; replace: boolean; engaged: boolean }
+  | { type: 'transcript:get'; noteId: string }
+  /** Translations and comments of cues, and the transcript's languages. */
+  | { type: 'transcript:annotate'; noteId: string; patches: CuePatch[]; lang?: string; target?: string }
+  /** Pins (or updates) the transcript line at the end of the note, when the note exists. */
+  | { type: 'transcript:pin'; noteId: string; delay?: number }
+  /** Recorded media (passage extract, audio trace) sent in base64 chunks, then stored. */
+  | { type: 'media:chunk'; upload: string; index: number; data: string }
+  | { type: 'media:commit'; upload: string; record: MediaMeta; meta: NoteMeta };
+
+/** A recorded extract (`passage`) or a stretch of the course's sound (`audio`), stored as `media/…`. */
+export interface MediaMeta {
+  path: string;
+  noteId: string;
+  kind: 'passage' | 'audio';
+  mime: string;
+  /** Media time range (s). */
+  start: number;
+  end: number;
+}
+
+/** State of the subtitles collection, for the panel. */
+export interface CaptionState {
+  /**
+   * `off`: disabled in the options; `searching`: no subtitles found yet; `captions-off`: the
+   * player can show some (turn them on to capture them); `capturing`: captured as they are shown;
+   * `complete`: the whole subtitles file is known.
+   */
+  status: 'off' | 'searching' | 'captions-off' | 'capturing' | 'complete';
+  source: TranscriptSource | null;
+  label: string;
+}
 
 export interface BackgroundResponses {
   hello: { tabId: number };
@@ -187,6 +227,12 @@ export interface BackgroundResponses {
   'notion:connect': NotionStatus;
   'notion:disconnect': NotionStatus;
   'notion:sync-all': { ok: number; failed: number };
+  'transcript:put': { stored: boolean };
+  'transcript:get': Transcript | null;
+  'transcript:annotate': Transcript | null;
+  'transcript:pin': { pinned: boolean };
+  'media:chunk': void;
+  'media:commit': { path: string };
 }
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -259,7 +305,20 @@ export type ContentToPanel =
    * Reading mode (page without media): furthest point read (0..1) and the
    * quoted passage being read (`[↗](URL#:~:text=…)` of the note), if any.
    */
-  | { type: 'reading'; ratio: number; passage: string | null };
+  | { type: 'reading'; ratio: number; passage: string | null }
+  /** Subtitle being spoken (null: none), and the state of the collection. */
+  | { type: 'caption'; cue: Cue | null; state: CaptionState }
+  /**
+   * Recordings: passage started with « Début du passage » or being recorded afterwards
+   * (`end` known), null when none; `audio`: the sound of the course is being kept.
+   */
+  | { type: 'recording'; passage: { start: number; end?: number; recording: boolean } | null; audio: boolean }
+  /** A passage was created: its card goes into the note (the panel adds its title). */
+  | { type: 'insert-passage'; start: number; end: number; image: string; media: string | null }
+  /** The extract of the passage starting at `start` was recorded. */
+  | { type: 'passage-media'; start: number; media: string }
+  /** The media reached its end: the transcript gets pinned to the note. */
+  | { type: 'media-ended' };
 
 export type PanelToContent =
   | { type: 'hello'; mode: PanelMode }
@@ -285,4 +344,10 @@ export type PanelToContent =
   /** Manual clock, for streams no script can read (DRM, native players, lectures in the room). */
   | { type: 'stopwatch'; action: 'start' | 'pause' | 'reset' }
   /** The user allowed embedded players: look for their media again. */
-  | { type: 'players:granted' };
+  | { type: 'players:granted' }
+  /** Plays a passage and stops at its end. */
+  | { type: 'play-range'; start: number; end: number }
+  /** A passage chosen afterwards (transcript selection): its card is added to the note; `record`: replay and record it. */
+  | { type: 'passage:create'; start: number; end: number; record: boolean }
+  /** Replays a passage of the note and records its extract. */
+  | { type: 'passage:record'; start: number; end: number };

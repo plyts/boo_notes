@@ -56,8 +56,11 @@ export interface EditorHooks {
   autoTimestamp(): boolean;
   /** Hovering a timestamp previews it on the player's progress bar. */
   onTimestampHover(seconds: number | null): void;
-  /** `resource`: the resource named by the timestamp (`[04:15](res:<id>)`), null for the main one. */
-  onTimestampClick(seconds: number, resource?: string | null): void;
+  /**
+   * `resource`: the resource named by the timestamp (`[04:15](res:<id>)`), null for the main one.
+   * `end`: end of a range (`[02:05–06:07]`, a passage): play the passage and stop there.
+   */
+  onTimestampClick(seconds: number, resource?: string | null, end?: number | null): void;
   /** Any typed character / deletion (drives auto-pause). */
   onKeystroke(): void;
   onChange(): void;
@@ -87,6 +90,10 @@ export interface EditorHooks {
   wikiTitles?(): string[];
   /** Click on a link to a passage of a web page (`[↗](URL#:~:text=…)`). */
   onFragmentClick?(url: string): void;
+  /** Click on a recorded extract (`[Extrait](media/…)`) of a passage. */
+  onMediaClick?(path: string, start: number | null): void;
+  /** Click on the transcript attachment line (`📄 [Transcription …](transcripts/…)`). */
+  onTranscriptClick?(path: string): void;
   /** Text of an empty note. */
   placeholderText?: string;
 }
@@ -126,11 +133,24 @@ function badgeAttrs(badge: BadgeFn, resource: string | null): Record<string, str
 
 export interface NoteMarker {
   seconds: number;
-  kind: 'note' | 'capture';
+  kind: 'note' | 'capture' | 'passage';
+  /** End of a passage. */
+  end?: number;
 }
 
-/** A line made only of a timestamp and a screenshot: rendered as a capture card. */
-const CAPTURE_LINE = /^\[((?:\d+:)?\d{1,3}:\d{2})\]\s+(?=!\[[^\]\n]*\]\(assets\/[^)\s]+\)\s*$)/;
+/**
+ * A line made only of a timestamp and a screenshot: rendered as a capture card.
+ * With a range and a `Passage` image (plus, optionally, its recorded extract),
+ * a passage card: `[02:05–06:07] ![Passage …](assets/…) [Extrait](media/…)`.
+ */
+const CAPTURE_LINE =
+  /^\[((?:\d+:)?\d{1,3}:\d{2})(?:\s?[–-]\s?((?:\d+:)?\d{1,3}:\d{2}))?\]\s+(?=!\[[^\]\n]*\]\(assets\/[^)\s]+\)(?:\s+\[[^\]\n]*\]\(media\/[^)\s]+\))?\s*$)/;
+
+/** `[Extrait](media/…)`: recorded extract of a passage. */
+const MEDIA_LINK = /\[([^\]\n]*)\]\((media\/[^)\s]+)\)/g;
+
+/** `📄 [Transcription — …](transcripts/…)`: the transcript pinned to the note. */
+const TRANSCRIPT_LINK = /^📄 \[([^\]\n]*)\]\((transcripts\/[^)\s]+)\)[ \t]*$/;
 
 /** Marks programmatic content changes, which must not trigger a save. */
 const external = Annotation.define<boolean>();
@@ -162,8 +182,11 @@ class ImageWidget extends WidgetType {
   toDOM(): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = 'cm-boo-img';
-    const tc = /(?:\d+:)?\d{1,2}:\d{2}/.exec(this.alt);
+    // « Passage 02:05–06:07 · Titre »: a passage card (range, title); otherwise a capture at one instant.
+    const passage = /^Passage\s+((?:\d+:)?\d{1,2}:\d{2})\s?[–-]\s?((?:\d+:)?\d{1,2}:\d{2})(?:\s*·\s*(.+))?$/.exec(this.alt);
+    const tc = passage ? [passage[1]] : /(?:\d+:)?\d{1,2}:\d{2}/.exec(this.alt);
     const seconds = tc ? parseTimecode(tc[0]) : null;
+    const end = passage ? parseTimecode(passage[2]) : null;
     const img = document.createElement('img');
     img.alt = this.alt || 'Capture';
     img.draggable = false;
@@ -171,15 +194,27 @@ class ImageWidget extends WidgetType {
     wrap.append(img);
     if (seconds !== null && tc) {
       wrap.dataset.t = String(seconds);
-      wrap.title = `Capture à ${tc[0]} — cliquer pour revoir ce moment`;
+      if (passage && end !== null) {
+        wrap.classList.add('cm-boo-passage');
+        wrap.dataset.end = String(end);
+        wrap.title = `Passage ${passage[1]}–${passage[2]} — cliquer pour le revoir`;
+      } else wrap.title = `Capture à ${tc[0]} — cliquer pour revoir ce moment`;
       // Timecode badge + "replay" affordance shown on hover.
       const badge = document.createElement('span');
       badge.className = 'cm-boo-img-tc';
-      badge.textContent = tc[0];
+      badge.textContent = passage ? `${passage[1]}–${passage[2]}` : tc[0];
       const replay = document.createElement('span');
       replay.className = 'cm-boo-img-replay';
-      replay.textContent = 'Revoir';
+      replay.textContent = passage ? 'Revoir le passage' : 'Revoir';
       wrap.append(badge, replay);
+      if (passage && end !== null) {
+        const info = document.createElement('span');
+        info.className = 'cm-boo-img-title';
+        const length = end - seconds;
+        const duration = length < 60 ? `${Math.max(1, Math.round(length))} s` : `${Math.round(length / 60)} min`;
+        info.textContent = `${passage[3]?.trim() || 'Passage'} · ${duration}`;
+        wrap.append(info);
+      }
     }
     this.load(this.path).then(
       (url) => {
@@ -270,14 +305,33 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
       const lineActive = active.has(line.number);
       const capture = CAPTURE_LINE.exec(line.text);
       if (capture && !inCode(tree, line.from)) {
-        out.push(Decoration.line({ class: 'cm-boo-capture-line' }).range(line.from));
+        out.push(Decoration.line({ class: `cm-boo-capture-line${capture[2] ? ' cm-boo-passage-line' : ''}` }).range(line.from));
         if (!lineActive) {
           // The card carries the timecode: hide the leading "[MM:SS] ".
           out.push(hide.range(line.from, line.from + capture[0].length));
+          pushMediaChips(out, line.text, line.from, capture[1], false);
           pos = line.to + 1;
           continue;
         }
       }
+      const transcript = TRANSCRIPT_LINK.exec(line.text);
+      if (transcript && !inCode(tree, line.from)) {
+        out.push(Decoration.line({ class: 'cm-boo-transcript-line' }).range(line.from));
+        if (!lineActive) {
+          const labelFrom = line.from + line.text.indexOf('[') + 1;
+          out.push(
+            hide.range(line.from, labelFrom),
+            Decoration.mark({
+              class: 'cm-boo-transcript',
+              attributes: { 'data-transcript': transcript[2], title: 'Ouvrir la transcription' },
+            }).range(labelFrom, labelFrom + transcript[1].length),
+            hide.range(labelFrom + transcript[1].length, line.to),
+          );
+        }
+        pos = line.to + 1;
+        continue;
+      }
+      pushMediaChips(out, line.text, line.from, capture?.[1] ?? null, lineActive);
       const stamps = findTimestamps(line.text, line.from);
       const touches = (from: number, to: number) =>
         view.hasFocus && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
@@ -328,7 +382,8 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
       }
       if (!capture && stamps[0]?.from === line.from && !inCode(tree, line.from)) {
         // Transcript layout: wrapped text aligns after the leading timestamp.
-        const cls = stamps[0].label.length > 5 ? 'cm-boo-stamped cm-boo-long' : 'cm-boo-stamped';
+        const width = stamps[0].labelTo - stamps[0].from;
+        const cls = width > 9 ? 'cm-boo-stamped cm-boo-range' : width > 7 ? 'cm-boo-stamped cm-boo-long' : 'cm-boo-stamped';
         out.push(Decoration.line({ class: cls }).range(line.from));
       }
       for (const m of stamps) {
@@ -341,8 +396,12 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
             attributes: {
               ...badged,
               'data-t': String(m.seconds),
+              ...(m.end !== null ? { 'data-end': String(m.end) } : {}),
               ...(m.resource ? { 'data-res': m.resource } : {}),
-              title: `Aller à ${m.label}${where} (Alt+clic pour éditer)`,
+              title:
+                m.end !== null
+                  ? `Revoir le passage ${state.sliceDoc(m.from + 1, m.labelTo - 1)}${where} (Alt+clic pour éditer)`
+                  : `Aller à ${m.label}${where} (Alt+clic pour éditer)`,
             },
           }).range(m.from, m.labelTo),
         );
@@ -358,6 +417,25 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
     }
   }
   return Decoration.set(out, true);
+}
+
+/** `[Extrait](media/…)` links become « 🔊 Extrait » chips (target hidden off the cursor line). */
+function pushMediaChips(out: Range<Decoration>[], text: string, offset: number, start: string | null, reveal: boolean): void {
+  for (const m of text.matchAll(MEDIA_LINK)) {
+    const from = offset + (m.index ?? 0);
+    const labelTo = from + 1 + m[1].length;
+    out.push(
+      Decoration.mark({
+        class: 'cm-boo-media',
+        attributes: {
+          'data-media': m[2],
+          ...(start ? { 'data-t': String(parseTimecode(start) ?? '') } : {}),
+          title: 'Écouter l’extrait enregistré',
+        },
+      }).range(from, from + m[0].length),
+    );
+    if (!reveal) out.push(hide.range(from, from + 1), hide.range(labelTo, from + m[0].length));
+  }
 }
 
 /** Asks the live preview to redraw (the resource badges changed). */
@@ -486,9 +564,22 @@ export class NotesEditor {
       }),
       EditorView.domEventHandlers({
         mousedown: (e) => {
-          const target = (e.target as Element | null)?.closest?.('.cm-boo-ts, .cm-boo-img[data-t], .cm-boo-wiki');
+          const target = (e.target as Element | null)?.closest?.(
+            '.cm-boo-ts, .cm-boo-img[data-t], .cm-boo-wiki, .cm-boo-media, .cm-boo-transcript',
+          );
           if (!target || e.altKey || e.button !== 0) return false;
           e.preventDefault();
+          const media = target.getAttribute('data-media');
+          if (media !== null) {
+            const t = target.getAttribute('data-t');
+            hooks.onMediaClick?.(media, t ? Number(t) : null);
+            return true;
+          }
+          const transcript = target.getAttribute('data-transcript');
+          if (transcript !== null) {
+            hooks.onTranscriptClick?.(transcript);
+            return true;
+          }
           const anchor = target.getAttribute('data-anchor');
           const wiki = target.getAttribute('data-wiki');
           const frag = target.getAttribute('data-frag');
@@ -498,7 +589,10 @@ export class NotesEditor {
             hooks.onAnchorClick?.(kind as AnchorKind, Number(n), res);
           } else if (wiki !== null) hooks.onWikiLinkClick?.(wiki);
           else if (frag !== null) hooks.onFragmentClick?.(frag);
-          else hooks.onTimestampClick(Number(target.getAttribute('data-t')), res);
+          else {
+            const end = target.getAttribute('data-end');
+            hooks.onTimestampClick(Number(target.getAttribute('data-t')), res, end === null ? null : Number(end));
+          }
           return true;
         },
         mouseover: (e) => {
@@ -550,10 +644,13 @@ export class NotesEditor {
       const capture = CAPTURE_LINE.exec(text);
       if (capture) {
         const seconds = parseTimecode(capture[1]);
-        if (seconds !== null) out.push({ seconds, kind: 'capture' });
+        const end = capture[2] ? parseTimecode(capture[2]) : null;
+        if (seconds !== null) out.push(end !== null && end > seconds ? { seconds, end, kind: 'passage' } : { seconds, kind: 'capture' });
         continue;
       }
-      for (const m of findTimestamps(text)) out.push({ seconds: m.seconds, kind: 'note' });
+      for (const m of findTimestamps(text)) {
+        out.push(m.end !== null ? { seconds: m.seconds, end: m.end, kind: 'passage' } : { seconds: m.seconds, kind: 'note' });
+      }
     }
     return out;
   }
@@ -567,6 +664,26 @@ export class NotesEditor {
       selection: { anchor: head },
       annotations: [external.of(true)],
     });
+  }
+
+  /**
+   * Rewrites the note as a user edit (saved, undoable): only the part that
+   * changed is replaced, so the cursor and the rest of the text stay put.
+   */
+  transform(update: (markdown: string) => string): boolean {
+    const before = this.content;
+    const after = update(before);
+    if (after === before) return false;
+    let from = 0;
+    while (from < before.length && from < after.length && before[from] === after[from]) from++;
+    let a = before.length;
+    let b = after.length;
+    while (a > from && b > from && before[a - 1] === after[b - 1]) {
+      a--;
+      b--;
+    }
+    this.view.dispatch({ changes: { from, to: a, insert: after.slice(from, b) }, userEvent: 'input.transcript' });
+    return true;
   }
 
   setEditable(editable: boolean): void {

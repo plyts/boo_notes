@@ -16,6 +16,8 @@ export const COMMAND_LABELS: Record<CommandId, string> = {
   'capture-screenshot': 'Capturer l’image (vidéo ou page)',
   'smart-pause': 'Pause & écrire (re-appuyer pour reprendre)',
   replay: 'Revoir les dernières secondes',
+  'passage-start': 'Début du passage',
+  'passage-end': 'Fin du passage (extrait)',
 };
 
 const EDITOR_TIPS: Array<[string, string]> = [

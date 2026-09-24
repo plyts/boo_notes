@@ -9,12 +9,15 @@ import type {
   Chapter,
   Course,
   Highlight,
+  MediaEntry,
   Pin,
   Placement,
   ResourceKind,
   ReviewAction,
   StudyStatus,
+  TranscriptSummary,
 } from './core/types';
+import type { CuePatch, Transcript } from '../../src/shared/transcript';
 import type { CourseView, LibrarySnapshot, NoteView, ResourceView } from './core/views';
 
 export type {
@@ -25,8 +28,12 @@ export type {
   ExportOptions,
   ExportResult,
   Highlight,
+  CuePatch,
   LibrarySnapshot,
+  MediaEntry,
   NoteView,
+  Transcript,
+  TranscriptSummary,
   Pin,
   Placement,
   ResourceKind,
@@ -133,6 +140,14 @@ export interface BooApi {
     /** Opens the resource where it lives: the page in the browser (at `seconds`), or the file in the explorer. */
     openSource(resourceId: string, seconds?: number): Promise<void>;
 
+    // Transcript (subtitles) and recordings
+    transcript(noteId: string): Promise<Transcript | null>;
+    annotateTranscript(noteId: string, patches: CuePatch[], langs?: { lang?: string; target?: string }): Promise<Transcript>;
+    /** Asks for a .vtt / .srt file: it becomes the note's transcript (null: cancelled). */
+    importSubtitles(noteId: string): Promise<Transcript | null>;
+    /** A passage extract recorded in the app (WebM bytes): returns its `media/…` path. */
+    saveMedia(noteId: string, entry: { kind: 'passage' | 'audio'; mime: string; start: number; end: number }, bytes: Uint8Array): Promise<string>;
+
     // Courses and chapters
     createCourse(input: { title: string; emoji?: string; hue?: number; description?: string }): Promise<Course>;
     updateCourse(id: string, patch: { title?: string; emoji?: string; hue?: number; description?: string }): Promise<void>;
@@ -204,6 +219,10 @@ export const CHANNELS = {
   setPins: 'resource:set-pins',
   saveCapture: 'resource:save-capture',
   openSource: 'resource:open-source',
+  transcript: 'note:transcript',
+  annotateTranscript: 'note:annotate-transcript',
+  importSubtitles: 'note:import-subtitles',
+  saveMedia: 'note:save-media',
   createCourse: 'course:create',
   updateCourse: 'course:update',
   removeCourse: 'course:remove',

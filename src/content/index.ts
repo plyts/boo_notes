@@ -1,3 +1,4 @@
+import { bytesToBase64 } from '../shared/encoding';
 import { captureLine, findFragmentLinks } from '../shared/markdown';
 import {
   callBackground,
@@ -5,12 +6,17 @@ import {
   PANEL_PORT,
   type BackgroundRequest,
   type BackgroundResponses,
+  type CaptionState,
   type CommandId,
   type ContentToPanel,
   type FrameMedia,
+  type MediaMeta,
   type PanelToContent,
+  type PlaybackState,
   type TabMessage,
 } from '../shared/messages';
+import type { NoteMeta } from '../shared/store';
+import { passageLine, passageMediaPath, rangeLabel, traceMediaPath, type Cue } from '../shared/transcript';
 import { detectVideoContext, readStartTime, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
 import type { Note } from '../shared/store';
 import { loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from '../shared/settings';
@@ -23,6 +29,8 @@ import { looksLikePlayer, playerFrames, scanMedia } from './media-scan';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
 import { PageReader } from './reader';
+import { passageCard, recordBlocker, Recording } from './recorder';
+import { SubtitleCollector } from './subtitles';
 
 const PINNED_KEY = 'boo-notes:pinned';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
@@ -89,6 +97,19 @@ class ContentApp {
   private blockedPlayers = '';
   private shotSeq = 0;
   private readonly shots = new Map<number, (r: { shot: Shot | null; error: string | null }) => void>();
+  /** Subtitles of the media, collected in the background. */
+  private readonly subtitles: SubtitleCollector;
+  private caption: { cue: Cue | null; state: CaptionState } = { cue: null, state: { status: 'searching', source: null, label: '' } };
+  /** Passage started with « Début du passage » (Alt+I), recording its picture and sound when possible. */
+  private passage: { noteId: string; start: number; poster: Shot | null; recording: Recording | null; what: 'video' | 'audio' } | null = null;
+  /** Passage replayed to record its extract. */
+  private rangeRecording: { noteId: string; start: number; end: number; recording: Recording; create: boolean; poster: Shot | null } | null = null;
+  /** Passage being replayed (clic on `[02:05–06:07]`): playback stops at its end. */
+  private rangeStop: { start: number; end: number } | null = null;
+  /** Sound of the course being kept (setting « Conserver l’audio »): the current stretch. */
+  private trace: { noteId: string; media: HTMLMediaElement; recording: Recording; start: number; last: number } | null = null;
+  private traceError = '';
+  private endedPinned = false;
 
   constructor(private readonly adapter: PlatformAdapter) {
     this.player = new MediaController(adapter, {
@@ -118,6 +139,16 @@ class ContentApp {
       topInset: () => headerInset(this.adapter),
       onResized: (width) => void saveSettings({ drawerWidth: width }).catch(() => undefined),
     });
+    this.subtitles = new SubtitleCollector({
+      flush: async (noteId, info, cues, replace, engaged) => {
+        const res = await this.bg({ type: 'transcript:put', noteId, meta: this.noteMeta(), info, cues, replace, engaged });
+        return res.stored;
+      },
+      caption: (cue, state) => {
+        this.caption = { cue, state };
+        this.postPanels({ type: 'caption', cue, state });
+      },
+    });
     this.reader = new PageReader({
       url: () => this.ctx?.canonicalUrl ?? location.href,
       isOwnUi: (el) => el === this.overlay.host || this.drawer.owns(el),
@@ -143,6 +174,17 @@ class ContentApp {
 
   get alive(): boolean {
     return !this.dead;
+  }
+
+  /** The user is taking notes on this page (panel open): its transcript is kept even before the note exists. */
+  private get engaged(): boolean {
+    return this.drawer.isOpen || this.popoutPort !== null;
+  }
+
+  private noteMeta(): NoteMeta {
+    const ctx = this.ctx;
+    if (!ctx) return { platform: 'web', url: location.href, title: this.title };
+    return { platform: ctx.platform, url: ctx.canonicalUrl, title: this.title, ...(this.player.available ? { kind: this.kind } : {}) };
   }
 
   async start(): Promise<void> {
@@ -224,7 +266,16 @@ class ContentApp {
         if (this.player.playback().playing) this.reportProgress();
       }, 15_000),
     );
-    window.addEventListener('pagehide', () => this.reportProgress(true), opts);
+    // Subtitles, passages being replayed or recorded, audio trace.
+    this.intervals.push(setInterval(() => this.tickMedia(), 300));
+    window.addEventListener(
+      'pagehide',
+      () => {
+        this.reportProgress(true);
+        void this.leaveMedia();
+      },
+      opts,
+    );
     // Periodic resync so the panels' extrapolated clock never drifts.
     this.intervals.push(
       setInterval(() => {
@@ -263,6 +314,13 @@ class ContentApp {
     // Course tracking: remember where the user stopped.
     if (type === 'pause' || type === 'ended') this.reportProgress(true);
     else if (type === 'seeked') this.reportProgress();
+    // A passage being recorded follows the playback (no frozen picture while paused).
+    const rec = this.passage?.recording ?? this.rangeRecording?.recording;
+    if (rec && (type === 'pause' || type === 'waiting')) rec.pause();
+    if (rec && (type === 'playing' || type === 'play')) rec.resume();
+    if (type === 'pause' || type === 'ended' || type === 'emptied') void this.closeTrace();
+    if (type === 'play') this.endedPinned = false;
+    if (type === 'ended') void this.onEnded();
   }
 
   /** State of an embedded player's media, relayed by the background. */
@@ -313,6 +371,8 @@ class ContentApp {
     this.overlay.setEnabled(s.hudEnabled);
     this.drawer.setWidth(s.drawerWidth);
     this.drawer.setLayout(s.layout);
+    this.subtitles?.setEnabled(s.transcribe);
+    if (!s.keepAudio) void this.closeTrace();
   }
 
   private bg<R extends BackgroundRequest>(request: R): Promise<BackgroundResponses[R['type']]> {
@@ -389,11 +449,14 @@ class ContentApp {
 
   private async syncContext(force = false): Promise<void> {
     const ctx = detectVideoContext(location.href);
-    const changed = force || ctx?.noteId !== this.ctx?.noteId;
+    const prev = this.ctx;
+    const changed = force || ctx?.noteId !== prev?.noteId;
     this.ctx = ctx;
     if (ctx) this.maybeSeekFromUrl();
     if (!changed) return;
 
+    if (prev) void this.leaveMedia(prev.noteId);
+    this.subtitles.reset(ctx?.noteId ?? null, ctx?.platform ?? null);
     this.player.reset();
     this.overlay.hideMarker();
     this.overlay.hideQuoteButton();
@@ -597,6 +660,10 @@ class ContentApp {
       case 'replay':
         this.overlay.toast('Aucun média à rembobiner sur cette page', 'error');
         break;
+      case 'passage-start':
+      case 'passage-end':
+        this.overlay.toast('Les passages découpent une vidéo ou un audio : aucun média sur cette page', 'error');
+        break;
     }
   }
 
@@ -681,6 +748,12 @@ class ContentApp {
         break;
       case 'replay':
         this.replay();
+        break;
+      case 'passage-start':
+        await this.passageStart();
+        break;
+      case 'passage-end':
+        await this.passageEnd();
         break;
     }
   }
@@ -914,6 +987,315 @@ class ContentApp {
     if (pinned && this.ctx && !this.drawer.isOpen && !this.popoutPort) this.openDrawer(null);
   }
 
+  // --- Transcript, passages, audio trace ---------------------------------------------------
+
+  private tickMedia(): void {
+    if (!this.ctx || this.dead || this.reading) return;
+    const p = this.player.playback();
+    this.subtitles.tick(this.player.current, p.time, p.playing, p.duration, this.engaged);
+    this.followRange(p);
+    this.followTrace(p);
+  }
+
+  /** The media ended: the transcript is pinned at the end of the note. */
+  private async onEnded(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || this.endedPinned) return;
+    this.endedPinned = true;
+    await this.subtitles.flushNow(this.engaged).catch(() => undefined);
+    if (!this.subtitles.count) return;
+    const port = this.popoutPort ?? this.embeddedPort;
+    if (port) port.postMessage({ type: 'media-ended' } satisfies ContentToPanel);
+    else void this.bg({ type: 'transcript:pin', noteId: ctx.noteId }).catch(() => undefined);
+  }
+
+  /** Leaving the media (page closed, next video): what was collected is stored, the transcript pinned. */
+  private async leaveMedia(noteId = this.ctx?.noteId): Promise<void> {
+    if (!noteId) return;
+    // Read now: the collector starts over for the next media right after this call.
+    const collected = this.subtitles.count;
+    this.rangeStop = null;
+    if (this.passage) {
+      void this.passage.recording?.stop().catch(() => undefined);
+      this.passage = null;
+    }
+    if (this.rangeRecording) {
+      void this.rangeRecording.recording.stop().catch(() => undefined);
+      this.rangeRecording = null;
+    }
+    void this.closeTrace();
+    this.broadcastRecording();
+    await this.subtitles.flushNow(this.engaged).catch(() => undefined);
+    // The panel saves the note as it goes away: pinned right after.
+    if (collected) void this.bg({ type: 'transcript:pin', noteId, delay: 1500 }).catch(() => undefined);
+  }
+
+  private broadcastRecording(): void {
+    const passage = this.passage
+      ? { start: this.passage.start, recording: this.passage.recording !== null }
+      : this.rangeRecording
+        ? { start: this.rangeRecording.start, end: this.rangeRecording.end, recording: true }
+        : null;
+    this.postPanels({ type: 'recording', passage, audio: this.trace !== null });
+  }
+
+  /** Sends a recording to the background (base64 chunks: runtime messages carry JSON only). */
+  private async uploadMedia(blob: Blob, record: MediaMeta): Promise<string> {
+    const upload = crypto.randomUUID();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const CHUNK = 768 * 1024;
+    for (let i = 0, n = 0; i < bytes.length; i += CHUNK, n++) {
+      await this.bg({ type: 'media:chunk', upload, index: n, data: bytesToBase64(bytes.subarray(i, i + CHUNK)) });
+    }
+    return (await this.bg({ type: 'media:commit', upload, record, meta: this.noteMeta() })).path;
+  }
+
+  /** « Conserver l’audio »: the sound is recorded while the media plays, one stretch per continuous playback. */
+  private followTrace(p: PlaybackState): void {
+    const media = this.player.current;
+    const want = this.settings.keepAudio && media !== null && p.playing && (this.engaged || this.registeredNoteId !== null);
+    const t = this.trace;
+    if (t) {
+      const jumped = Math.abs(p.time - t.last) > 3 * Math.max(1, p.rate);
+      if (!want || media !== t.media || jumped || p.time - t.start > 600 || t.noteId !== this.ctx?.noteId) void this.closeTrace();
+      else t.last = p.time;
+      return;
+    }
+    if (!want || !this.ctx) return;
+    try {
+      this.trace = { noteId: this.ctx.noteId, media: media!, recording: new Recording(media!, 'audio'), start: p.time, last: p.time };
+      this.traceError = '';
+      this.broadcastRecording();
+    } catch (e) {
+      const msg = errorMessage(e);
+      if (msg !== this.traceError) {
+        this.traceError = msg;
+        this.overlay.toast(`Audio non conservé : ${msg}`, 'error', 3500);
+      }
+    }
+  }
+
+  private async closeTrace(): Promise<void> {
+    const t = this.trace;
+    if (!t) return;
+    this.trace = null;
+    this.broadcastRecording();
+    try {
+      const blob = await t.recording.stop();
+      if (t.last - t.start < 2 || !blob.size) return;
+      const nonce = Math.random().toString(36).slice(2, 6);
+      const ext = t.recording.mime.includes('ogg') ? 'ogg' : 'webm';
+      await this.uploadMedia(blob, {
+        path: traceMediaPath(t.noteId, t.start, nonce, ext),
+        noteId: t.noteId,
+        kind: 'audio',
+        mime: t.recording.mime,
+        start: t.start,
+        end: t.last,
+      });
+      this.postPanels({ type: 'recording', passage: null, audio: this.trace !== null });
+    } catch {
+      // A lost stretch of sound is not worth interrupting the lesson.
+    }
+  }
+
+  /** Alt+I: the passage starts here; its picture and sound are recorded when the player allows it. */
+  private async passageStart(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!this.player.available) {
+      this.overlay.toast('Lancez la vidéo (ou le chronomètre) avant de commencer un passage', 'error');
+      return;
+    }
+    if (this.rangeRecording) {
+      this.overlay.toast('Un passage est déjà en cours d’enregistrement', 'error');
+      return;
+    }
+    if (this.passage) void this.passage.recording?.stop().catch(() => undefined);
+    const start = this.player.time();
+    const media = this.player.current;
+    const what = this.player.kind === 'audio' ? 'audio' : 'video';
+    const video = this.player.video;
+    const poster = video && probeFrame(video) === 'ok' ? await captureVideoFrame(video, 'image/jpeg', 0.86).catch(() => null) : null;
+    let recording: Recording | null = null;
+    let note = '';
+    if (this.settings.recordPassages) {
+      try {
+        recording = new Recording(media!, what);
+        if (this.player.paused) recording.pause();
+      } catch (e) {
+        note = ` · extrait non enregistré : ${errorMessage(e)}`;
+      }
+    }
+    this.passage = { noteId: ctx.noteId, start, poster, recording, what };
+    const key = this.pageBindings.find((b) => b.command === 'passage-end')?.shortcut ?? 'Alt+O';
+    this.overlay.toast(`${recording ? '● ' : ''}Début du passage ${formatTimecode(start)} — ${key} pour le terminer${note}`, 'info', 3500, {
+      icon: 'clock',
+    });
+    this.broadcastRecording();
+  }
+
+  /** Alt+O: the passage ends here: card in the note, extract, and (in the panel) its notes and subtitles. */
+  private async passageEnd(): Promise<void> {
+    const p = this.passage;
+    if (!p) {
+      const key = this.pageBindings.find((b) => b.command === 'passage-start')?.shortcut ?? 'Alt+I';
+      this.overlay.toast(`Commencez par « Début du passage » (${key})`, 'error');
+      return;
+    }
+    const end = this.player.time();
+    if (end - p.start < 1) {
+      this.overlay.toast(end < p.start ? 'La lecture est revenue avant le début du passage : choisissez une fin après lui' : 'Passage trop court : laissez la lecture avancer', 'error', 3500);
+      return;
+    }
+    this.passage = null;
+    this.broadcastRecording();
+    const blob = p.recording ? await p.recording.stop().catch(() => null) : null;
+    await this.savePassage(p.noteId, p.start, end, p.poster, blob, p.recording?.mime ?? '', p.what);
+  }
+
+  /** Card picture, extract, and the passage line in the note (or appended when the notes are closed). */
+  private async savePassage(
+    noteId: string,
+    start: number,
+    end: number,
+    poster: Shot | null,
+    blob: Blob | null,
+    mime: string,
+    what: 'video' | 'audio',
+  ): Promise<void> {
+    try {
+      const shot = poster ?? (await passageCard(start, end, what, this.title));
+      const { path: image } = await this.bg({
+        type: 'asset:save',
+        noteId,
+        dataUrl: shot.dataUrl,
+        mime: shot.mime,
+        width: shot.width,
+        height: shot.height,
+        time: start,
+      });
+      let media: string | null = null;
+      if (blob && blob.size > 0) {
+        this.overlay.toast(`Enregistrement de l’extrait ${rangeLabel(start, end)}…`, 'info', 2000);
+        const nonce = Math.random().toString(36).slice(2, 6);
+        media = await this.uploadMedia(blob, {
+          path: passageMediaPath(noteId, start, nonce, mime.includes('ogg') ? 'ogg' : 'webm'),
+          noteId,
+          kind: 'passage',
+          mime,
+          start,
+          end,
+        });
+      }
+      const port = this.popoutPort ?? this.embeddedPort;
+      if (port && this.ctx?.noteId === noteId) {
+        port.postMessage({ type: 'insert-passage', start, end, image, media } satisfies ContentToPanel);
+      } else {
+        await this.bg({ type: 'note:append', noteId, meta: this.noteMeta(), text: passageLine({ start, end, image, media }) });
+      }
+      this.overlay.toast(`Passage ${rangeLabel(start, end)} ajouté à la note${media ? ' avec son extrait' : ''}`, 'success', 2500, {
+        thumb: shot.dataUrl,
+      });
+    } catch (e) {
+      this.overlay.toast(`Passage non enregistré : ${errorMessage(e)}`, 'error', 4000);
+    }
+  }
+
+  /** A passage chosen afterwards (transcript selection): card now, extract recorded by replaying it if asked. */
+  private async createPassage(start: number, end: number, record: boolean): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || end - start < 1) return;
+    if (record && this.settings.recordPassages && !recordBlocker(this.player.current)) {
+      await this.recordRange(start, end, true);
+      return;
+    }
+    await this.savePassage(ctx.noteId, start, end, null, null, '', this.player.kind === 'audio' ? 'audio' : 'video');
+  }
+
+  /** Replays [start, end] and records it; the user keeps writing meanwhile. */
+  private async recordRange(start: number, end: number, create: boolean): Promise<void> {
+    const ctx = this.ctx;
+    const media = this.player.current;
+    const blocker = recordBlocker(media);
+    if (!ctx || blocker) {
+      this.overlay.toast(`Extrait impossible à enregistrer : ${blocker ?? 'aucun média'}`, 'error', 3500);
+      return;
+    }
+    if (this.rangeRecording || this.passage) {
+      this.overlay.toast('Un passage est déjà en cours', 'error');
+      return;
+    }
+    this.rangeStop = null;
+    media!.pause();
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 4000);
+      media!.addEventListener('seeked', () => (clearTimeout(timer), resolve()), { once: true });
+      this.player.seek(start);
+    });
+    const what = this.player.kind === 'audio' ? 'audio' : 'video';
+    const video = this.player.video;
+    const poster = create && video && probeFrame(video) === 'ok' ? await captureVideoFrame(video, 'image/jpeg', 0.86).catch(() => null) : null;
+    let recording: Recording;
+    try {
+      recording = new Recording(media!, what);
+    } catch (e) {
+      this.overlay.toast(`Extrait impossible à enregistrer : ${errorMessage(e)}`, 'error', 3500);
+      return;
+    }
+    this.rangeRecording = { noteId: ctx.noteId, start, end, recording, create, poster };
+    this.broadcastRecording();
+    this.overlay.toast(`● Enregistrement du passage ${rangeLabel(start, end)} (${formatTimecode(end - start)})`, 'info', 3000);
+    this.player.play();
+  }
+
+  /** Playback of a passage: stops at its end; a recorded replay is saved then. */
+  private followRange(p: PlaybackState): void {
+    const r = this.rangeRecording;
+    if (r) {
+      if (this.ctx?.noteId !== r.noteId || p.time < r.start - 2 || p.time > r.end + 5) {
+        this.rangeRecording = null;
+        void r.recording.stop().catch(() => undefined);
+        this.broadcastRecording();
+        this.overlay.toast('Enregistrement du passage annulé (lecture déplacée)', 'error', 3000);
+        return;
+      }
+      if (p.time < r.end) return;
+      this.rangeRecording = null;
+      this.player.pause();
+      this.broadcastRecording();
+      void r.recording.stop().then(
+        async (blob) => {
+          if (r.create) {
+            await this.savePassage(r.noteId, r.start, r.end, r.poster, blob, r.recording.mime, this.player.kind === 'audio' ? 'audio' : 'video');
+            return;
+          }
+          const nonce = Math.random().toString(36).slice(2, 6);
+          const media = await this.uploadMedia(blob, {
+            path: passageMediaPath(r.noteId, r.start, nonce, r.recording.mime.includes('ogg') ? 'ogg' : 'webm'),
+            noteId: r.noteId,
+            kind: 'passage',
+            mime: r.recording.mime,
+            start: r.start,
+            end: r.end,
+          });
+          this.postPanels({ type: 'passage-media', start: r.start, media });
+          this.overlay.toast(`Extrait ${rangeLabel(r.start, r.end)} enregistré`, 'success', 2500);
+        },
+        (e: unknown) => this.overlay.toast(`Extrait non enregistré : ${errorMessage(e)}`, 'error', 3500),
+      );
+      return;
+    }
+    const s = this.rangeStop;
+    if (!s) return;
+    if (p.time < s.start - 2 || p.time > s.end + 3) this.rangeStop = null;
+    else if (p.time >= s.end) {
+      this.rangeStop = null;
+      this.player.pause();
+      this.overlay.toast(`Fin du passage ${rangeLabel(s.start, s.end)}`, 'info', 1500, { icon: 'clock' });
+    }
+  }
+
   // --- Panels (drawer iframe / pop-out window) ------------------------------------------
 
   private postPanels(msg: ContentToPanel): void {
@@ -960,6 +1342,8 @@ class ContentApp {
         } satisfies ContentToPanel);
         if (this.reading) port.postMessage({ type: 'reading', ratio: this.reader.progress, passage: this.lastPassage } satisfies ContentToPanel);
         if (this.blockedPlayers) port.postMessage({ type: 'players', hosts: this.blockedPlayers.split(' ') } satisfies ContentToPanel);
+        port.postMessage({ type: 'caption', cue: this.caption.cue, state: this.caption.state } satisfies ContentToPanel);
+        this.broadcastRecording();
         return;
       case 'seek':
         this.player.seek(msg.seconds);
@@ -1031,6 +1415,18 @@ class ContentApp {
         // The agent was injected into the allowed frames: they report within a second.
         void this.bg({ type: 'frames:inject' }).catch(() => undefined);
         return;
+      case 'play-range':
+        this.rangeStop = { start: msg.start, end: msg.end };
+        this.player.seek(msg.start);
+        this.player.play();
+        this.broadcastPlayback();
+        break;
+      case 'passage:create':
+        void this.createPassage(msg.start, msg.end, msg.record);
+        break;
+      case 'passage:record':
+        void this.recordRange(msg.start, msg.end, false);
+        break;
     }
     this.markInteraction();
   }

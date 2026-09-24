@@ -171,7 +171,8 @@ export class Drawer {
     this.iframe = h('iframe', {
       src: this.opts.panelUrl(),
       title: 'Boo Notes — éditeur de notes',
-      allow: 'clipboard-write',
+      // On-device translation of the subtitles (Chrome built-in AI) runs in the panel.
+      allow: 'clipboard-write; translator; language-detector',
     });
     this.panel.append(this.iframe);
   }

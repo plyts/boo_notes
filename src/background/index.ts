@@ -15,7 +15,10 @@ import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/mar
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
 import { NoteStore, type CourseOption } from '../shared/store';
-import { asciiFileName, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
+import { clearMedia, getMedia, markAllMediaUnsynced, markMediaSynced, putMedia, unsyncedMedia } from '../shared/media-db';
+import { pinTranscriptLine, transcriptLine } from '../shared/transcript';
+import { TranscriptStore } from '../shared/transcript-store';
+import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
@@ -26,7 +29,11 @@ import { DesktopSync } from './sync';
  * direct Notion sync used while the app is closed.
  */
 const store = new NoteStore(chrome.storage.local);
+const transcripts = new TranscriptStore(chrome.storage.local);
 const session = new SessionState();
+/** Recorded media being received in chunks (upload id → base64 parts). */
+const uploads = new Map<string, { parts: string[]; at: number }>();
+const MAX_MEDIA_BYTES = 400 * 1024 * 1024;
 const SYNC_ALARM = 'boo-notes-sync-retry';
 const NOTION_ALARM = 'boo-notes-notion';
 /** Titles of the desktop app's library (revision sheets…), for `[[` completion. */
@@ -36,6 +43,13 @@ const DESKTOP_COURSES = 'desktop:courses';
 
 const sync: DesktopSync = new DesktopSync({
   store,
+  transcripts,
+  media: {
+    unsynced: () => unsyncedMedia().catch(() => []),
+    read: async (path) => (await getMedia(path))?.blob ?? null,
+    markSynced: (path) => markMediaSynced(path),
+    requeueAll: () => markAllMediaUnsynced(),
+  },
   clientVersion: chrome.runtime.getManifest().version,
   getConfig: async () => {
     const s = await loadSettings();
@@ -459,7 +473,63 @@ const handlers: Handlers = {
 
   'notes:clear': async () => {
     await store.clearAll();
+    await clearMedia().catch(noop);
     await sync.notifyChanged();
+  },
+
+  'transcript:put': async (msg) => {
+    // Watching alone is never recorded: the note must exist, or the user be taking notes.
+    if (!msg.engaged && !(await store.getNote(msg.noteId))) return { stored: false };
+    await transcripts.put(msg.noteId, msg.info, msg.cues, msg.replace);
+    void sync.notifyChanged();
+    return { stored: true };
+  },
+
+  'transcript:get': (msg) => transcripts.get(msg.noteId),
+
+  'transcript:annotate': async (msg) => {
+    const t = await transcripts.annotate(msg.noteId, msg.patches, { lang: msg.lang, target: msg.target });
+    void sync.notifyChanged();
+    return t;
+  },
+
+  'transcript:pin': async (msg) => {
+    // Leaving the page: the panel saves the note first.
+    if (msg.delay) await new Promise((r) => setTimeout(r, Math.min(msg.delay ?? 0, 5000)));
+    const t = await transcripts.get(msg.noteId);
+    if (!t?.cues.length) return { pinned: false };
+    const line = transcriptLine(t);
+    const note = await store.transformNote(msg.noteId, (md) => (md.trim() ? pinTranscriptLine(md, line) : md), 'background');
+    if (note) {
+      void sync.notifyChanged();
+      void notion.enqueue(msg.noteId);
+    }
+    return { pinned: Boolean(note) || Boolean((await store.getNote(msg.noteId))?.markdown.includes(line)) };
+  },
+
+  'media:chunk': async (msg) => {
+    const now = Date.now();
+    for (const [id, u] of uploads) if (now - u.at > 10 * 60_000) uploads.delete(id);
+    const u = uploads.get(msg.upload) ?? { parts: [], at: now };
+    u.parts[msg.index] = msg.data;
+    u.at = now;
+    if (u.parts.reduce((n, p) => n + (p?.length ?? 0), 0) * 0.75 > MAX_MEDIA_BYTES) {
+      uploads.delete(msg.upload);
+      throw new Error('Enregistrement trop volumineux');
+    }
+    uploads.set(msg.upload, u);
+  },
+
+  'media:commit': async (msg) => {
+    const u = uploads.get(msg.upload);
+    uploads.delete(msg.upload);
+    const r = msg.record;
+    if (!u || u.parts.some((p) => p === undefined)) throw new Error('Enregistrement incomplet');
+    if (!/^media\/[\w.-]+\.(webm|ogg|mp4|m4a)$/.test(r.path) || !/^(audio|video)\/[\w.+-]+(;.*)?$/.test(r.mime)) throw new Error('Enregistrement invalide');
+    const blob = new Blob(u.parts.map((p) => base64ToBytes(p)), { type: r.mime });
+    await putMedia({ ...r, blob, size: blob.size, createdAt: Date.now() });
+    void sync.notifyChanged();
+    return { path: r.path };
   },
 
   'player:progress': async (msg) => {

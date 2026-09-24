@@ -5,8 +5,9 @@ import type { CommandId } from './messages';
  * when it can; it silently drops a suggested key that clashes with one of
  * its own shortcuts (Alt+Shift+T focuses the toolbar on Windows / Linux) and
  * accepts at most four defaults. Every default Chrome did not register is
- * handled in-page instead (video page + notes panel), so the five shortcuts
- * always work out of the box.
+ * handled in-page instead (video page + notes panel), so every shortcut
+ * works out of the box. The passage keys (Alt+I / Alt+O) have no Chrome
+ * default: they are in-page unless the user binds them globally.
  */
 export const DEFAULT_SHORTCUTS: Readonly<Record<CommandId, string>> = {
   'toggle-sidebar': 'Alt+Shift+N',
@@ -14,6 +15,8 @@ export const DEFAULT_SHORTCUTS: Readonly<Record<CommandId, string>> = {
   'capture-screenshot': 'Alt+Shift+S',
   'smart-pause': 'Alt+Shift+Space',
   replay: 'Alt+Left',
+  'passage-start': 'Alt+I',
+  'passage-end': 'Alt+O',
 };
 
 export interface KeyCombo {

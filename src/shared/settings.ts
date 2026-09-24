@@ -24,6 +24,16 @@ export interface Settings {
   hudEnabled: boolean;
   captureFormat: CaptureFormat;
   captureQuality: number;
+  /** Collect the media's subtitles in the background (transcript kept apart from the notes). */
+  transcribe: boolean;
+  /** Translate the subtitles on the device, as they arrive. */
+  autoTranslate: boolean;
+  /** Language translations are written in (BCP 47). */
+  translateTo: string;
+  /** Record the media's sound while it plays (audio trace of the course). */
+  keepAudio: boolean;
+  /** Record the picture and sound of a passage between its start and end. */
+  recordPassages: boolean;
   /** Local desktop app endpoint. */
   desktopUrl: string;
   /** Pairing token shown by the desktop app. */
@@ -45,6 +55,11 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   hudEnabled: true,
   captureFormat: 'image/jpeg',
   captureQuality: 0.92,
+  transcribe: true,
+  autoTranslate: false,
+  translateTo: 'fr',
+  keepAudio: false,
+  recordPassages: true,
   desktopUrl: DEFAULT_DESKTOP_URL,
   desktopToken: '',
 });
@@ -92,6 +107,11 @@ export function normalizeSettings(raw: unknown): Settings {
     hudEnabled: bool(r.hudEnabled, d.hudEnabled),
     captureFormat: pick(r.captureFormat, ['image/jpeg', 'image/png', 'image/webp'], d.captureFormat),
     captureQuality: clamp(num(r.captureQuality, d.captureQuality), 0.5, 1),
+    transcribe: bool(r.transcribe, d.transcribe),
+    autoTranslate: bool(r.autoTranslate, d.autoTranslate),
+    translateTo: typeof r.translateTo === 'string' && /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(r.translateTo) ? r.translateTo : d.translateTo,
+    keepAudio: bool(r.keepAudio, d.keepAudio),
+    recordPassages: bool(r.recordPassages, d.recordPassages),
     desktopUrl: isLoopbackWsUrl(desktopUrl) ? desktopUrl : d.desktopUrl,
     desktopToken: typeof r.desktopToken === 'string' ? r.desktopToken.trim().slice(0, 256) : '',
   };

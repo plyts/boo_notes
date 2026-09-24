@@ -129,6 +129,12 @@
     },
     "replay": {
       "description": "Reculer de 5 secondes (Alt+← dans la page par défaut)"
+    },
+    "passage-start": {
+      "description": "Début du passage (Alt+I dans la page par défaut)"
+    },
+    "passage-end": {
+      "description": "Fin du passage : extrait avec ses sous-titres et vos notes (Alt+O dans la page par défaut)"
     }
   },
   "optional_host_permissions": [
