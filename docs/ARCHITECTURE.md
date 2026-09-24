@@ -49,6 +49,7 @@
 | **Script de contenu** | `src/content/index.ts` | Adaptateur de plateforme, détection du média (vidéo ou audio) et des navigations SPA, HUD / toasts / flash / marqueur, drawer, capture de frame, progression de lecture, exécution des commandes ; **mode lecture** (`src/content/reader.ts`) pour une page sans média ; **écran partagé** (`src/content/fit.ts`) : le lecteur est réduit (`scale` / `translate`) pour que les notes ne le cachent jamais, côte à côte comme en plein écran. |
 | **Panneau** | `src/panel/index.ts` | Éditeur de notes ; tourne soit dans l’iframe du drawer, soit dans la fenêtre pop-out. Communique avec le script de contenu de l’onglet vidéo par un *port*. |
 | **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données (dont « Télécharger toutes les notes en PDF »). |
+| **Diagnostic** | `src/diagnostic/index.ts` | Rapport « Diagnostic de cette page » (clic droit sur l’icône, ou aide du panneau) : le SW (`src/background/diagnostic.ts`) sonde chaque cadre lisible de l’onglet (`chrome.scripting`, monde isolé et monde de la page : cadres, médias, API SCORM, agent), interroge le script de la page et les droits ; `src/shared/diagnostic.ts` en tire un constat en clair et un texte à copier. |
 | **Document hors écran** | `src/offscreen/pdf.ts` | Mise en page des PDF (`src/shared/pdf-notes.ts`, pdf-lib) : le service worker (`src/background/pdf.ts`) rassemble les notes et leurs images, l’ouvre le temps d’un export (`chrome.offscreen`) puis télécharge le résultat. La bibliothèque PDF reste ainsi hors du service worker, que Chrome relance souvent. |
 
 La logique pure est dans `src/shared/` et couverte par les tests unitaires. L’application Desktop
@@ -188,8 +189,12 @@ dernier ayant reçu une interaction (clic, touche, ouverture de vidéo). Une com
 
 1. la vidéo de la fenêtre pop-out, si la pop-out a le focus ;
 2. l’onglet courant s’il affiche une vidéo prise en charge ;
-3. sinon le lecteur actif (capture / saut arrière sans changer d’onglet ; ouverture des notes,
-   horodatage et Smart Pause ramènent l’onglet au premier plan).
+3. **ouvrir les notes** (icône, `Alt+Shift+N`) : l’onglet courant, où Boo Notes démarre s’il le
+   peut — une leçon SCORM ou un article pas encore suivis compris (auparavant, la commande partait
+   vers la vidéo d’un autre onglet et rien ne se passait sur la page affichée) ;
+4. sinon le lecteur actif (capture / saut arrière sans changer d’onglet ; horodatage et Smart
+   Pause ramènent l’onglet au premier plan ; ouvrir les notes depuis une page où Boo Notes ne peut
+   pas tourner, comme un nouvel onglet, ramène à la vidéo).
 
 Le lecteur actif est aussi annoncé à l’application Desktop (`player.active`).
 

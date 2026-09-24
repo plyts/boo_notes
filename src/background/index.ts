@@ -20,6 +20,7 @@ import { findMediaRefs, pinTranscriptLine, transcriptLine, transcriptPath, trans
 import { TranscriptStore } from '../shared/transcript-store';
 import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
+import { DIAGNOSTIC_MENU, runDiagnostic } from './diagnostic';
 import { downloadPdf } from './pdf';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
@@ -292,13 +293,20 @@ const FOCUS_COMMANDS = new Set<CommandId>(['toggle-sidebar', 'insert-timestamp',
 /**
  * Routes a command to a single player: the pop-out's video when the pop-out
  * has focus, else the current tab if it plays a supported video, else the
- * last player that received an interaction.
+ * last player that received an interaction. Opening the notes (the icon,
+ * Alt+Shift+N) is about the page on screen: Boo Notes starts there when it
+ * may — a course page not followed yet (SCORM module, article) included —,
+ * instead of opening the notes of a video played earlier in another tab.
  */
 async function runCommand(command: CommandId, tab?: chrome.tabs.Tab): Promise<void> {
   const data = await session.get();
   const fromPopout = tab?.windowId !== undefined ? SessionState.popoutOwner(data, tab.windowId) : null;
   let target: number | null = fromPopout;
   if (target === null && tab?.id !== undefined && data.players[tab.id]) target = tab.id;
+  if (target === null && command === 'toggle-sidebar' && tab?.id !== undefined && (await ensureContentScript(tab.id))) {
+    await sendToTab(tab.id, { type: 'command', command });
+    return;
+  }
   // Remote control of the last media played (a page read in another tab has nothing to drive).
   const active = data.activeTab !== null ? data.players[data.activeTab] : undefined;
   if (target === null && active && active.kind !== 'page') {
@@ -333,6 +341,15 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 chrome.action.onClicked.addListener((tab) => void runCommand('toggle-sidebar', tab));
+
+/** « Diagnostic de cette page »: what Boo Notes sees of the tab, and what blocks it. */
+function diagnose(tabId: number): Promise<void> {
+  return runDiagnostic(tabId, { ensureContentScript, syncStatus: () => sync.status(), notionStatus: () => notion.status() });
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === DIAGNOSTIC_MENU && tab?.id !== undefined) void diagnose(tab.id).catch(noop);
+});
 
 // --- Messages -----------------------------------------------------------------
 
@@ -688,6 +705,8 @@ const handlers: Handlers = {
 
   'notes:pdf': async () => ({ message: await downloadPdf(store, null) }),
 
+  'diagnostic:run': (msg) => diagnose(msg.tabId),
+
   'wiki:titles': async () => {
     const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_TITLES)]);
     const titles = [...Object.values(index).map((n) => n.title), ...((stored[DESKTOP_TITLES] as string[] | undefined) ?? [])];
@@ -821,6 +840,10 @@ async function downloadNote(noteId: string): Promise<string> {
 // --- Lifecycle ---------------------------------------------------------------------
 
 chrome.runtime.onInstalled.addListener(async (details) => {
+  // Right click on the icon: the page's diagnostic (menus live until the next install / update).
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: DIAGNOSTIC_MENU, title: 'Diagnostic de cette page (Boo Notes)', contexts: ['action'] }, () => void chrome.runtime.lastError);
+  });
   // Declared content scripts only run on page load: add them to video tabs already open.
   for (const cs of chrome.runtime.getManifest().content_scripts ?? []) {
     if (!cs.matches || !cs.js) continue;
@@ -899,6 +922,7 @@ Object.assign(globalThis, {
           : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
       await runCommand(command, tab);
     },
+    diagnose,
     store,
     sync,
     session,

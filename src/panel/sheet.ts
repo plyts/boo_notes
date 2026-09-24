@@ -49,18 +49,25 @@ export class ShortcutsSheet {
   constructor(
     private readonly mac: boolean,
     onCustomize: () => void,
+    onDiagnostic?: () => void,
   ) {
     const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer' }, icon('close'));
     close.addEventListener('click', () => this.close());
     const customize = h('button', { type: 'button', class: 'btn' }, 'Personnaliser les raccourcis…');
     customize.addEventListener('click', onCustomize);
+    // Boo Notes does not work as expected on this page: what it sees of it, what blocks it.
+    const diagnostic = onDiagnostic ? h('button', { type: 'button', class: 'btn', title: 'Ce que Boo Notes voit de la page (cadres, vidéo, SCORM, droits) et ce qui le bloque' }, 'Diagnostic de la page') : null;
+    diagnostic?.addEventListener('click', () => {
+      this.close();
+      onDiagnostic?.();
+    });
     this.body = h('div', { class: 'sheet-body' });
     this.dialog = h(
       'div',
       { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'sheet-title' },
       h('div', { class: 'sheet-head' }, h('h2', { id: 'sheet-title' }, 'Raccourcis clavier'), close),
       this.body,
-      h('div', { class: 'sheet-foot' }, customize),
+      h('div', { class: 'sheet-foot' }, customize, diagnostic),
     );
     this.el = h('div', { class: 'sheet-backdrop', hidden: true }, this.dialog);
     this.el.addEventListener('pointerdown', (e) => {

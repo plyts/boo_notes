@@ -198,3 +198,28 @@ test.describe('Module de cours SCORM (LMS type Docebo)', () => {
     await expect(hint.getByRole('button', { name: 'Autoriser' })).toBeVisible();
   });
 });
+
+test('« Diagnostic de cette page » : cadres lus, module SCORM suivi, cadre d’un autre site à autoriser', async ({ context, page, sw }) => {
+  const module = await openLesson(page, sw);
+  await module.locator('#next').click();
+  await expect(panel(page).locator('.platform')).toContainText('Module SCORM');
+  const opened = context.waitForEvent('page');
+  await sw.evaluate(async (url) => {
+    const [tab] = (await chrome.tabs.query({})).filter((t) => t.url === url);
+    await (globalThis as unknown as { booNotes: { diagnose(id: number): Promise<void> } }).booNotes.diagnose(tab.id!);
+  }, page.url());
+  const report = await opened;
+  await expect(report).toHaveURL(/diagnostic\/diagnostic\.html$/);
+  const findings = report.locator('#findings');
+  await expect(findings).toContainText('Boo Notes est actif sur cette page, notes ouvertes.');
+  await expect(findings).toContainText('Module SCORM 2004 suivi : incomplete · 50 %.');
+  // The video host of the module: out of reach, the report says so and offers to allow every site.
+  await expect(findings.locator('li.error')).toHaveText(/^✗1 cadre de la page \(videos\.scorm-cdn\.example\)/);
+  await expect(report.getByRole('button', { name: 'Autoriser Boo Notes sur tous les sites' })).toBeVisible();
+  const details = report.locator('#report');
+  await expect(details).toContainText('https://lms-player.example.test/player/3565 · Boo Notes ✓ · SCORM 2004');
+  await expect(details).toContainText('https://lms-player.example.test/scorm/64272/index.html · Boo Notes ✓ · SCORM parent');
+  // No query string in the report (tokens stay private).
+  expect(await details.textContent()).not.toMatch(/\?[\w-]+=/);
+  await expect(report.getByRole('button', { name: 'Copier le diagnostic' })).toBeVisible();
+});

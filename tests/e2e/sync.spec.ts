@@ -136,4 +136,23 @@ test.describe('Multi-onglets', () => {
     await expect.poll(async () => (await storedNote(sw, 'youtube:videoAAAAAA'))?.markdown ?? '').toContain('[00:10]');
     expect(await storedNote(sw, 'youtube:videoBBBBBB')).toBeUndefined();
   });
+
+  test('l’icône (Alt+Maj+N) ouvre les notes de la page affichée, pas celles de la vidéo d’un autre onglet', async ({ context, page, sw }) => {
+    // A video followed earlier, in another tab: the active player.
+    await openWatch(page, '', 'videoAAAAAA');
+    await page.locator('h1').click();
+    // Then a course page (never activated) comes to the front.
+    await context.route(/^https:\/\/academy\.example\.test\//, (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Lesson</title></head><body><main><h1>Course project overview</h1><p>A lesson of a course module, read as a page.</p></main></body></html>' }),
+    );
+    const lesson = await context.newPage();
+    await lesson.goto('https://academy.example.test/learn/courses/2971/lessons/63328:4384/overview');
+    await lesson.bringToFront();
+    await runCommand(sw, lesson, 'toggle-sidebar');
+    await expect(panel(lesson).locator('.cm-content')).toBeVisible();
+    await expect(lesson.locator('#boo-notes-drawer .drawer')).toHaveClass(/open/);
+    // The video's notes stay closed.
+    await expect(page.locator('#boo-notes-drawer .drawer.open')).toHaveCount(0);
+  });
 });
+

@@ -169,9 +169,12 @@ class PanelApp {
     seek: (seconds) => this.post({ type: 'seek', seconds }),
     preview: (seconds) => this.post({ type: 'mark', seconds }),
   });
-  private readonly sheet = new ShortcutsSheet(IS_MAC, () => {
-    void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-  });
+  private readonly sheet = new ShortcutsSheet(
+    IS_MAC,
+    () => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }),
+    // The page's diagnostic (its tab: known in the drawer and in the pop-out).
+    TAB_ID >= 0 ? () => void callBackground({ type: 'diagnostic:run', tabId: TAB_ID }).catch((e: unknown) => this.notify(e instanceof Error ? e.message : String(e), 'error')) : undefined,
+  );
   private readonly emptyState = new EmptyState(IS_MAC);
 
   // Transcript (subtitles collected in the background), passages, recordings.

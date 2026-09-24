@@ -39,6 +39,7 @@ import { PageReader } from './reader';
 import { passageCard, recordBlocker, Recording } from './recorder';
 import { showReloadNotice } from './reload-notice';
 import { captionFile, SubtitleCollector } from './subtitles';
+import type { PageState } from '../shared/diagnostic';
 
 const PINNED_KEY = 'boo-notes:pinned';
 /** Notes open when this copy stopped (extension updated): the next copy opens them again. */
@@ -577,6 +578,7 @@ class ContentApp {
   ): boolean => {
     if (sender.id !== chrome.runtime.id) return false;
     if (msg.type === 'ping') sendResponse(true);
+    else if (msg.type === 'diagnostic') sendResponse(this.pageState());
     else if (msg.type === 'command') void this.onCommand(msg.command);
     else if (msg.type === 'popout:closed') this.popoutPort = null;
     else if (msg.type === 'frame:media') this.onFrameMedia(msg.frameId, msg.media);
@@ -588,6 +590,25 @@ class ContentApp {
     }
     return false;
   };
+
+  /** For « Diagnostic de cette page ». */
+  private pageState(): PageState {
+    const media = this.player.current;
+    const r = media?.getBoundingClientRect();
+    return {
+      context: this.ctx ? { platform: this.ctx.platform, noteId: this.ctx.noteId } : null,
+      mode: this.kind,
+      source: this.player.source,
+      media: media && r ? { tag: media.tagName.toLowerCase(), width: Math.round(r.width), height: Math.round(r.height), duration: Number.isFinite(media.duration) ? Math.round(media.duration) : 0, drm: Boolean(media.mediaKeys) } : null,
+      mediaFrames: this.player.reportingFrames().size,
+      blocked: this.blockedPlayers ? this.blockedPlayers.split(' ') : [],
+      moduleFollowed: this.frameReading !== null,
+      scorm: this.scorm,
+      notesOpen: this.drawer.isOpen,
+      popout: this.popoutPort !== null,
+      errors: [...this.overlay.errors],
+    };
+  }
 
   private readonly onPanelConnect = (port: Port): void => {
     if (port.name !== PANEL_PORT || port.sender?.id !== chrome.runtime.id) return;

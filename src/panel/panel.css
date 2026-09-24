@@ -805,6 +805,9 @@ button {
 }
 
 .sheet-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 12px 18px 16px;
   border-top: 1px solid var(--hairline);
 }

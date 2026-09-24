@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Boo Notes — Diagnostic</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="diagnostic.css" />
+    <script src="diagnostic.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <p class="eyebrow">Diagnostic de la page</p>
+        <h1 id="title">Boo Notes</h1>
+        <p class="lede" id="where"></p>
+      </header>
+      <section aria-labelledby="h-findings">
+        <h2 id="h-findings">Constat</h2>
+        <ul id="findings" class="findings"></ul>
+        <div class="actions">
+          <button type="button" class="btn primary" id="copy">Copier le diagnostic</button>
+          <button type="button" class="btn" id="allow-all" hidden>Autoriser Boo Notes sur tous les sites</button>
+          <span id="status" role="status"></span>
+        </div>
+        <p class="hint">Pour obtenir de l’aide, copiez le diagnostic et collez-le dans votre message : il ne contient ni vos notes ni les paramètres des adresses.</p>
+      </section>
+      <section aria-labelledby="h-details">
+        <h2 id="h-details">Détails</h2>
+        <pre id="report"></pre>
+      </section>
+    </main>
+  </body>
+</html>

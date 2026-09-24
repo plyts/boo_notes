@@ -30,7 +30,8 @@
     "downloads",
     "alarms",
     "clipboardWrite",
-    "offscreen"
+    "offscreen",
+    "contextMenus"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

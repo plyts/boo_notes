@@ -204,6 +204,8 @@ export type BackgroundRequest =
   | { type: 'notes:list' }
   /** Every note as one PDF, downloaded. */
   | { type: 'notes:pdf' }
+  /** « Diagnostic de cette page »: probes the tab and opens the report. */
+  | { type: 'diagnostic:run'; tabId: number }
   | { type: 'notes:clear' }
   /** Sites where Boo Notes is always active (optional host permission already granted). */
   | { type: 'sites:list' }
@@ -286,6 +288,7 @@ export interface BackgroundResponses {
   'sync:retry': SyncStatus;
   'notes:list': Record<string, NoteSummary>;
   'notes:pdf': { message: string };
+  'diagnostic:run': void;
   'notes:clear': void;
   'sites:list': string[];
   'sites:enable': string[];
@@ -321,6 +324,8 @@ export async function callBackground<R extends BackgroundRequest>(
 export type TabMessage =
   /** Presence check before an on-demand injection. */
   | { type: 'ping' }
+  /** What the page's script knows, for « Diagnostic de cette page » (answers a PageState). */
+  | { type: 'diagnostic' }
   | { type: 'command'; command: CommandId }
   | { type: 'popout:closed' }
   | { type: 'player:active'; active: boolean }

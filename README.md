@@ -74,6 +74,11 @@ Captivate, iSpring) :
   **Activer sur tous les sites** dans les options ; ses vidéos s’horodatent alors comme les autres.
   Un module lancé dans un cadre dont l’adresse est masquée (formulaire envoyé dans le cadre, comme
   certains LMS) est signalé aussi : **Autoriser** active alors Boo Notes sur tous les sites ;
+- **Diagnostic de cette page** (clic droit sur l’icône Boo Notes, ou bouton dans l’aide `?` du
+  panneau) : ce que Boo Notes voit de la leçon — ses cadres (LMS, module, lecteur vidéo), les vidéos
+  qu’ils contiennent, l’interface SCORM, les droits accordés — et, en clair, ce qui le bloque
+  (« 1 cadre de la page (…) est illisible : Autoriser »). Le rapport se copie d’un clic pour
+  demander de l’aide ; il ne contient ni les notes ni les paramètres des adresses ;
 - Boo Notes **mis à jour ou rechargé** pendant la leçon : l’ancienne copie retire son panneau (plus
   de panneau figé ni d’erreur « Extension context invalidated ») ; la nouvelle rouvre les notes là
   où elle peut démarrer seule (sites toujours actifs), sinon une carte invite à recharger la page.
@@ -164,7 +169,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Toasts** | Bas-gauche du lecteur (au-dessus des contrôles), 2 s, sombre, mono-espace. |
 | **Capture** | `<canvas>` détaché à la résolution de la vidéo ; repli sur une capture de l’onglet recadrée si la source est cross-origin sans CORS. |
 | **Desktop** | WebSocket local `ws://localhost:43117` + jeton d’appairage ; stockage `chrome.storage.local` d’abord, file d’envoi rejouée à la reconnexion. Voir [docs/PROTOCOL.md](docs/PROTOCOL.md). |
-| **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés (un média seulement : une page en mode lecture n’est pas pilotée depuis un autre onglet). |
+| **Multi-onglets** | Un seul lecteur actif : celui qui a reçu la dernière interaction ; les raccourcis lancés ailleurs lui sont routés (un média seulement : une page en mode lecture n’est pas pilotée depuis un autre onglet). L’icône et `Alt+Shift+N` ouvrent toujours les notes **de la page affichée**. |
 
 ### Formats et sources : chaque note ramène à son origine
 
@@ -244,7 +249,9 @@ chronologie (clic, aimantation, clavier), état vide et statistiques, feuille de
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu, **mise à jour de
 l’extension** pendant que les notes sont ouvertes (ancien panneau retiré, notes rouvertes, carte « Recharger »),
-module lancé dans un cadre à l’adresse masquée,
+module lancé dans un cadre à l’adresse masquée, icône / `Alt+Shift+N` sur une leçon alors qu’une
+vidéo d’un autre onglet était le lecteur actif, **diagnostic de la page** (cadres, module SCORM,
+cadre à autoriser),
 synchronisation hors-ligne → en ligne avec le mock Desktop, jeton refusé, auto-pause, routage
 multi-onglets, **podcast audio sur un site quelconque** (activation au raccourci, horodatage,
 progression, capture refusée), « Toujours activer ici » et page d’options, **vidéo déposée dans une

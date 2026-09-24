@@ -311,7 +311,14 @@ export class Overlay {
     }
   }
 
+  /** Last error messages shown (for « Diagnostic de cette page »). */
+  readonly errors: string[] = [];
+
   toast(text: string, kind: ToastKind = 'info', ms = 2000, extra: ToastExtra = {}): void {
+    if (kind === 'error') {
+      this.errors.push(text);
+      if (this.errors.length > 5) this.errors.shift();
+    }
     const m = TOAST_TIMECODE.exec(text);
     const body = m
       ? [h('span', { class: 't-tc' }, m[1]), h('span', { class: 't-sep' }, ' - '), h('span', { class: 't-msg' }, m[2])]

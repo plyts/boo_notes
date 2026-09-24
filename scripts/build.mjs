@@ -32,6 +32,7 @@ const entries = [
   { entryPoints: [join(src, 'content/media-bridge.ts')], outfile: join(out, 'media-bridge.js'), format: 'iife' },
   { entryPoints: [join(src, 'panel/index.ts')], outfile: join(out, 'panel/panel.js'), format: 'iife' },
   { entryPoints: [join(src, 'options/index.ts')], outfile: join(out, 'options/options.js'), format: 'iife' },
+  { entryPoints: [join(src, 'diagnostic/index.ts')], outfile: join(out, 'diagnostic/diagnostic.js'), format: 'iife' },
   // The PDF layout (and its library), loaded only while a PDF is being made.
   { entryPoints: [join(src, 'offscreen/pdf.ts')], outfile: join(out, 'offscreen/pdf.js'), format: 'iife' },
 ];
@@ -44,7 +45,7 @@ async function copyStatic() {
   if (e2e) manifest.host_permissions.push('*://*.test/*', 'http://127.0.0.1/*');
   await mkdir(out, { recursive: true });
   await writeFile(join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  for (const rel of ['panel/panel.html', 'panel/panel.css', 'panel/editor.css', 'panel/transcript.css', 'options/options.html', 'options/options.css', 'offscreen/pdf.html', 'tokens.css']) {
+  for (const rel of ['panel/panel.html', 'panel/panel.css', 'panel/editor.css', 'panel/transcript.css', 'options/options.html', 'options/options.css', 'offscreen/pdf.html', 'diagnostic/diagnostic.html', 'diagnostic/diagnostic.css', 'tokens.css']) {
     await mkdir(dirname(join(out, rel)), { recursive: true });
     await cp(join(src, rel), join(out, rel));
   }
