@@ -1,4 +1,5 @@
 import type { MediaKind, VideoContext } from './platforms';
+import type { DrawerLayout } from './settings';
 import type { InPageBinding } from './shortcuts';
 import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
 import type { Cue, Transcript, TranscriptSource } from './transcript';
@@ -148,7 +149,12 @@ export type FrameToBackground =
 /** What the page tells its frames: the notes (open or not), their quoted passages; find a quote. */
 export type FrameNotice =
   | { kind: 'notes'; open: boolean; page: string; passages: string[]; shortcut: string; bindings: InPageBinding[] }
-  | { kind: 'reveal'; url: string };
+  | { kind: 'reveal'; url: string }
+  /**
+   * The frame `token` is fullscreen by itself (an LMS's « expand the lesson »):
+   * only it is on screen, so the notes panel of the tab shows inside it.
+   */
+  | { kind: 'notes-host'; token: string; show: boolean; tabId: number; width: number; layout: DrawerLayout };
 
 export type BackgroundToFrame = { type: 'command'; command: FrameCommand } | { type: 'notice'; notice: FrameNotice };
 

@@ -152,6 +152,13 @@ class ContentApp {
   private readonly nestedBlocked = new Map<number, string[]>();
   /** Windows of the page's frames that run an agent (course pages without media included). */
   private readonly agentWindows = new WeakSet<object>();
+  /** Agent token of each frame window holding one (to ask it to show the notes). */
+  private readonly agentTokens = new WeakMap<object, string>();
+  /** Frame windows asked whether Boo Notes runs in them (answered or not). */
+  private readonly askedFrames = new WeakSet<object>();
+  /** The notes shown inside a frame fullscreen by itself (LMS « expand the lesson »). */
+  private frameHost: { iframe: HTMLIFrameElement; token: string } | null = null;
+  private frameHostAt = 0;
   /** What the course module (SCORM, xAPI) reports to its LMS. */
   private scorm: ScormState | null = null;
   /** Quoted passages of the note (text fragment links), also highlighted in frames. */
@@ -239,7 +246,7 @@ class ContentApp {
 
   /** The user is taking notes on this page (panel open): its transcript is kept even before the note exists. */
   private get engaged(): boolean {
-    return this.drawer.isOpen || this.popoutPort !== null;
+    return this.notesShown || this.popoutPort !== null;
   }
 
   private noteMeta(): NoteMeta {
@@ -296,7 +303,7 @@ class ContentApp {
     this.abort.abort();
     for (const id of this.intervals) clearInterval(id);
     if (this.titleWatch) clearInterval(this.titleWatch);
-    if (this.drawer.isOpen) step(() => sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ href: location.href, at: Date.now() })));
+    if (this.notesShown) step(() => sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ href: location.href, at: Date.now() })));
     step(() => this.fit.clear());
     step(() => this.drawer.destroy());
     step(() => this.overlay.destroy());
@@ -348,6 +355,7 @@ class ContentApp {
       setInterval(() => {
         // The page may show its lesson in the top layer (dialog, popover) or cover the notes.
         this.syncLayer();
+        this.syncFrameHost();
         this.updateFit();
         this.checkPanel();
       }, 700),
@@ -485,7 +493,7 @@ class ContentApp {
     if (this.dead || !this.ctx) return;
     const n: FrameNotice = notice ?? {
       kind: 'notes',
-      open: this.drawer.isOpen || this.popoutPort !== null,
+      open: this.notesShown || this.popoutPort !== null,
       page: this.ctx.canonicalUrl,
       passages: this.passageUrls,
       shortcut: this.quoteShortcut,
@@ -522,6 +530,7 @@ class ContentApp {
     const agent = (e.data as { booNotesAgent?: unknown } | null)?.booNotesAgent;
     if (typeof agent === 'string' && e.source) {
       this.agentWindows.add(e.source);
+      this.agentTokens.set(e.source, agent);
       return;
     }
     // A media's frame, maybe several frames deep: its hello comes from the <iframe> of this page holding it.
@@ -584,7 +593,7 @@ class ContentApp {
   private orphan(): void {
     if (this.dead) return;
     // Only where Boo Notes was in use: notes open, or a media followed.
-    const inUse = this.drawer.isOpen || this.popoutPort !== null || this.registeredNoteId !== null;
+    const inUse = this.notesShown || this.popoutPort !== null || this.registeredNoteId !== null;
     this.destroy();
     if (!inUse) return;
     let answered = false;
@@ -630,7 +639,7 @@ class ContentApp {
       blocked: this.blockedPlayers ? this.blockedPlayers.split(' ') : [],
       moduleFollowed: this.frameReading !== null,
       scorm: this.scorm,
-      notesOpen: this.drawer.isOpen,
+      notesOpen: this.notesShown,
       popout: this.popoutPort !== null,
       panel: {
         loaded: this.embeddedPort !== null || this.popoutPort !== null,
@@ -638,7 +647,7 @@ class ContentApp {
           const cover = this.drawer.coveredBy([this.overlay.host]);
           return cover ? describeElement(cover) : null;
         })() : null,
-        layer: this.layer ? describeElement(this.layer) : null,
+        layer: this.frameHost ? `${describeElement(this.frameHost.iframe)} (notes affichées dans ce cadre)` : this.layer ? describeElement(this.layer) : null,
         fullscreen: document.fullscreenElement ? describeElement(document.fullscreenElement) : null,
       },
       errors: [...this.overlay.errors],
@@ -678,8 +687,15 @@ class ContentApp {
     const fs = document.fullscreenElement;
     // Fitted again once the page has laid out its fullscreen (or left it).
     this.fit.clear();
-    // A video (or a frame) fullscreen by itself cannot host anything: with the notes open, its
-    // container takes the fullscreen instead (still the user's gesture), the notes beside it.
+    // A course frame fullscreen by itself (« expand the lesson »): the notes follow it, inside it.
+    if (this.notesShown && this.askFullscreenFrame(this.onFullscreenChange)) return;
+    this.syncFrameHost();
+    if (this.frameHost) {
+      this.syncLayer(true);
+      return;
+    }
+    // A video (or a frame without Boo Notes) fullscreen by itself cannot host anything: with the notes
+    // open, its container takes the fullscreen instead (still the user's gesture), the notes beside it.
     if (fs instanceof HTMLElement && !hostsChildren(fs) && this.drawer.isOpen && !this.popoutPort) {
       this.redirectFullscreen(fs);
       return;
@@ -726,6 +742,84 @@ class ContentApp {
         })
         .at(-1) ?? null
     );
+  }
+
+  /** Notes shown in the page or in its fullscreen frame. */
+  private get notesShown(): boolean {
+    return this.drawer.isOpen || this.frameHost !== null;
+  }
+
+  /**
+   * The frame fullscreen by itself that can show the notes (Boo Notes' agent
+   * runs in it): an LMS's « expand the lesson » shows the course that way,
+   * and nothing else of the page is then on screen.
+   */
+  private notesFrame(): { iframe: HTMLIFrameElement; token: string } | null {
+    const fs = document.fullscreenElement;
+    if (!(fs instanceof HTMLIFrameElement) || !fs.contentWindow) return null;
+    const token = this.agentTokens.get(fs.contentWindow);
+    return token ? { iframe: fs, token } : null;
+  }
+
+  /**
+   * A frame just fullscreen whose agent has not said hello yet (agents greet
+   * every few seconds): asked at once, answer awaited briefly. True when the
+   * question was needed (the caller runs again once it is settled).
+   */
+  private askFullscreenFrame(then: () => void): boolean {
+    const fs = document.fullscreenElement;
+    const win = fs instanceof HTMLIFrameElement ? fs.contentWindow : null;
+    if (!win || this.agentTokens.has(win) || this.askedFrames.has(win)) return false;
+    this.askedFrames.add(win);
+    try {
+      win.postMessage({ booNotesAgentQuery: true }, '*');
+    } catch {
+      return false;
+    }
+    void (async () => {
+      for (let t = 0; t < 1500 && !this.agentTokens.has(win); t += 50) await new Promise((r) => setTimeout(r, 50));
+      if (!this.dead) then();
+    })();
+    return true;
+  }
+
+  private showInFrame(host: { iframe: HTMLIFrameElement; token: string }, focus: 'keep' | 'end' | null): void {
+    void this.ensureRegistered(true);
+    // One panel at a time: the page's gives way (it is not on screen anyway).
+    if (this.drawer.hasFrame) {
+      this.drawer.destroyFrame();
+      this.embeddedPort = null;
+    }
+    this.frameHost = host;
+    this.frameHostAt = Date.now();
+    this.notifyFrames({ kind: 'notes-host', token: host.token, show: true, tabId: this.tabId, width: this.settings.drawerWidth, layout: this.settings.layout });
+    this.notifyFrames();
+    if (focus) void this.embedded().then((port) => port.postMessage({ type: 'focus', where: focus } satisfies ContentToPanel));
+  }
+
+  private hideInFrame(): void {
+    const host = this.frameHost;
+    if (!host) return;
+    this.frameHost = null;
+    this.embeddedPort = null;
+    this.notifyFrames({ kind: 'notes-host', token: host.token, show: false, tabId: this.tabId, width: this.settings.drawerWidth, layout: this.settings.layout });
+  }
+
+  /** The notes follow the fullscreen frame in and out (open in the page, they go in it; it leaves, they come back). */
+  private syncFrameHost(): void {
+    if (this.dead || this.popoutPort) return;
+    const host = this.notesFrame();
+    if (this.frameHost && host?.iframe !== this.frameHost.iframe) {
+      this.hideInFrame();
+      if (host) this.showInFrame(host, null);
+      else this.openDrawer(null);
+    } else if (!this.frameHost && host && this.drawer.isOpen) this.showInFrame(host, null);
+    // Asked before the frame's agent could hear it (still connecting): asked again until its panel is there.
+    else if (this.frameHost && !this.embeddedPort && Date.now() - this.frameHostAt > 1500) {
+      this.frameHostAt = Date.now();
+      const h = this.frameHost;
+      this.notifyFrames({ kind: 'notes-host', token: h.token, show: true, tabId: this.tabId, width: this.settings.drawerWidth, layout: this.settings.layout });
+    }
   }
 
   private syncLayer(force = false): void {
@@ -905,7 +999,7 @@ class ContentApp {
       // A page already noted: its quoted passages are highlighted, its reading followed.
       if (this.reading) await this.loadPassages(ctx.noteId, true);
     } else {
-      if (this.drawer.isOpen) this.closeDrawer();
+      if (this.notesShown) this.closeDrawer();
       await this.bg({ type: 'player:gone' }).catch(() => undefined);
     }
   }
@@ -998,7 +1092,7 @@ class ContentApp {
 
   private updateQuoteBubble(): void {
     // Cheapest checks first: this runs on every scroll / selection change of the page.
-    const open = this.drawer.isOpen || this.popoutPort !== null;
+    const open = this.notesShown || this.popoutPort !== null;
     const rect = open && this.ctx?.requiresMedia && this.reading && this.reader.selection().length >= 3 ? this.reader.selectionRect() : null;
     if (!rect || rect.bottom < 0 || rect.top > innerHeight) this.overlay.hideQuoteButton();
     else this.overlay.showQuoteButton(rect, this.quoteShortcut, () => void this.quote());
@@ -1127,7 +1221,7 @@ class ContentApp {
     switch (command) {
       case 'toggle-sidebar':
         if (!this.popoutPort) {
-          if (this.drawer.isOpen) this.closeDrawer();
+          if (this.notesShown) this.closeDrawer();
           else this.openDrawer('keep');
         }
         break;
@@ -1224,7 +1318,7 @@ class ContentApp {
       case 'toggle-sidebar':
         // With a pop-out, the background switches window focus instead.
         if (!this.popoutPort) {
-          if (this.drawer.isOpen) this.closeDrawer();
+          if (this.notesShown) this.closeDrawer();
           else {
             this.openDrawer('keep');
           }
@@ -1258,6 +1352,13 @@ class ContentApp {
       this.orphan();
       return;
     }
+    // Only a frame is on screen (fullscreen by itself): the notes show inside it.
+    if (this.askFullscreenFrame(() => this.openDrawer(focus))) return;
+    const host = this.notesFrame();
+    if (host) {
+      this.showInFrame(host, focus);
+      return;
+    }
     void this.ensureRegistered(true);
     this.syncLayer(true);
     this.drawer.open();
@@ -1276,6 +1377,7 @@ class ContentApp {
   }
 
   private closeDrawer(): void {
+    this.hideInFrame();
     this.drawer.close();
     this.notifyFrames();
     this.scheduleFit();
@@ -1292,8 +1394,9 @@ class ContentApp {
   /** The editor that receives keyboard input: the pop-out if any, else the (opened) drawer. */
   private async inputEditor(): Promise<Port> {
     if (this.popoutPort) return this.popoutPort;
-    if (!this.drawer.isOpen) this.openDrawer(null);
-    this.drawer.focus();
+    if (!this.notesShown) this.openDrawer(null);
+    // Shown in a fullscreen frame: its agent gave the panel the keyboard.
+    if (!this.frameHost) this.drawer.focus();
     return this.embedded();
   }
 
@@ -1492,7 +1595,7 @@ class ContentApp {
     }
     this.overlay.setPinned(pinned);
     this.postPanels({ type: 'pinned', value: pinned });
-    if (pinned && this.ctx && !this.drawer.isOpen && !this.popoutPort) this.openDrawer(null);
+    if (pinned && this.ctx && !this.notesShown && !this.popoutPort) this.openDrawer(null);
   }
 
   // --- Transcript, passages, audio trace ---------------------------------------------------
@@ -1855,6 +1958,7 @@ class ContentApp {
       case 'hello':
         if (msg.mode === 'popout') {
           this.popoutPort = port;
+          this.hideInFrame();
           this.drawer.destroyFrame();
           this.embeddedPort = null;
           this.notifyFrames();

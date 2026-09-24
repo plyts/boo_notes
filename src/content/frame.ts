@@ -6,11 +6,14 @@ import {
   type FrameCaptions,
   type FrameCommand,
   type FrameMedia,
+  type FrameNotice,
   type FrameToBackground,
 } from '../shared/messages';
 import { frameHello, liftHello, readHello } from '../shared/frame-hello';
+import { saveSettings } from '../shared/settings';
 import { adapterForHost } from './adapters';
 import { captureVideoFrame, probeFrame } from './capture';
+import { Drawer } from './drawer';
 import { FrameReading } from './frame-reading';
 import { allFrames } from './media-scan';
 import { MediaController } from './player';
@@ -85,6 +88,7 @@ class FrameAgent {
       },
       { signal: this.abort.signal },
     );
+    this.abort.signal.addEventListener('abort', () => this.notes?.destroy());
     this.reading.start();
     this.report();
   }
@@ -160,6 +164,29 @@ class FrameAgent {
     }
   }
 
+  /** The tab's notes panel, shown here while this frame alone is fullscreen. */
+  private notes: Drawer | null = null;
+
+  private hostNotes(n: Extract<FrameNotice, { kind: 'notes-host' }>): void {
+    if (n.token !== this.token) return;
+    if (!n.show) {
+      this.notes?.destroyFrame();
+      return;
+    }
+    this.notes ??= new Drawer({
+      width: n.width,
+      layout: n.layout,
+      topInset: () => 0,
+      // The same panel as in the page: it talks to the page's script (its tab), wherever it is shown.
+      panelUrl: () => chrome.runtime.getURL(`panel/panel.html?tab=${n.tabId}&mode=embedded`),
+      onResized: (width) => void saveSettings({ drawerWidth: width }).catch(() => undefined),
+    });
+    this.notes.setWidth(n.width);
+    this.notes.setLayout(n.layout);
+    this.notes.open();
+    this.notes.focus();
+  }
+
   private post(msg: FrameToBackground): void {
     if (!chrome.runtime?.id) {
       this.abort.abort(); // Extension reloaded: this copy is orphaned (its listeners go with it).
@@ -186,7 +213,8 @@ class FrameAgent {
 
   private async onMessage(msg: BackgroundToFrame): Promise<void> {
     if (msg.type === 'notice') {
-      this.reading.onNotice(msg.notice);
+      if (msg.notice.kind === 'notes-host') this.hostNotes(msg.notice);
+      else this.reading.onNotice(msg.notice);
       return;
     }
     if (msg.type !== 'command') return;

@@ -65,8 +65,18 @@ export class FrameReading {
     window.addEventListener(
       'message',
       (e) => {
-        const d = e.data as { booNotesAgent?: unknown } | null;
+        const d = e.data as { booNotesAgent?: unknown; booNotesAgentQuery?: unknown } | null;
         if (typeof d?.booNotesAgent === 'string' && e.source) this.agents.add(e.source);
+        // The page asks at once (this frame just went fullscreen): answered without waiting for the next round.
+        if (d?.booNotesAgentQuery === true && e.source === window.parent) {
+          try {
+            window.parent.postMessage({ booNotesAgent: this.token }, '*');
+          } catch {
+            // Parent gone.
+          }
+          // And reachable by the extension right away (to show the notes here).
+          if (!this.connected()) this.send({ kind: 'hello' });
+        }
       },
       { signal },
     );
@@ -102,6 +112,7 @@ export class FrameReading {
       this.ensureReader()?.reveal(notice.url);
       return;
     }
+    if (notice.kind !== 'notes') return;
     this.notes = notice;
     if (notice.open && this.textual()) {
       const reader = this.ensureReader();

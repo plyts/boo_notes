@@ -257,8 +257,15 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
   de la page suit cette couche (toutes les 0,7 s et à chaque changement de plein écran) et y place le
   panneau et le HUD. Il vérifie aussi que le panneau ouvert est bien ce que la page montre à cet
   endroit (`elementFromPoint`) : recouvert, il repasse au premier plan ; toujours recouvert (ou son
-  cadre jamais chargé), les notes s’ouvrent dans la fenêtre détachée. Un cadre ou une vidéo mis seuls
-  en plein écran quand les notes s’ouvrent laissent la place à leur conteneur.
+  cadre jamais chargé), les notes s’ouvrent dans la fenêtre détachée.
+- **Cadre du cours seul en plein écran** (Docebo / Databricks : « Développer la vue de la leçon ») :
+  seul ce cadre est à l’écran. Si l’agent Boo Notes y tourne (demandé à l’instant par `postMessage`
+  s’il ne s’est pas encore annoncé), le script de la page lui demande d’afficher le panneau des notes
+  chez lui (`notice: notes-host`, redemandé tant que le panneau ne s’est pas connecté) : c’est le même
+  panneau (`panel.html?tab=…`), relié au script de la page par son port, le panneau de la page
+  s’effaçant. Quand le plein écran se termine, les notes reviennent dans la page. Un panneau retiré
+  envoie ses dernières modifications aussitôt (`pagehide`), sans file d’attente. Un cadre sans agent
+  (ou une vidéo seule) en plein écran laisse la place à son conteneur.
 - L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
 
 ## Sécurité

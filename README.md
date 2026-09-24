@@ -77,10 +77,12 @@ Captivate, iSpring) :
 - une vidéo au fond du module (leçon Databricks Academy : page Docebo → lanceur SCORM → pilote
   SCORM → contenu Articulate Rise, quatre cadres emboîtés) est suivie et **placée** : horodatages,
   captures recadrées sur l’image, lecteur ajusté à côté des notes ;
-- les notes restent **à l’écran** : le cadre du cours mis seul en plein écran (bouton plein écran
-  du LMS) cède sa place à son conteneur, une leçon affichée dans une boîte de dialogue modale ou un
-  popover (top layer) accueille les notes, et si la page les recouvre malgré tout, elles s’ouvrent
-  dans une **fenêtre à part** (même note, mêmes raccourcis) ;
+- les notes restent **à l’écran** : le cours mis seul en plein écran (Databricks : « Développer la
+  vue de la leçon », seule façon d’y lire le cours) **reste en plein écran et affiche les notes en
+  lui-même** — elles reviennent dans la page quand la vue se replie, rien de ce qui est écrit ne se
+  perd ; une leçon affichée dans une boîte de dialogue modale ou un popover (top layer) accueille les
+  notes, et si la page les recouvre malgré tout, elles s’ouvrent dans une **fenêtre à part** (même
+  note, mêmes raccourcis) ;
 - **Diagnostic de cette page** (clic droit sur l’icône Boo Notes, ou bouton dans l’aide `?` du
   panneau) : ce que Boo Notes voit de la leçon — ses cadres (LMS, module, lecteur vidéo), les vidéos
   qu’ils contiennent, l’interface SCORM, les droits accordés — et, en clair, ce qui le bloque

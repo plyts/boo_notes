@@ -7,6 +7,7 @@ import { findAssetRefs, findFragmentLinks, linkedTitles, normalizeTitle, toPorta
 import {
   callBackground,
   HIDDEN_SITE,
+  type BackgroundRequest,
   PANEL_PORT,
   type CaptionState,
   type ContentToPanel,
@@ -571,6 +572,24 @@ class PanelApp {
     this.setSaveState('pending');
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flush(), SAVE_DELAY_MS);
+  }
+
+  /**
+   * The panel is going away (removed from the page — its frame left
+   * fullscreen, the notes moved —, tab closed): the last edits leave at once,
+   * a save queued behind another would never be sent.
+   */
+  private flushNow(): void {
+    const meta = this.meta();
+    if (!this.dirty || !this.note || !meta) return;
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.dirty = false;
+    try {
+      void chrome.runtime.sendMessage({ type: 'note:save', noteId: this.note.id, meta, markdown: this.editor.content, writer: CLIENT_ID } satisfies BackgroundRequest).catch(() => undefined);
+    } catch {
+      // Extension reloaded: nothing to send to.
+    }
   }
 
   private flush(): Promise<void> {
@@ -1809,7 +1828,7 @@ class PanelApp {
         this.closeMenu(false);
       }
     });
-    window.addEventListener('pagehide', () => void this.flush());
+    window.addEventListener('pagehide', () => this.flushNow());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') void this.flush();
     });
