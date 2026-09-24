@@ -4,6 +4,7 @@
  * content scripts may open), and off-DOM `new Audio()` players, docked into
  * the page by the main-world bridge (media-bridge.ts) as soon as they play.
  */
+import { HIDDEN_SITE } from '../shared/messages';
 
 /** Custom element the main-world bridge moves off-DOM media into (hidden). */
 export const MEDIA_DOCK = 'boo-media-dock';
@@ -103,4 +104,29 @@ export function looksLikePlayer(src: string): boolean {
         ? host === h || host.endsWith(`.${h}`)
         : host.includes(h),
   );
+}
+
+/**
+ * Site a frame shows, to ask for the right to read it: the host of its
+ * `src` when another site's; `HIDDEN_SITE` when its `src` says this site (or
+ * nothing) but its document is out of reach — it went elsewhere, e.g. a
+ * course launched by a form posted into it; null for the page's own.
+ */
+export function frameSite(frame: HTMLIFrameElement): string | null {
+  let url: URL | null;
+  try {
+    url = frame.src ? new URL(frame.src, location.href) : null;
+  } catch {
+    return null;
+  }
+  // Extension pages (the notes panel), data: and blob: documents are no site to allow.
+  if (url && !/^(https?|about|javascript):$/.test(url.protocol)) return null;
+  if (url && /^https?:$/.test(url.protocol) && url.host !== location.host) return url.host;
+  let reachable = false;
+  try {
+    reachable = frame.contentDocument !== null;
+  } catch {
+    reachable = false;
+  }
+  return reachable ? null : HIDDEN_SITE;
 }

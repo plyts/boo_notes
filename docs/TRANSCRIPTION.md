@@ -239,10 +239,11 @@ lecteur propose **⤓ Télécharger le fichier**.
   l’autorisation est manqué : la piste du lecteur ou la capture en direct prend le relais.
 - Une vidéo **sans aucun sous-titre** (ni fichier, ni sous-titres automatiques) n’a pas de
   transcription : pas de reconnaissance vocale pour l’instant.
-- Boo Notes **mis à jour ou rechargé** pendant qu’une page est ouverte : sur les sites déclarés
-  ou toujours actifs, il redémarre seul ; ailleurs, une carte « Boo Notes a été mis à jour —
-  Recharger » s’affiche (au lieu de l’erreur « Extension context invalidated »), vos notes
-  enregistrées sont conservées.
+- Boo Notes **mis à jour ou rechargé** pendant qu’une page est ouverte : l’ancienne copie du
+  script retire son panneau et rend la page (marge, lecteur) ; sur les sites déclarés ou toujours
+  actifs, la nouvelle version redémarre seule et **rouvre les notes** qui l’étaient ; ailleurs, une
+  carte « Boo Notes a été mis à jour — Recharger » s’affiche (au lieu de l’erreur « Extension
+  context invalidated »), vos notes enregistrées sont conservées.
 - La traduction automatique demande Chrome 138+ (modèle téléchargé une fois sur l’appareil) ;
   l’application Desktop propose la traduction à la main.
 

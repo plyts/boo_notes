@@ -143,6 +143,10 @@ class FrameAgent {
   }
 
   private post(msg: FrameToBackground): void {
+    if (!chrome.runtime?.id) {
+      this.abort.abort(); // Extension reloaded: this copy is orphaned (its listeners go with it).
+      return;
+    }
     try {
       if (!this.port) {
         this.port = chrome.runtime.connect({ name: FRAME_PORT });

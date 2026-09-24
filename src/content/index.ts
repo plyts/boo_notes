@@ -32,7 +32,7 @@ import { adapterForHost, detectPageTheme, headerInset, queryVisible, type Platfo
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
 import { Drawer } from './drawer';
 import { hostsChildren, PlayerFit } from './fit';
-import { looksLikePlayer, playerFrames, scanMedia } from './media-scan';
+import { frameSite, looksLikePlayer, playerFrames, scanMedia } from './media-scan';
 import { Overlay } from './overlay';
 import { MediaController } from './player';
 import { PageReader } from './reader';
@@ -41,6 +41,8 @@ import { showReloadNotice } from './reload-notice';
 import { captionFile, SubtitleCollector } from './subtitles';
 
 const PINNED_KEY = 'boo-notes:pinned';
+/** Notes open when this copy stopped (extension updated): the next copy opens them again. */
+const REOPEN_KEY = 'boo-notes:reopen';
 const TEARDOWN_EVENT = 'boo-notes:teardown';
 /** A copy cut off from the extension asks whether a newer one runs in the page; it answers. */
 const ALIVE_QUESTION = 'boo-notes:alive?';
@@ -233,8 +235,12 @@ class ContentApp {
     if (this.dead) return;
     this.tabId = (await this.bg({ type: 'hello' })).tabId;
     if (this.dead) return;
+    let reopen = false;
     try {
       this.pinned = sessionStorage.getItem(PINNED_KEY) === '1';
+      const left = JSON.parse(sessionStorage.getItem(REOPEN_KEY) ?? 'null') as { href?: string; at?: number } | null;
+      sessionStorage.removeItem(REOPEN_KEY);
+      reopen = left?.href === location.href && Date.now() - (left.at ?? 0) < 30 * 60_000;
     } catch {
       this.pinned = false;
     }
@@ -248,29 +254,40 @@ class ContentApp {
     // Those the player downloaded before this script started are sent again.
     document.dispatchEvent(new CustomEvent(CAPTIONS_REQUEST_EVENT));
     document.dispatchEvent(new CustomEvent(SCORM_REQUEST_EVENT));
-    if (this.pinned && this.ctx) this.openDrawer(null);
+    if ((this.pinned || reopen) && this.ctx) this.openDrawer(null);
   }
 
+  /**
+   * Stops this copy and gives the page back as it was. Also runs cut off from
+   * the extension (reloaded, updated), where its APIs are gone or throw: each
+   * step on its own, the page's side first — a panel left behind would stay
+   * on screen, dead.
+   */
   readonly destroy = () => {
     if (this.dead) return;
     this.dead = true;
+    const step = (f: () => void) => {
+      try {
+        f();
+      } catch {
+        // Extension context already gone.
+      }
+    };
     this.abort.abort();
     for (const id of this.intervals) clearInterval(id);
     if (this.titleWatch) clearInterval(this.titleWatch);
-    this.stopSettingsWatch?.();
-    try {
-      chrome.runtime.onMessage.removeListener(this.onTabMessage);
-      chrome.runtime.onConnect.removeListener(this.onPanelConnect);
-      chrome.storage.onChanged.removeListener(this.onStorageChanged);
-    } catch {
-      // Extension context already gone.
-    }
-    this.embeddedPort?.disconnect();
-    this.popoutPort?.disconnect();
-    this.fit.clear();
-    this.overlay.destroy();
-    this.drawer.destroy();
-    this.reader.stop();
+    if (this.drawer.isOpen) step(() => sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ href: location.href, at: Date.now() })));
+    step(() => this.fit.clear());
+    step(() => this.drawer.destroy());
+    step(() => this.overlay.destroy());
+    step(() => this.reader.stop());
+    for (const r of [this.passage?.recording, this.rangeRecording?.recording, this.trace?.recording]) step(() => void r?.stop().catch(() => undefined));
+    step(() => this.embeddedPort?.disconnect());
+    step(() => this.popoutPort?.disconnect());
+    step(() => this.stopSettingsWatch?.());
+    step(() => chrome.runtime.onMessage.removeListener(this.onTabMessage));
+    step(() => chrome.runtime.onConnect.removeListener(this.onPanelConnect));
+    step(() => chrome.storage.onChanged.removeListener(this.onStorageChanged));
   };
 
   // --- Wiring -------------------------------------------------------------------
@@ -496,10 +513,10 @@ class ContentApp {
       hosts = [
         ...new Set([
           ...playerFrames(PLAYER_FRAME_AREA)
-            .filter((f) => !reporting.has(f) && !(f.contentWindow && this.agentWindows.has(f.contentWindow)) && f.src && /^https?:/.test(f.src))
+            .filter((f) => !reporting.has(f) && !(f.contentWindow && this.agentWindows.has(f.contentWindow)))
             .filter((f) => looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen|encrypted-media/.test(f.allow) || isLargeFrame(f))
-            .map((f) => new URL(f.src, location.href).host)
-            .filter((h) => h !== location.host),
+            .map(frameSite)
+            .filter((h): h is string => h !== null),
           // Frames inside frames (an LMS player holding the course module).
           ...[...this.nestedBlocked.values()].flat(),
         ]),
@@ -587,7 +604,7 @@ class ContentApp {
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.markInteraction();
-    if (!this.ctx || isEditableTarget(e)) return;
+    if (this.dead || !this.ctx || isEditableTarget(e)) return;
     const plain = !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
     if (e.key === 'Escape' && plain && this.drawer.isOpen && !this.pinned && !document.fullscreenElement) {
       this.closeDrawer();
@@ -1055,6 +1072,11 @@ class ContentApp {
   }
 
   private markInteraction(): void {
+    // Reloaded extension noticed at the user's first gesture (a hidden tab's timers are slowed down).
+    if (!chrome.runtime?.id) {
+      this.orphan();
+      return;
+    }
     const now = Date.now();
     if (!this.ctx || now - this.lastInteraction < 3000) return;
     this.lastInteraction = now;
@@ -1110,6 +1132,11 @@ class ContentApp {
 
   private openDrawer(focus: 'keep' | 'end' | null): void {
     if (this.popoutPort) return;
+    // The panel is a page of the extension: none to show once it is reloaded.
+    if (!chrome.runtime?.id) {
+      this.orphan();
+      return;
+    }
     void this.ensureRegistered(true);
     this.drawer.open();
     this.notifyFrames();

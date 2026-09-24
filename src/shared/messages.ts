@@ -31,6 +31,9 @@ export interface SyncStatus {
   at: number;
 }
 
+/** A frame of another site whose address is out of reach (it went elsewhere than its `src`): readable once allowed everywhere. */
+export const HIDDEN_SITE = '*';
+
 export type ExportTarget = 'desktop' | 'notion' | 'download' | 'pdf';
 
 /** Notion as seen by the extension: through the desktop app, or directly (app closed). */

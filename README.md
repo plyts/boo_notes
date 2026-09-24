@@ -72,6 +72,11 @@ Captivate, iSpring) :
   la leçon ;
 - un cadre d’un autre site dans le module (contenu, vidéo) est signalé : **Autoriser** une fois, ou
   **Activer sur tous les sites** dans les options ; ses vidéos s’horodatent alors comme les autres.
+  Un module lancé dans un cadre dont l’adresse est masquée (formulaire envoyé dans le cadre, comme
+  certains LMS) est signalé aussi : **Autoriser** active alors Boo Notes sur tous les sites ;
+- Boo Notes **mis à jour ou rechargé** pendant la leçon : l’ancienne copie retire son panneau (plus
+  de panneau figé ni d’erreur « Extension context invalidated ») ; la nouvelle rouvre les notes là
+  où elle peut démarrer seule (sites toujours actifs), sinon une carte invite à recharger la page.
 
 | Note vide : le mode d’emploi | Raccourcis (`Ctrl/⌘ + /`) | Toast de capture |
 | --- | --- | --- |
@@ -232,7 +237,9 @@ seule repris par son lecteur, bouton « Plein écran avec les notes »), lecteur
 côte, **export PDF** (note et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
-captures et copie du Markdown, persistance après rechargement, double injection du script de contenu,
+captures et copie du Markdown, persistance après rechargement, double injection du script de contenu, **mise à jour de
+l’extension** pendant que les notes sont ouvertes (ancien panneau retiré, notes rouvertes, carte « Recharger »),
+module lancé dans un cadre à l’adresse masquée,
 synchronisation hors-ligne → en ligne avec le mock Desktop, jeton refusé, auto-pause, routage
 multi-onglets, **podcast audio sur un site quelconque** (activation au raccourci, horodatage,
 progression, capture refusée), « Toujours activer ici » et page d’options, **vidéo déposée dans une

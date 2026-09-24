@@ -1,7 +1,7 @@
 import type { FrameEvent, FrameNotice, ScormState } from '../shared/messages';
 import { applyScorm, readScormValue, SCORM_EVENT, SCORM_REQUEST_EVENT } from '../shared/scorm';
 import { findBinding, formatShortcut, type InPageBinding } from '../shared/shortcuts';
-import { looksLikePlayer } from './media-scan';
+import { frameSite, looksLikePlayer } from './media-scan';
 import { PageReader } from './reader';
 
 /**
@@ -257,16 +257,11 @@ export class FrameReading {
     const hosts = new Set<string>();
     for (const f of document.querySelectorAll('iframe')) {
       if (f.contentWindow && this.agents.has(f.contentWindow)) continue;
-      let url: URL;
-      try {
-        url = new URL(f.src, location.href);
-      } catch {
-        continue;
-      }
-      if (!/^https?:$/.test(url.protocol) || url.host === location.host) continue;
+      const site = frameSite(f);
+      if (!site) continue;
       const r = f.getBoundingClientRect();
       const big = r.width >= 480 && r.height >= 270;
-      if (big || (r.width * r.height >= 240 * 135 && (looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen/.test(f.allow)))) hosts.add(url.host);
+      if (big || (r.width * r.height >= 240 * 135 && (looksLikePlayer(f.src) || f.allowFullscreen || /autoplay|fullscreen/.test(f.allow)))) hosts.add(site);
     }
     const key = [...hosts].sort().join(' ');
     if (key === this.lastFrames) return;

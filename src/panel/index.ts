@@ -6,6 +6,7 @@ import { h, icon, type IconName } from '../shared/icons';
 import { findAssetRefs, findFragmentLinks, linkedTitles, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import {
   callBackground,
+  HIDDEN_SITE,
   PANEL_PORT,
   type CaptionState,
   type ContentToPanel,
@@ -1289,14 +1290,16 @@ class PanelApp {
   /** Embedded players found in the page that Boo Notes may not read yet: one click allows them. */
   private buildPlayersHint(): HTMLDivElement {
     const button = h('button', { type: 'button', class: 'link-btn' }, 'Autoriser');
-    button.addEventListener('click', () => void this.allowPlayers());
+    // A frame whose site is hidden can only be read with Boo Notes allowed everywhere.
+    button.addEventListener('click', () => void (this.pendingPlayers.includes(HIDDEN_SITE) ? this.enableEverywhere() : this.allowPlayers()));
     return h('div', { class: 'players-hint', hidden: true, role: 'status' }, icon('video', 14), h('span', { class: 'site-text' }), button);
   }
 
   private async renderPlayers(hosts: string[]): Promise<void> {
     const missing: string[] = [];
     for (const host of hosts) {
-      const has = await chrome.permissions.contains({ origins: [`https://${host}/*`] }).catch(() => false);
+      const origins = host === HIDDEN_SITE ? ['https://*/*'] : [`https://${host}/*`];
+      const has = await chrome.permissions.contains({ origins }).catch(() => false);
       if (!has) missing.push(host);
     }
     // Allowed earlier but loaded before: inject the agent now.
@@ -1306,10 +1309,12 @@ class PanelApp {
     }
     this.pendingPlayers = missing;
     this.playersHint.hidden = missing.length === 0;
-    (this.playersHint.querySelector('.site-text') as HTMLElement).textContent =
-      missing.length === 1
-        ? `Contenu intégré (${missing[0]}) — lecteur vidéo ou module de cours : autorisez Boo Notes à le lire (horodatage, citations, captures).`
-        : `${missing.length} contenus intégrés (${missing.join(', ')}) — lecteurs ou modules de cours : autorisez Boo Notes à les lire.`;
+    const named = missing.filter((host) => host !== HIDDEN_SITE);
+    (this.playersHint.querySelector('.site-text') as HTMLElement).textContent = missing.includes(HIDDEN_SITE)
+      ? 'Le cours s’affiche dans un cadre venu d’un autre site, dont l’adresse est masquée (module SCORM, lecteur) : autorisez Boo Notes sur tous les sites pour le lire (horodatage, citations, captures).'
+      : named.length === 1
+        ? `Contenu intégré (${named[0]}) — lecteur vidéo ou module de cours : autorisez Boo Notes à le lire (horodatage, citations, captures).`
+        : `${named.length} contenus intégrés (${named.join(', ')}) — lecteurs ou modules de cours : autorisez Boo Notes à les lire.`;
   }
 
   private async allowPlayers(): Promise<void> {
@@ -1351,6 +1356,7 @@ class PanelApp {
     try {
       await callBackground({ type: 'sites:all', enabled: true });
       this.siteHint.hidden = true;
+      this.playersHint.hidden = true;
       this.post({ type: 'players:granted' });
       this.notify('Boo Notes est actif sur tous les sites', 'success');
     } catch (e) {

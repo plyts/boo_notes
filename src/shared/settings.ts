@@ -135,5 +135,11 @@ export function onSettingsChanged(cb: (s: Settings) => void): () => void {
     if (area === 'sync' && changes[KEY]) cb(normalizeSettings(changes[KEY].newValue));
   };
   chrome.storage.onChanged.addListener(listener);
-  return () => chrome.storage.onChanged.removeListener(listener);
+  return () => {
+    try {
+      chrome.storage.onChanged.removeListener(listener);
+    } catch {
+      // Cut off from the extension (reloaded): nothing left to remove.
+    }
+  };
 }
