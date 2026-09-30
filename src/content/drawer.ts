@@ -3,6 +3,8 @@ import { DEFAULT_SETTINGS, DRAWER_MAX_WIDTH, DRAWER_MIN_WIDTH, type DrawerLayout
 import { attachStyles } from './overlay';
 
 const DEFAULT_WIDTH = DEFAULT_SETTINGS.drawerWidth;
+/** Longest wait for a removed editor to save what was just typed. */
+const RETIRE_MS = 1500;
 
 /**
  * Right-hand retractable drawer. It only hosts an <iframe> of the extension's
@@ -24,6 +26,7 @@ const CSS = `
 .drawer.open { transform: none; visibility: visible; transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s; }
 .drawer.resizing { transition: none; }
 iframe { flex: 1; width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+iframe.retired { display: none; }
 .drawer.resizing iframe { pointer-events: none; }
 .resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 1; touch-action: none; }
 .resize::after {
@@ -116,11 +119,12 @@ export class Drawer {
     if (document.activeElement === this.host) (document.activeElement as HTMLElement).blur();
   }
 
-  /** Removes the editor iframe (notes detached to a pop-out window). */
+  /** Removes the editor iframe (notes detached to a pop-out window, or shown in another frame). */
   destroyFrame(): void {
     this.close();
-    this.iframe?.remove();
+    const old = this.iframe;
     this.iframe = null;
+    if (old) retire(old);
   }
 
   setWidth(width: number): void {
@@ -291,5 +295,36 @@ export class Drawer {
       this.setWidth(DEFAULT_WIDTH);
       this.opts.onResized(this.width);
     });
+  }
+}
+
+/**
+ * Removes an editor once it has saved what was just typed (the panel saves
+ * a moment after the last keystroke: removed at once, those keystrokes could
+ * be lost while the notes reopen elsewhere). Hidden meanwhile; removed anyway
+ * if it does not answer.
+ */
+function retire(iframe: HTMLIFrameElement): void {
+  iframe.classList.add('retired');
+  const win = iframe.contentWindow;
+  let timer = 0;
+  const onMessage = (e: MessageEvent) => {
+    if (e.source === win && (e.data as { booNotesFlushed?: unknown } | null)?.booNotesFlushed === true) done();
+  };
+  const done = () => {
+    clearTimeout(timer);
+    window.removeEventListener('message', onMessage);
+    iframe.remove();
+  };
+  if (!win || !iframe.isConnected) {
+    done();
+    return;
+  }
+  window.addEventListener('message', onMessage);
+  timer = window.setTimeout(done, RETIRE_MS);
+  try {
+    win.postMessage({ booNotesFlush: true }, new URL(iframe.src).origin);
+  } catch {
+    done();
   }
 }

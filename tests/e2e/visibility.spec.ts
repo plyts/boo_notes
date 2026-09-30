@@ -110,6 +110,9 @@ test('« Développer la vue de la leçon » (Databricks) : le cours reste en ple
   await expect.poll(() => page.frames().some((f) => f.url().endsWith('/scormcontent/index.html'))).toBe(true);
   await runCommand(sw, page, 'toggle-sidebar');
   await expect(panel(page).locator('.cm-content')).toBeVisible();
+  // Typed just before expanding: it goes along (not yet saved when the page's panel gives way).
+  await panel(page).locator('.cm-content').click();
+  await page.keyboard.type('Agents :');
 
   // Expanded: the course frame alone fills the screen — and stays so.
   await page.locator('#expand').click();
@@ -117,14 +120,15 @@ test('« Développer la vue de la leçon » (Databricks) : le cours reste en ple
   const launcher = page.frameLocator('#lo');
   // The notes show inside the course frame, open, usable.
   await expect(launcher.locator('#boo-notes-drawer .drawer.open')).toBeAttached({ timeout: 10_000 });
-  const inFrame = launcher.frameLocator('#boo-notes-drawer iframe');
-  await expect(inFrame.locator('.cm-content')).toBeVisible();
+  const inFrame = launcher.frameLocator('#boo-notes-drawer iframe:not(.retired)');
+  await expect(inFrame.locator('.cm-content')).toContainText('Agents :');
   await inFrame.locator('.cm-content').click();
-  await page.keyboard.type('Model Serving en plein écran');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' Model Serving en plein écran');
   await expect(inFrame.locator('.cm-content')).toContainText('Model Serving en plein écran');
   expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('lo');
   // Only one panel: the page's is gone meanwhile.
-  expect(await page.evaluate(() => document.querySelector('#boo-notes-drawer iframe'))).toBeNull();
+  await expect.poll(() => page.evaluate(() => document.getElementById('boo-notes-drawer')?.shadowRoot?.querySelectorAll('iframe').length ?? 0)).toBe(0);
 
   // Collapsed again: the notes come back in the page, with what was written.
   await page.evaluate(() => document.exitFullscreen());

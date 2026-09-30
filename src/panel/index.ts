@@ -1829,6 +1829,11 @@ class PanelApp {
       }
     });
     window.addEventListener('pagehide', () => this.flushNow());
+    // The page removes this panel (the notes move to another frame, a pop-out): what was just typed is saved first.
+    window.addEventListener('message', (e) => {
+      if (e.source !== window.parent || window.parent === window || (e.data as { booNotesFlush?: unknown } | null)?.booNotesFlush !== true) return;
+      void this.flush().finally(() => window.parent.postMessage({ booNotesFlushed: true }, '*'));
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') void this.flush();
     });

@@ -151,7 +151,8 @@ export async function runCommand(sw: Worker, page: Page, command: string): Promi
   );
 }
 
-export const panel = (page: Page): FrameLocator => page.frameLocator('#boo-notes-drawer iframe');
+/** The notes panel of the page (not one being removed, see Drawer.destroyFrame). */
+export const panel = (page: Page): FrameLocator => page.frameLocator('#boo-notes-drawer iframe:not(.retired)');
 
 /** Alt+Shift+N, then waits until the editor has keyboard focus. */
 export async function openNotes(sw: Worker, page: Page): Promise<void> {
