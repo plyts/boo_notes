@@ -12,7 +12,7 @@ import {
   type TabMessage,
 } from '../shared/messages';
 import { readCourseText, type CourseText } from '../shared/course-text';
-import { authorizeUrl, BUILT_IN_NOTION_OAUTH, codeFrom, exchangeCode, type NotionOAuthConfig } from '../shared/notion-oauth';
+import { authorizeUrl, BUILT_IN_NOTION_OAUTH, codeFrom, exchangeCode, refreshAccess, revokeAccess, type NotionOAuthConfig } from '../shared/notion-oauth';
 import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
@@ -32,7 +32,7 @@ import { DesktopSync } from './sync';
  * active player (multi-tab routing), the link to the desktop app, and the
  * direct Notion sync used while the app is closed.
  */
-/** « Se connecter avec Notion »: the public integration set in this build (null: not set up). */
+/** « Connecter Notion »: the public integration set in this build (null: not set up). */
 let notionOAuth: NotionOAuthConfig | null = BUILT_IN_NOTION_OAUTH;
 const store = new NoteStore(chrome.storage.local);
 const transcripts = new TranscriptStore(chrome.storage.local);
@@ -76,6 +76,8 @@ const notion: ExtensionNotion = new ExtensionNotion({
   // The app learns the Notion page of the note with its next copy.
   onLinked: (noteId) => void store.requeue(noteId).then(() => sync.notifyChanged()),
   onStatus: (status) => void publishNotionStatus(status),
+  // « Connecter Notion »: an expired access renewed without the user.
+  renewAccess: async (refreshToken) => (notionOAuth ? refreshAccess(notionOAuth, refreshToken) : null),
 });
 
 async function publishNotionStatus(status: NotionStatus): Promise<void> {
@@ -779,6 +781,7 @@ const handlers: Handlers = {
 
   'notion:oauth-info': async () => ({ available: Boolean(notionOAuth), redirectUri: chrome.identity?.getRedirectURL('notion') ?? '' }),
 
+  // « Connecter Notion »: one click. Notion's window (consent), then everything else without asking.
   'notion:oauth': async () => {
     if (!notionOAuth) throw new Error('la connexion en un clic n’est pas configurée dans cette installation : utilisez le secret d’intégration (voir docs/NOTION.md)');
     const redirect = chrome.identity.getRedirectURL('notion');
@@ -792,10 +795,16 @@ const handlers: Handlers = {
       throw new Error(/approve|cancel|closed/i.test(message) ? 'connexion annulée' : `fenêtre de connexion Notion : ${message}`);
     }
     const grant = await exchangeCode(notionOAuth, codeFrom(responseUrl ?? '', state), redirect);
-    return { ...grant, places: await notion.places(grant.token) };
+    return notion.connectWithGrant(grant);
   },
 
-  'notion:disconnect': () => notion.disconnect(),
+  // « Déconnecter »: forgotten here, and the access withdrawn in Notion (Connected apps) too.
+  'notion:disconnect': async () => {
+    const access = await notion.access();
+    const status = await notion.disconnect();
+    if (access?.via === 'oauth' && access.origin === 'extension' && notionOAuth) await revokeAccess(notionOAuth, access.token);
+    return status;
+  },
 
   'notion:sync-all': () => {
     if (sync.appHandlesNotion) throw new Error('L’app Desktop synchronise déjà vos notes avec Notion');
@@ -981,7 +990,7 @@ Object.assign(globalThis, {
     sync,
     session,
     notion,
-    /** The public Notion integration of « Se connecter avec Notion » (the E2E mock sets its own). */
+    /** The public Notion integration of « Connecter Notion » (the E2E mock sets its own). */
     get notionOAuth() {
       return notionOAuth;
     },

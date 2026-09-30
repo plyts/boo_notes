@@ -15,14 +15,20 @@ const compact = (id) => String(id).replace(/-/g, '').toLowerCase();
 export const OAUTH_CLIENT = { clientId: 'client-test', clientSecret: 'client-secret-test' };
 
 export function startMockNotion({ port = 0, token = 'secret_test', log = () => {}, oauth = OAUTH_CLIENT } = {}) {
-  /** Codes of the OAuth consent, until exchanged: their redirect address. */
+  /** Codes of the OAuth consent, until exchanged: their redirect address and the template copied. */
   const codes = new Map();
+  /** The access the API takes (renewed by `expireToken`, withdrawn by a revoke). */
+  let access = token;
+  let refreshCount = 0;
+  const refreshTokens = new Set();
   const state = {
     pages: new Map(),
     databases: new Map(),
     blocks: new Map(),
     uploads: new Map(),
     requests: [],
+    /** Accesses withdrawn through /v1/oauth/revoke. */
+    revoked: [],
     /** Next N requests answer 429 (Retry-After: 0). */
     rateLimitNext: 0,
   };
@@ -330,33 +336,64 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
         if (q.get('client_id') !== oauth.clientId) return reply(400, { error: 'invalid_client' });
         const back = (params) => `${q.get('redirect_uri')}?${new URLSearchParams({ ...params, state: q.get('state') ?? '' })}`;
         const code = randomUUID();
-        codes.set(code, q.get('redirect_uri'));
+        const withTemplate = randomUUID();
+        codes.set(code, { redirect: q.get('redirect_uri'), template: false });
+        codes.set(withTemplate, { redirect: q.get('redirect_uri'), template: true });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Notion — autoriser Boo Notes</title></head><body>
           <h1>Boo Notes souhaite accéder à votre espace Notion</h1>
           <p>Pages partagées : ${[...state.pages.values()].filter((pg) => pg.parent?.type === 'workspace').map((pg) => titleOf(pg.id)).join(', ')}</p>
+          <a id="template" href="${back({ code: withTemplate })}">Utiliser le modèle fourni par Boo Notes</a>
           <a id="allow" href="${back({ code })}">Autoriser l’accès</a> <a id="cancel" href="${back({ error: 'access_denied' })}">Annuler</a>
         </body></html>`);
         return;
       }
+      const clientAuth = `Basic ${Buffer.from(`${oauth.clientId}:${oauth.clientSecret}`).toString('base64')}`;
       if (req.method === 'POST' && url.pathname === '/v1/oauth/token') {
-        const expected = `Basic ${Buffer.from(`${oauth.clientId}:${oauth.clientSecret}`).toString('base64')}`;
-        if (req.headers.authorization !== expected) return reply(401, { error: 'invalid_client', error_description: 'Client authentication failed.' });
-        if (body.grant_type !== 'authorization_code' || !codes.has(body.code) || codes.get(body.code) !== body.redirect_uri)
+        if (req.headers.authorization !== clientAuth) return reply(401, { error: 'invalid_client', error_description: 'Client authentication failed.' });
+        const newRefresh = () => {
+          const r = `refresh-${++refreshCount}`;
+          refreshTokens.add(r);
+          return r;
+        };
+        const answer = (extra = {}) =>
+          reply(200, {
+            access_token: access,
+            refresh_token: newRefresh(),
+            token_type: 'bearer',
+            bot_id: 'bot-1',
+            workspace_id: 'ws-1',
+            workspace_name: 'Espace de test',
+            workspace_icon: null,
+            owner: { type: 'user', user: { object: 'user', id: 'user-1' } },
+            duplicated_template_id: null,
+            ...extra,
+          });
+        if (body.grant_type === 'refresh_token') {
+          if (!refreshTokens.delete(body.refresh_token)) return reply(400, { error: 'invalid_grant', error_description: 'Invalid refresh token.' });
+          return answer();
+        }
+        const granted = codes.get(body.code);
+        if (body.grant_type !== 'authorization_code' || !granted || granted.redirect !== body.redirect_uri)
           return reply(400, { error: 'invalid_grant', error_description: 'Invalid code.' });
         codes.delete(body.code);
-        return reply(200, {
-          access_token: token,
-          token_type: 'bearer',
-          bot_id: 'bot-1',
-          workspace_id: 'ws-1',
-          workspace_name: 'Espace de test',
-          workspace_icon: null,
-          owner: { type: 'user', user: { object: 'user', id: 'user-1' } },
-          duplicated_template_id: null,
-        });
+        let duplicated = null;
+        if (granted.template) {
+          // Notion copies the developer's template page into the workspace.
+          duplicated = randomUUID();
+          seedPage(duplicated, 'Boo Notes');
+        }
+        return answer({ duplicated_template_id: duplicated });
       }
-      if (req.headers.authorization !== `Bearer ${token}`)
+      if (req.method === 'POST' && url.pathname === '/v1/oauth/revoke') {
+        if (req.headers.authorization !== clientAuth) return reply(401, { error: 'invalid_client', error_description: 'Client authentication failed.' });
+        if (body.token === access) {
+          state.revoked.push(access);
+          access = `revoked-${randomUUID()}`;
+        }
+        return reply(200, {});
+      }
+      if (req.headers.authorization !== `Bearer ${access}`)
         return reply(401, { object: 'error', status: 401, code: 'unauthorized', message: 'API token is invalid.' });
       if (!req.headers['notion-version'])
         return reply(400, { object: 'error', status: 400, code: 'missing_version', message: 'Notion-Version header missing' });
@@ -404,6 +441,13 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     state,
     ready,
     seedPage,
+    /** Notion stops taking the current access: a refresh gives the new one. */
+    expireToken() {
+      access = `access-${randomUUID()}`;
+    },
+    get token() {
+      return access;
+    },
     pageContent,
     titleOf,
     get url() {

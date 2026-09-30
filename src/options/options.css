@@ -375,38 +375,6 @@ a.btn[hidden],
 }
 
 /* Notion: the place of the notes table, then the advanced way (an integration secret). */
-.place-choice {
-  margin: 0;
-  border: 0;
-}
-
-.place-list {
-  display: grid;
-  gap: 4px;
-  max-height: 220px;
-  overflow: auto;
-}
-
-.place-list label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.place-list label:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.place-list small {
-  margin-left: auto;
-  color: var(--faint);
-}
-
 details.advanced {
   border-top: 1px solid var(--hairline);
 }

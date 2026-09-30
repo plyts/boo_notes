@@ -32,20 +32,27 @@ Extension (navigateur) ──ws://localhost──► Boo Notes Desktop ──HTT
   quelques secondes après chaque modification. Quand l’application revient, chacune apprend de
   l’autre quelle page Notion correspond à quelle note (identifiant « Boo ID ») : pas de doublon.
 
-## Se connecter avec Notion (1 clic)
+## Connecter Notion : un seul bouton
 
-Dans les **options de l’extension** › Notion, **« Se connecter avec Notion »** :
+Pas de secret, pas de lien à copier : **« Connecter Notion »**, en haut du **panneau de notes**
+(à côté du badge de l’app Desktop), ou dans les **options** › Notion.
 
-1. la fenêtre de Notion s’ouvre (comme « Se connecter avec Google ») : connectez-vous si besoin,
-   choisissez l’espace de travail et les **pages auxquelles Boo Notes aura accès**, puis
-   **Autoriser l’accès** ;
-2. de retour dans les options, choisissez la page où créer le tableau (« Mes cours »…) et
-   **Créer le tableau ici** — rien à choisir si un tableau « Boo Notes — Mes notes » existe déjà
-   ou si une seule page est partagée.
+1. La fenêtre de Notion s’ouvre, comme « Se connecter avec Google » : connectez-vous si besoin,
+   choisissez **« Utiliser le modèle fourni par Boo Notes »** (ou cochez une page), puis
+   **« Autoriser l’accès »**.
+2. C’est tout. Boo Notes choisit seul où ranger le tableau « Boo Notes — Mes notes » : le tableau
+   d’une connexion précédente s’il existe, sinon la page du modèle, sinon la page partagée qui
+   parle de cours ou de notes, sinon la première. Le tableau est créé, **toutes les notes déjà
+   prises y sont envoyées**, puis chaque note au fil de l’eau.
 
-L’option indique « Connecté avec votre compte Notion · *votre espace* ». Rien à copier, aucun
-secret à manipuler ; « Déconnecter » l’oublie, et l’accès se retire aussi côté Notion
-(Paramètres › Connexions).
+Le bouton devient **« Notion »** (vert : les notes partent ; orange : un problème, expliqué au
+survol). Un clic dessus : **Ouvrir mon tableau Notion**, **Déconnecter Notion**.
+
+- **Déconnecter Notion** oublie la connexion *et* retire l’accès de Boo Notes dans Notion
+  (plus besoin d’aller dans Paramètres › Connexions). Les pages déjà créées restent.
+- **Accès expiré** : renouvelé automatiquement, sans rien demander.
+- **Reconnecter** : même bouton, même fenêtre ; le tableau existant est retrouvé (pas de doublon).
+- Si l’app Desktop partage sa connexion Notion, le bouton l’indique (« Géré par l’app Desktop »).
 
 ### Pour le développeur : activer le bouton (une fois)
 
@@ -55,9 +62,11 @@ tout est décrit dans [`tools/notion-oauth/README.md`](../tools/notion-oauth/REA
 
 1. intégration **publique** sur [notion.so/profile/integrations](https://www.notion.so/profile/integrations),
    adresse de redirection `https://<id-de-l’extension>.chromiumapp.org/notion` (affichée dans les
-   options tant que le bouton n’est pas activé) ;
+   options tant que le bouton n’est pas activé), et — recommandé — un **modèle** : l’adresse d’une
+   page Notion publique « Boo Notes » que Notion copie chez l’utilisateur pendant le consentement ;
 2. `npx wrangler deploy` dans `tools/notion-oauth`, puis `wrangler secret put NOTION_CLIENT_ID` et
-   `NOTION_CLIENT_SECRET` ;
+   `NOTION_CLIENT_SECRET` (il échange le code, renouvelle l’accès expiré et le retire à la
+   déconnexion) ;
 3. `notion-oauth.json` à la racine du projet — `{ "clientId": "…", "exchangeUrl": "https://…workers.dev/token" }`
    (ou `BOO_NOTION_CLIENT_ID` / `BOO_NOTION_OAUTH_URL`) — puis `npm run build`.
 
@@ -67,7 +76,7 @@ ci-dessous reste disponible.
 ## Avec un secret d’intégration (avancé, 2 minutes)
 
 Pour l’application Desktop, ou dans les options de l’extension › Notion › « Méthode avancée : avec
-un secret d’intégration » :
+un secret d’intégration » (« Connecter avec ce secret ») :
 
 1. **Créez une intégration interne.** [notion.so › Paramètres › Intégrations](https://www.notion.so/profile/integrations),
    « Nouvelle intégration », type **Interne**. Capacités : *Lire*, *Mettre à jour* et *Insérer du

@@ -15,10 +15,13 @@ export interface MockNotion {
     uploads: Map<string, Record<string, any>>;
     requests: Array<{ method: string; path: string; body: any }>;
     rateLimitNext: number;
+    revoked: string[];
   };
   ready: Promise<void>;
   readonly url: string;
   seedPage(id: string, title: string): void;
+  expireToken(): void;
+  readonly token: string;
   pageContent(pageId: string): MockBlockView[] | null;
   titleOf(pageId: string): string;
   close(): Promise<void>;

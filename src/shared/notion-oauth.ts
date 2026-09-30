@@ -1,5 +1,5 @@
 /**
- * « Se connecter avec Notion »: Notion's own consent window (the public
+ * « Connecter Notion »: Notion's own consent window (the public
  * integration of Boo Notes, OAuth), no secret to copy. The code it gives
  * back is exchanged for the access token by a small server holding the
  * client secret (tools/notion-oauth), which keeps nothing.
@@ -51,17 +51,63 @@ export interface NotionGrant {
   token: string;
   workspace: string | null;
   refreshToken?: string;
+  /** The page of Boo Notes' template, copied into the workspace when chosen in the consent window. */
+  templatePageId?: string;
+}
+
+type TokenResponse = {
+  access_token?: string;
+  workspace_name?: string;
+  refresh_token?: string;
+  duplicated_template_id?: string | null;
+  error?: string;
+  error_description?: string;
+};
+
+/** The other addresses of the exchange server, next to `/token`: `/refresh`, `/revoke`. */
+export function exchangeEndpoint(cfg: NotionOAuthConfig, name: 'refresh' | 'revoke'): string {
+  return new URL(name, cfg.exchangeUrl).href;
+}
+
+async function post(url: string, body: unknown, signal?: AbortSignal): Promise<{ res: Response; data: TokenResponse }> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+  } catch (e) {
+    throw new Error(`serveur de connexion Notion injoignable (${e instanceof Error ? e.message : String(e)})`);
+  }
+  return { res, data: (await res.json().catch(() => ({}))) as TokenResponse };
+}
+
+function grantOf(res: Response, data: TokenResponse): NotionGrant {
+  if (!res.ok || !data.access_token) throw new Error(`Notion n’a pas donné d’accès${data.error_description || data.error ? ` (${data.error_description ?? data.error})` : ''}`);
+  return {
+    token: data.access_token,
+    workspace: data.workspace_name ?? null,
+    ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+    ...(data.duplicated_template_id ? { templatePageId: data.duplicated_template_id } : {}),
+  };
 }
 
 /** The code exchanged for the access token, by the exchange server. */
 export async function exchangeCode(cfg: NotionOAuthConfig, code: string, redirectUri: string): Promise<NotionGrant> {
-  let res: Response;
+  const { res, data } = await post(cfg.exchangeUrl, { code, redirect_uri: redirectUri });
+  return grantOf(res, data);
+}
+
+/** A new access when Notion no longer takes the current one. */
+export async function refreshAccess(cfg: NotionOAuthConfig, refreshToken: string): Promise<NotionGrant> {
+  const { res, data } = await post(exchangeEndpoint(cfg, 'refresh'), { refresh_token: refreshToken });
+  return grantOf(res, data);
+}
+
+/** « Déconnecter »: the access withdrawn on Notion's side too (true when Notion confirmed it). */
+export async function revokeAccess(cfg: NotionOAuthConfig, token: string): Promise<boolean> {
   try {
-    res = await fetch(cfg.exchangeUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, redirect_uri: redirectUri }) });
-  } catch (e) {
-    throw new Error(`serveur de connexion Notion injoignable (${e instanceof Error ? e.message : String(e)})`);
+    // Never holds « Déconnecter » up for long: already forgotten here.
+    const { res } = await post(exchangeEndpoint(cfg, 'revoke'), { token }, AbortSignal.timeout(8000));
+    return res.ok;
+  } catch {
+    return false;
   }
-  const data = (await res.json().catch(() => ({}))) as { access_token?: string; workspace_name?: string; refresh_token?: string; error?: string; error_description?: string };
-  if (!res.ok || !data.access_token) throw new Error(`Notion n’a pas donné d’accès${data.error_description || data.error ? ` (${data.error_description ?? data.error})` : ''}`);
-  return { token: data.access_token, workspace: data.workspace_name ?? null, ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}) };
 }

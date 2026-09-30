@@ -1,7 +1,10 @@
-// « Se connecter avec Notion » — the only server Boo Notes needs, and only for this: it
+// « Connecter Notion » — the only server Boo Notes needs, and only for this: it
 // holds the client secret of the public Notion integration (which must never be in the
 // extension, where anyone could read it) and exchanges the code of the consent for the
 // access token. It keeps nothing: the token goes straight back to the extension.
+//   POST /token    { code, redirect_uri }  the consent's code → the access
+//   POST /refresh  { refresh_token }       a new access when Notion no longer takes the current one
+//   POST /revoke   { token }               « Déconnecter »: the access withdrawn in Notion too
 //
 // A Cloudflare Worker (free plan is plenty); see README.md next to it. Settings:
 //   NOTION_CLIENT_ID, NOTION_CLIENT_SECRET   the public integration (notion.so/profile/integrations)
@@ -30,7 +33,7 @@ export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(request) });
     const url = new URL(request.url);
-    if (request.method !== 'POST' || (url.pathname !== '/token' && url.pathname !== '/refresh')) return json(request, 404, { error: 'not_found' });
+    if (request.method !== 'POST' || !['/token', '/refresh', '/revoke'].includes(url.pathname)) return json(request, 404, { error: 'not_found' });
     if (!env.NOTION_CLIENT_ID || !env.NOTION_CLIENT_SECRET) return json(request, 500, { error: 'server_not_configured', error_description: 'NOTION_CLIENT_ID / NOTION_CLIENT_SECRET missing.' });
     let body;
     try {
@@ -39,7 +42,12 @@ export default {
       return json(request, 400, { error: 'invalid_request' });
     }
     let grant;
-    if (url.pathname === '/token') {
+    let endpoint = '/v1/oauth/token';
+    if (url.pathname === '/revoke') {
+      if (typeof body.token !== 'string' || !body.token) return json(request, 400, { error: 'invalid_request' });
+      endpoint = '/v1/oauth/revoke';
+      grant = { token: body.token };
+    } else if (url.pathname === '/token') {
       const redirect = REDIRECT.exec(String(body.redirect_uri ?? ''));
       const allowed = String(env.ALLOWED_EXTENSIONS ?? '')
         .split(',')
@@ -52,7 +60,7 @@ export default {
       if (typeof body.refresh_token !== 'string' || !body.refresh_token) return json(request, 400, { error: 'invalid_request' });
       grant = { grant_type: 'refresh_token', refresh_token: body.refresh_token };
     }
-    const res = await fetch(`${env.NOTION_API ?? 'https://api.notion.com'}/v1/oauth/token`, {
+    const res = await fetch(`${env.NOTION_API ?? 'https://api.notion.com'}${endpoint}`, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${btoa(`${env.NOTION_CLIENT_ID}:${env.NOTION_CLIENT_SECRET}`)}`,

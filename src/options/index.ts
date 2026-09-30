@@ -209,79 +209,36 @@ function renderNotion(status: NotionStatus | undefined): void {
   open.hidden = !status?.databaseUrl;
   if (status?.databaseUrl) open.href = status.databaseUrl;
   for (const id of ['notion-oauth', 'notion-advanced']) (document.getElementById(id) as HTMLElement).hidden = configured;
-  if (configured) (document.getElementById('notion-place') as HTMLElement).hidden = true;
   (document.getElementById('notion-actions') as HTMLElement).hidden = !configured;
   // A connection shared by the app is managed there.
   (document.getElementById('notion-disconnect-row') as HTMLElement).hidden = status?.origin === 'desktop';
 }
 
 /**
- * « Se connecter avec Notion »: Notion's consent window, then the page that
- * will hold the notes table (straight to it when there is only one, or the
- * table of a former connection).
+ * « Connecter Notion »: one button. Notion's consent window; the service
+ * worker does the rest (the page of the table, the table, the notes).
  */
 async function setUpNotionOAuth(): Promise<void> {
   const info = await callBackground({ type: 'notion:oauth-info' }).catch(() => ({ available: false, redirectUri: '' }));
   const button = document.getElementById('notion-oauth-btn') as HTMLButtonElement;
-  const advanced = document.getElementById('notion-advanced') as HTMLDetailsElement;
-  const placeForm = document.getElementById('notion-place') as HTMLFormElement;
   if (!info.available) {
     button.disabled = true;
     (document.getElementById('notion-oauth-desc') as HTMLElement).textContent =
       `La connexion en un clic n’est pas encore configurée dans cette installation de Boo Notes (voir docs/NOTION.md) : utilisez la méthode avancée ci-dessous.${info.redirectUri ? ` Adresse de retour à déclarer dans l’intégration Notion : ${info.redirectUri}` : ''}`;
-    advanced.open = true;
+    (document.getElementById('notion-advanced') as HTMLDetailsElement).open = true;
   }
-  let grant: { token: string; refreshToken?: string } | null = null;
-  const connectTo = async (target: string) => {
-    if (!grant) return;
-    renderNotion(await callBackground({ type: 'notion:connect', token: grant.token, target, via: 'oauth', ...(grant.refreshToken ? { refreshToken: grant.refreshToken } : {}) }));
-    grant = null;
-    placeForm.hidden = true;
-    flashSaved('Notion connecté : vos notes y seront écrites');
-  };
   button.addEventListener('click', async () => {
     button.disabled = true;
-    button.textContent = 'Fenêtre Notion ouverte…';
+    button.textContent = 'Connexion…';
     try {
       const res = await callBackground({ type: 'notion:oauth' });
-      grant = res;
-      if (!res.places.length) throw new Error('aucune page partagée avec Boo Notes : recommencez en cochant la page qui accueillera vos notes');
-      // The table of a former connection, or a single page: straight to it.
-      const table = res.places.find((pl) => pl.kind === 'database');
-      if (table || res.places.length === 1) {
-        await connectTo((table ?? res.places[0]).id);
-        return;
-      }
-      const list = document.getElementById('notion-place-list') as HTMLElement;
-      list.replaceChildren(
-        ...res.places.map((pl, i) => {
-          const radio = h('input', { type: 'radio', name: 'notionPlace', value: pl.id });
-          radio.checked = i === 0;
-          return h('label', {}, radio, h('span', {}, `${pl.icon ? `${pl.icon} ` : ''}${pl.title}`));
-        }),
-      );
-      placeForm.hidden = false;
-      (list.querySelector('input') as HTMLInputElement | null)?.focus();
+      renderNotion(res);
+      flashSaved(`Notion connecté : vos notes vont dans le tableau « Boo Notes — Mes notes » (page « ${res.place} »)`);
     } catch (e) {
-      grant = null;
       flashSaved(e instanceof Error ? e.message : String(e), false);
     } finally {
       button.disabled = !info.available;
-      button.textContent = 'Se connecter avec Notion';
-    }
-  });
-  placeForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const picked = placeForm.querySelector<HTMLInputElement>('input[name="notionPlace"]:checked');
-    if (!picked) return;
-    const submit = document.getElementById('notion-place-btn') as HTMLButtonElement;
-    submit.disabled = true;
-    try {
-      await connectTo(picked.value);
-    } catch (err) {
-      flashSaved(err instanceof Error ? err.message : String(err), false);
-    } finally {
-      submit.disabled = false;
+      button.textContent = 'Connecter Notion';
     }
   });
 }
@@ -690,7 +647,7 @@ async function main(): Promise<void> {
       flashSaved(err instanceof Error ? err.message : String(err), false);
     } finally {
       button.disabled = false;
-      button.textContent = 'Connecter Notion';
+      button.textContent = 'Connecter avec ce secret';
     }
   });
   document.getElementById('notion-disconnect')?.addEventListener('click', async () => {

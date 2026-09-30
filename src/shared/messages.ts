@@ -38,8 +38,7 @@ export const HIDDEN_SITE = '*';
 
 export type ExportTarget = 'desktop' | 'notion' | 'download' | 'pdf';
 
-/** Notion as seen by the extension: through the desktop app, or directly (app closed). */
-/** A place the notes table can go (« Se connecter avec Notion »): a page shared, or the table of a former connection. */
+/** A place the notes table can go (« Connecter Notion »): a page shared, or the table of a former connection. */
 export interface NotionPlace {
   id: string;
   kind: 'page' | 'database';
@@ -47,12 +46,13 @@ export interface NotionPlace {
   icon?: string;
 }
 
+/** Notion as seen by the extension: through the desktop app, or directly (app closed). */
 export interface NotionStatus {
   /** The extension can write to Notion itself. */
   configured: boolean;
   /** Where the connection comes from: shared by the desktop app, or set in the options. */
   origin: 'desktop' | 'extension' | null;
-  /** Connected by Notion's consent (« Se connecter avec Notion »), or with an integration secret. */
+  /** Connected by Notion's consent (« Connecter Notion »), or with an integration secret. */
   via?: 'oauth' | 'secret' | null;
   workspace: string | null;
   databaseUrl: string | null;
@@ -242,9 +242,9 @@ export type BackgroundRequest =
   | { type: 'wiki:open'; title: string }
   | { type: 'notion:status' }
   | { type: 'notion:connect'; token: string; target: string; via?: 'oauth' | 'secret'; refreshToken?: string }
-  /** Whether « Se connecter avec Notion » is set up in this build, and the address Notion sends back to. */
+  /** Whether « Connecter Notion » is set up in this build, and the address Notion sends back to. */
   | { type: 'notion:oauth-info' }
-  /** « Se connecter avec Notion »: Notion's consent window, then the places the notes table can go. */
+  /** « Connecter Notion »: Notion's consent window, then everything else (the page of the table, the table, the notes). */
   | { type: 'notion:oauth' }
   | { type: 'notion:disconnect' }
   | { type: 'notion:sync-all' }
@@ -329,7 +329,8 @@ export interface BackgroundResponses {
   'notion:status': NotionStatus;
   'notion:connect': NotionStatus;
   'notion:oauth-info': { available: boolean; redirectUri: string };
-  'notion:oauth': { token: string; workspace: string | null; refreshToken?: string; places: NotionPlace[] };
+  /** Connected: the status, and the Notion page that holds the notes table. */
+  'notion:oauth': NotionStatus & { place: string };
   'notion:disconnect': NotionStatus;
   'notion:sync-all': { ok: number; failed: number };
   'transcript:put': { stored: boolean };

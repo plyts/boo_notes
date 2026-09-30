@@ -329,7 +329,7 @@
           <header class="group-head">
             <h2 id="h-notion">Notion</h2>
             <p>
-              Toutes vos notes rejoignent un tableau « Boo Notes — Mes notes » dans la page Notion de votre choix, une page
+              Toutes vos notes rejoignent un tableau « Boo Notes — Mes notes » dans votre Notion, une page
               par note, reliées entre elles par vos [[liens]]. Quand l’application Desktop est lancée, c’est elle qui écrit
               dans Notion ; sinon, l’extension s’en charge.
             </p>
@@ -346,25 +346,15 @@
             <div class="rows inset" id="notion-oauth">
               <div class="row">
                 <span class="row-text">
-                  <span class="row-label">Se connecter avec Notion</span>
+                  <span class="row-label">Connecter Notion</span>
                   <span class="row-desc" id="notion-oauth-desc">
-                    Une fenêtre Notion s’ouvre : connectez-vous, cochez la page qui accueillera vos notes, puis « Autoriser
-                    l’accès ». Rien à copier.
+                    Un clic : la fenêtre de Notion s’ouvre, choisissez « Utiliser le modèle » (ou une page), puis « Autoriser
+                    l’accès ». Boo Notes fait le reste : le tableau de vos notes est créé et vos notes y sont envoyées.
                   </span>
                 </span>
-                <button type="button" class="btn primary" id="notion-oauth-btn">Se connecter avec Notion</button>
+                <button type="button" class="btn primary" id="notion-oauth-btn">Connecter Notion</button>
               </div>
             </div>
-            <form class="rows inset" id="notion-place" hidden>
-              <fieldset class="row stacked place-choice">
-                <legend class="row-label">Où créer le tableau « Boo Notes — Mes notes » ?</legend>
-                <div id="notion-place-list" class="place-list" role="radiogroup"></div>
-              </fieldset>
-              <div class="row">
-                <span class="row-text"><span class="row-desc">Le tableau y sera ajouté ; une page par note ensuite.</span></span>
-                <button type="submit" class="btn primary" id="notion-place-btn">Créer le tableau ici</button>
-              </div>
-            </form>
             <details class="advanced" id="notion-advanced">
               <summary>Méthode avancée : avec un secret d’intégration</summary>
               <form class="rows inset" id="notion-form">
@@ -380,7 +370,7 @@
                 </div>
                 <div class="row">
                   <span class="row-text"><span class="row-desc" id="notion-hint">Ou lancez l’app Desktop : elle partage sa connexion Notion avec l’extension.</span></span>
-                  <button type="submit" class="btn" id="notion-connect">Connecter Notion</button>
+                  <button type="submit" class="btn" id="notion-connect">Connecter avec ce secret</button>
                 </div>
               </form>
             </details>
@@ -394,10 +384,10 @@
               </div>
               <div class="row" id="notion-disconnect-row">
                 <span class="row-text">
-                  <span class="row-label">Déconnecter</span>
-                  <span class="row-desc">Les pages déjà créées restent dans Notion.</span>
+                  <span class="row-label">Déconnecter Notion</span>
+                  <span class="row-desc">Boo Notes n’a plus accès à votre Notion ; les pages déjà créées y restent.</span>
                 </span>
-                <button type="button" id="notion-disconnect" class="btn danger">Déconnecter</button>
+                <button type="button" id="notion-disconnect" class="btn danger">Déconnecter Notion</button>
               </div>
             </div>
           </div>

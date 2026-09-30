@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ExtensionNotion, noteToSyncItem } from '../../src/background/notion';
-import type { NotionStatus } from '../../src/shared/messages';
+import { ExtensionNotion, noteToSyncItem, pickPlace } from '../../src/background/notion';
+import type { NotionPlace, NotionStatus } from '../../src/shared/messages';
 import { NoteStore } from '../../src/shared/store';
 import { TranscriptStore } from '../../src/shared/transcript-store';
 import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../tools/mock-notion/server.mjs';
@@ -200,5 +200,23 @@ describe('ExtensionNotion (direct sync, desktop app closed)', () => {
     const status = await fresh.status();
     expect(status.pending).toBe(1);
     expect(status.lastError).toBeTruthy();
+  });
+});
+
+describe('« Connecter Notion » : la page du tableau, sans rien demander', () => {
+  const page = (id: string, title: string): NotionPlace => ({ id, kind: 'page', title });
+
+  it('le tableau d’une connexion précédente d’abord, puis la page du modèle', () => {
+    const table: NotionPlace = { id: 'db', kind: 'database', title: 'Boo Notes — Mes notes' };
+    expect(pickPlace([page('a', 'Journal'), table], 'tpl')).toBe(table);
+    expect(pickPlace([page('a', 'Journal'), page('1234-5678', 'Boo Notes')], '12345678')?.id).toBe('1234-5678');
+    // The copy of the template not yet found by the search: its id is enough.
+    expect(pickPlace([page('a', 'Journal')], 'tpl')).toEqual({ id: 'tpl', kind: 'page', title: 'Boo Notes' });
+  });
+
+  it('sinon la page qui parle de cours ou de notes, sinon la première', () => {
+    expect(pickPlace([page('a', 'Journal'), page('b', 'Mes cours de maths')])?.id).toBe('b');
+    expect(pickPlace([page('a', 'Journal'), page('b', 'Recettes')])?.id).toBe('a');
+    expect(pickPlace([])).toBeNull();
   });
 });

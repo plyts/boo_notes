@@ -121,6 +121,7 @@ button {
 }
 
 .toolbar {
+  container: toolbar / inline-size;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -165,6 +166,122 @@ button {
 .status[data-state='connecting'] .status-dot {
   background: var(--faint);
   animation: pulse 0.9s ease-in-out infinite alternate;
+}
+
+/* Notion: an invitation to connect, then a calm badge like the one of the app. */
+.notion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-s);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur) ease;
+}
+
+.notion-chip:hover {
+  filter: brightness(0.97);
+}
+
+.notion-chip svg {
+  flex: none;
+}
+
+.notion-chip .status-dot,
+.notion-chip .notion-short {
+  display: none;
+}
+
+.notion-chip:not([data-state='off']) {
+  color: inherit;
+}
+
+.notion-chip:not([data-state='off']) svg {
+  display: none;
+}
+
+.notion-chip:not([data-state='off']) .status-dot {
+  display: block;
+}
+
+.notion-chip[data-state='on'] {
+  background: var(--ok-soft);
+}
+
+.notion-chip[data-state='on'] .status-dot {
+  background: var(--ok);
+}
+
+.notion-chip[data-state='error'] {
+  background: var(--warn-soft);
+}
+
+.notion-chip[data-state='connecting'] {
+  background: var(--surface-2);
+}
+
+.notion-chip[data-state='connecting'] .status-dot {
+  background: var(--faint);
+  animation: pulse 0.9s ease-in-out infinite alternate;
+}
+
+/* Narrow notes: the app's badge keeps its dot, Notion its short name. */
+@container toolbar (max-width: 380px) {
+  .status:not([data-state='connected']) .status-label {
+    display: none;
+  }
+
+  .status:not([data-state='connected']) {
+    padding: 0 8px;
+  }
+
+  .status[data-state='connected'] ~ .notion-chip .notion-long {
+    display: none;
+  }
+
+  .status[data-state='connected'] ~ .notion-chip .notion-short {
+    display: inline;
+  }
+}
+
+/* Recording: its REC badge takes the room of the long name. */
+.toolbar:has(.rec-pill:not([hidden])) .notion-chip .notion-long {
+  display: none;
+}
+
+.toolbar:has(.rec-pill:not([hidden])) .notion-chip .notion-short {
+  display: inline;
+}
+
+@container toolbar (max-width: 300px) {
+  .notion-chip .notion-long {
+    display: none;
+  }
+
+  .notion-chip .notion-short {
+    display: inline;
+  }
+}
+
+.notion-menu {
+  right: auto;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  transform-origin: top left;
+}
+
+.notion-menu .notion-error {
+  margin: 0 10px 6px;
+  color: var(--warn);
+  font-size: var(--text-xs);
 }
 
 @keyframes pulse {

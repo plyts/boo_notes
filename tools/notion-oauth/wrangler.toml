@@ -1,4 +1,4 @@
-# The exchange of « Se connecter avec Notion », as a Cloudflare Worker (see README.md).
+# The exchange of « Connecter Notion », as a Cloudflare Worker (see README.md).
 name = "boo-notes-notion"
 main = "worker.mjs"
 compatibility_date = "2025-01-01"

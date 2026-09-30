@@ -279,10 +279,11 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
 - Notion : seule permission d’hôte ajoutée, `https://api.notion.com/*` (l’API n’accepte pas les
   requêtes CORS des pages). Le secret n’est lu que par le service worker ; les sites n’ont pas accès à
   `chrome.storage` de l’extension.
-- « Se connecter avec Notion » : permission `identity` (`chrome.identity.launchWebAuthFlow`, retour sur
+- « Connecter Notion » : permission `identity` (`chrome.identity.launchWebAuthFlow`, retour sur
   `https://<id>.chromiumapp.org/notion`, paramètre `state` vérifié). Le *client secret* de
-  l’intégration publique n’est jamais dans l’extension : le code de consentement est échangé par
-  `tools/notion-oauth/worker.mjs` (Cloudflare Worker), qui n’accepte qu’une adresse de retour
+  l’intégration publique n’est jamais dans l’extension : `tools/notion-oauth/worker.mjs`
+  (Cloudflare Worker) échange le code (`/token`), renouvelle un accès expiré (`/refresh`, sur une
+  réponse 401) et le retire à la déconnexion (`/revoke`) ; il n’accepte qu’une adresse de retour
   `chromiumapp.org` (liste d’extensions autorisées possible) et ne conserve rien.
 - Les icônes sont construites en DOM (pas d’`innerHTML`), compatible Trusted Types (YouTube).
 - `media-bridge.js` s’exécute dans le monde de la page mais ne lit ni n’envoie rien : il déplace

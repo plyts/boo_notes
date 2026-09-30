@@ -111,7 +111,38 @@ export interface ExtensionNotionOptions {
   /** Delay before writing a changed note (ms). */
   debounceMs?: number;
   clientOptions?: Partial<NotionClientOptions>;
+  /** OAuth: a new access when Notion no longer takes the current one (null: impossible). */
+  renewAccess?(refreshToken: string): Promise<{ token: string; refreshToken?: string } | null>;
 }
+
+/** Notion's consent, as given back by the exchange server. */
+export interface NotionGrantLike {
+  token: string;
+  refreshToken?: string;
+  /** Boo Notes' template page, copied into the workspace during the consent. */
+  templatePageId?: string;
+}
+
+const PLACE_HINT = /boo\s*notes|cours|notes|études|etudes|révision|revision/i;
+
+/**
+ * Where the notes table goes, without asking: the table of a former
+ * connection, else the page of Boo Notes' template, else the page shared
+ * whose name speaks of notes or courses, else the first one shared (the top
+ * of the workspace first).
+ */
+export function pickPlace(places: NotionPlace[], templatePageId?: string): NotionPlace | null {
+  const table = places.find((p) => p.kind === 'database');
+  if (table) return table;
+  if (templatePageId) {
+    const bare = templatePageId.replace(/-/g, '');
+    return places.find((p) => p.id.replace(/-/g, '') === bare) ?? { id: templatePageId, kind: 'page', title: 'Boo Notes' };
+  }
+  const pages = places.filter((p) => p.kind === 'page');
+  return pages.find((p) => PLACE_HINT.test(p.title)) ?? pages[0] ?? null;
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class ExtensionNotion {
   readonly engine: NotionEngine;
@@ -121,6 +152,7 @@ export class ExtensionNotion {
   private flushing: Promise<void> | null = null;
   private syncing = false;
   private queue: Promise<unknown> = Promise.resolve();
+  private renewing: Promise<boolean> | null = null;
   /** Test hook: Notion API of the E2E mock. */
   apiBase: string | undefined;
 
@@ -303,6 +335,59 @@ export class ExtensionNotion {
     return this.status();
   }
 
+  /**
+   * « Connecter Notion », all in one: the page of the notes table chosen
+   * without asking (see pickPlace), the table created there, then every
+   * note of this browser written to it.
+   */
+  async connectWithGrant(grant: NotionGrantLike): Promise<NotionStatus & { place: string }> {
+    const places = await this.places(grant.token);
+    const place = pickPlace(places, grant.templatePageId);
+    if (!place) throw new Error('aucune page Notion n’a été partagée : recommencez et choisissez « Utiliser le modèle » ou cochez une page dans la fenêtre Notion');
+    const access = { via: 'oauth' as const, ...(grant.refreshToken ? { refreshToken: grant.refreshToken } : {}) };
+    let status: NotionStatus | null = null;
+    // Notion copies the template in the background: its page may take a moment to be reachable.
+    for (let attempt = 0; !status; attempt++) {
+      try {
+        status = await this.connect(grant.token, place.id, access);
+      } catch (e) {
+        if (place.kind !== 'page' || !grant.templatePageId || attempt >= 5 || !/introuvable|not.?found/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        await pause(1000 * (attempt + 1));
+      }
+    }
+    await this.enqueueAll();
+    return { ...status, place: place.title };
+  }
+
+  /** The access in use, for « Déconnecter » to withdraw it in Notion too. */
+  async access(): Promise<{ token: string; via: 'oauth' | 'secret'; origin: 'desktop' | 'extension' } | null> {
+    await this.load();
+    return this.config ? { token: this.config.token, via: this.config.via ?? 'secret', origin: this.config.origin } : null;
+  }
+
+  /** Every note of this browser, to be written (a new connection). */
+  async enqueueAll(): Promise<void> {
+    const ids = Object.keys(await this.opts.store.listNotes());
+    if (!ids.length || !(await this.isConfigured())) return;
+    await this.exclusive(async () => {
+      const res = await this.opts.area.get(PENDING_KEY);
+      const pending = (res[PENDING_KEY] as Pending | undefined) ?? {};
+      for (const id of ids) pending[id] = { kind: 'content', at: stamp() };
+      await this.opts.area.set({ [PENDING_KEY]: pending });
+    });
+    this.schedule();
+    await this.emit();
+  }
+
+  /** What went wrong, said for who connected: without a word of « secret » after « Connecter Notion ». */
+  private explain(e: unknown): string {
+    if (this.config?.via === 'oauth' && e instanceof NotionError) {
+      if (e.isUnauthorized) return 'Boo Notes n’a plus accès à votre Notion : reconnectez Notion (bouton « Notion » › Reconnecter Notion)';
+      if (e.status === 403 || e.isNotFound) return 'Le tableau Boo Notes n’est plus accessible dans Notion : reconnectez Notion (bouton « Notion » › Reconnecter Notion)';
+    }
+    return explainNotionError(e);
+  }
+
   async disconnect(): Promise<NotionStatus> {
     await this.load();
     this.config = null;
@@ -407,6 +492,46 @@ export class ExtensionNotion {
     return out;
   }
 
+  /**
+   * OAuth: Notion no longer takes the access (expired): a new one, asked
+   * once for every sync that ran into it.
+   */
+  private renew(e: unknown, used: string): Promise<boolean> {
+    if (!(e instanceof NotionError) || e.status !== 401) return Promise.resolve(false);
+    const cfg = this.config;
+    if (!cfg || cfg.via !== 'oauth') return Promise.resolve(false);
+    // Already renewed by another sync meanwhile.
+    if (cfg.token !== used) return Promise.resolve(true);
+    const refreshToken = cfg.refreshToken;
+    const renewAccess = this.opts.renewAccess;
+    if (!refreshToken || !renewAccess) return Promise.resolve(false);
+    this.renewing ??= (async () => {
+      try {
+        const next = await renewAccess(refreshToken);
+        if (!next || !this.config || this.config.token !== used) return false;
+        this.config = { ...this.config, token: next.token, refreshToken: next.refreshToken ?? refreshToken };
+        await this.opts.area.set({ [CONFIG_KEY]: this.config });
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      this.renewing = null;
+    });
+    return this.renewing;
+  }
+
+  /** A call to Notion, again with a renewed access if it had expired. */
+  private async withAccess<T>(fn: () => Promise<T>): Promise<T> {
+    const used = this.config?.token ?? '';
+    try {
+      return await fn();
+    } catch (e) {
+      if (await this.renew(e, used)) return fn();
+      throw e;
+    }
+  }
+
   async hasPending(): Promise<boolean> {
     const res = await this.opts.area.get(PENDING_KEY);
     return Object.keys((res[PENDING_KEY] as Pending | undefined) ?? {}).length > 0;
@@ -445,13 +570,13 @@ export class ExtensionNotion {
     try {
       for (const id of ids) {
         try {
-          if (pending[id].kind === 'progress' && (await this.link(id))) await this.engine.syncProperties(id);
-          else await this.engine.syncItem(id);
+          if (pending[id].kind === 'progress' && (await this.link(id))) await this.withAccess(() => this.engine.syncProperties(id));
+          else await this.withAccess(() => this.engine.syncItem(id));
           await this.done(id, pending[id].at);
           await this.setState({ lastSyncAt: Date.now(), lastError: null });
           this.opts.onLinked?.(id);
         } catch (e) {
-          await this.setState({ lastError: explainNotionError(e) });
+          await this.setState({ lastError: this.explain(e) });
           // Bad secret, page no longer shared…: the others would fail the same way.
           if (e instanceof NotionError && (e.status === 401 || e.status === 403)) break;
           if (!(e instanceof NotionError)) break; // Offline.
@@ -481,13 +606,13 @@ export class ExtensionNotion {
     await this.emit();
     const started = stamp();
     try {
-      const res = await this.engine.syncItem(noteId);
+      const res = await this.withAccess(() => this.engine.syncItem(noteId));
       await this.done(noteId, started);
       await this.setState({ lastSyncAt: Date.now(), lastError: null });
       this.opts.onLinked?.(noteId);
       return { url: res.url };
     } catch (e) {
-      const message = explainNotionError(e);
+      const message = this.explain(e);
       await this.setState({ lastError: message });
       throw new Error(message);
     } finally {

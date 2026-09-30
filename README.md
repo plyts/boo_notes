@@ -226,8 +226,9 @@ l’ouverture sur les trois plateformes (Udemy et Coursera ne gèrent pas ce fra
 
 ## Notion et Boo Notes Desktop (application séparée)
 
-L’extension fonctionne entièrement hors-ligne. Connectée à Notion (options › Notion ›
-**« Se connecter avec Notion »** : la fenêtre de Notion, « Autoriser », c’est tout), elle écrit
+L’extension fonctionne entièrement hors-ligne. Connectée à Notion (bouton **« Connecter Notion »**
+en haut du panneau de notes ou dans les options : la fenêtre de Notion, « Autoriser », c’est tout ;
+« Déconnecter Notion » au même endroit), elle écrit
 elle-même chaque note dans le tableau de votre page. Si l’application **Boo Notes Desktop** (projet
 séparé) tourne sur la machine, les notes, captures et positions de lecture lui sont envoyées sur
 `ws://localhost:43117` (badge vert) : elles rejoignent sa bibliothèque, et c’est elle qui écrit
@@ -242,7 +243,7 @@ Boo Notes Desktop et écrit les notes en Markdown, l’autre imite l’API Notio
 ```bash
 npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 npm run mock:notion                           # http://127.0.0.1:43118, secret « secret_test »
-npm run mock:notion-oauth                     # échange du code « Se connecter avec Notion » (tools/notion-oauth)
+npm run mock:notion-oauth                     # échange du code « Connecter Notion » (tools/notion-oauth)
 ```
 
 ## Développement
@@ -256,7 +257,7 @@ npm run mock:notion-oauth                     # échange du code « Se connecter
 | `npm run screenshots` | Régénère `docs/screenshots/` |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
 | `npm run mock:desktop` / `npm run mock:notion` | Serveurs simulant Boo Notes Desktop et l’API Notion |
-| `npm run mock:notion-oauth` | Serveur d’échange de « Se connecter avec Notion » en local (à déployer en Cloudflare Worker : `tools/notion-oauth/README.md`) |
+| `npm run mock:notion-oauth` | Serveur d’échange de « Connecter Notion » en local (à déployer en Cloudflare Worker : `tools/notion-oauth/README.md`) |
 
 Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Shift+T` (y compris le
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
@@ -297,7 +298,7 @@ src/
   offscreen/    document hors écran : export PDF
 tools/mock-desktop/   serveur WebSocket simulant l’application Boo Notes Desktop
 tools/mock-notion/    API Notion simulée (tests, développement), fenêtre de consentement OAuth comprise
-tools/notion-oauth/   serveur d’échange de « Se connecter avec Notion » (Cloudflare Worker, garde le client secret)
+tools/notion-oauth/   serveur d’échange de « Connecter Notion » (Cloudflare Worker, garde le client secret)
 tests/unit, tests/e2e
 docs/         architecture, protocole, design, transcription, questions, Notion
 ```
@@ -335,7 +336,7 @@ docs/         architecture, protocole, design, transcription, questions, Notion
   Safari). Le texte des iframes (modules de cours) se cite et se surligne une fois leur site
   autorisé ; un module dessiné en image ou en canvas (certaines diapositives Storyline) ne se
   sélectionne pas : capture et notes restent possibles.
-- **Notion depuis l’extension** : l’accès donné par « Se connecter avec Notion » (ou le secret de
+- **Notion depuis l’extension** : l’accès donné par « Connecter Notion » (ou le secret de
   l’intégration) est conservé dans le stockage local de l’extension ; le bouton demande une
   intégration publique et le serveur d’échange déployés une fois (voir [docs/NOTION.md](docs/NOTION.md)).
 - **Réponses aux questions** : l’IA intégrée de Chrome demande Chrome 138+ sur un ordinateur assez

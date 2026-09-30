@@ -1,4 +1,4 @@
-// The exchange of « Se connecter avec Notion » (worker.mjs) served by Node: tests, and local
+// The exchange of « Connecter Notion » (worker.mjs) served by Node: tests, and local
 // development before deploying it.
 //   NOTION_CLIENT_ID=… NOTION_CLIENT_SECRET=… node tools/notion-oauth/server.mjs [--port 43119]
 import { createServer } from 'node:http';
