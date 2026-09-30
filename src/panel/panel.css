@@ -37,6 +37,8 @@ button {
 .app {
   position: relative;
   display: grid;
+  /* Nothing may widen the panel (a long course name, a long address): too long, it is cut short. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   grid-template-areas: 'header' 'banner' 'editor' 'live' 'footer';
   height: 100%;
@@ -854,6 +856,7 @@ button {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   max-width: 100%;
   height: 22px;
   margin: 4px 0 0 -6px;
@@ -867,6 +870,10 @@ button {
   transition: background var(--dur-fast), color var(--dur-fast);
 }
 
+.place > svg {
+  flex: none;
+}
+
 .place:hover,
 .place:focus-visible {
   background: var(--accent-soft);
@@ -878,14 +885,36 @@ button {
 }
 
 .place-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Course › chapter: each part cut short with « … » (the whole in the tooltip). */
+.place-part {
+  min-width: 2.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.place-part-course {
+  flex: 0 1 auto;
+  max-width: 55%;
+}
+
+.place-sep {
+  flex: none;
+  opacity: 0.7;
+}
+
 .place-menu {
   left: 10px;
   right: auto;
+  max-width: calc(100% - 20px);
   max-height: min(420px, 70vh);
   overflow: auto;
   transform-origin: top left;
@@ -893,9 +922,20 @@ button {
 
 .place-course {
   padding: 8px 10px 2px;
+  overflow: hidden;
   color: var(--text);
   font-weight: 650;
   font-size: var(--text-s);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A long chapter or course name in a menu: one line, cut short. */
+.menu .menu-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu button.place-chapter {

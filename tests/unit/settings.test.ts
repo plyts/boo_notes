@@ -7,9 +7,10 @@ describe('normalizeSettings', () => {
     expect(DEFAULT_SETTINGS.drawerWidth).toBe(360);
   });
 
-  it('clamps the drawer width to 300–500 px', () => {
+  it('clamps the drawer width to 300–960 px', () => {
     expect(normalizeSettings({ drawerWidth: 120 }).drawerWidth).toBe(300);
-    expect(normalizeSettings({ drawerWidth: 900 }).drawerWidth).toBe(500);
+    expect(normalizeSettings({ drawerWidth: 900 }).drawerWidth).toBe(900);
+    expect(normalizeSettings({ drawerWidth: 1600 }).drawerWidth).toBe(960);
     expect(normalizeSettings({ drawerWidth: 421.6 }).drawerWidth).toBe(422);
   });
 

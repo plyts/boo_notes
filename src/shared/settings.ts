@@ -41,7 +41,8 @@ export interface Settings {
 }
 
 export const DRAWER_MIN_WIDTH = 300;
-export const DRAWER_MAX_WIDTH = 500;
+/** As wide as the window allows (see Drawer): long titles, notes beside a small video. */
+export const DRAWER_MAX_WIDTH = 960;
 export const DEFAULT_DESKTOP_URL = 'ws://localhost:43117';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({

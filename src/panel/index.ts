@@ -1208,9 +1208,18 @@ class PanelApp {
     this.placeButton.hidden = !this.ctx || !note;
     const placed = Boolean(note?.course);
     this.placeButton.dataset.placed = String(placed);
+    // Course and chapter each cut short (« … ») when they do not fit: both stay partly readable.
     this.placeButton.replaceChildren(
       icon('course', 13),
-      h('span', { class: 'place-label' }, placed ? `${note!.course} › ${note!.chapter ?? 'Chapitre 1'}` : 'Ranger dans un cours'),
+      placed
+        ? h(
+            'span',
+            { class: 'place-label' },
+            h('span', { class: 'place-part place-part-course' }, note!.course!),
+            h('span', { class: 'place-sep', 'aria-hidden': 'true' }, ' › '),
+            h('span', { class: 'place-part' }, note!.chapter ?? 'Chapitre 1'),
+          )
+        : h('span', { class: 'place-label' }, 'Ranger dans un cours'),
     );
     const label = placed ? `Rangée dans ${note!.course} › ${note!.chapter} (changer)` : 'Ranger cette note dans un cours et un chapitre de la bibliothèque';
     this.placeButton.title = label;
@@ -1247,7 +1256,7 @@ class PanelApp {
         'button',
         { type: 'button', role: 'menuitemradio', 'aria-checked': String(checked), ...extra },
         checked ? icon('check', 14) : h('span', { class: 'menu-check-space' }),
-        h('span', {}, label),
+        h('span', { class: 'menu-text', title: label }, label),
       );
       b.addEventListener('click', () => void this.place(place));
       return b;
@@ -1257,7 +1266,7 @@ class PanelApp {
       children.push(h('p', { class: 'place-empty' }, 'Aucun cours pour l’instant : créez-en un ci-dessous (ou dans l’app Desktop).'));
     }
     for (const c of courses) {
-      children.push(h('div', { class: 'place-course', 'aria-hidden': 'true' }, `${c.emoji ? `${c.emoji} ` : ''}${c.title}`));
+      children.push(h('div', { class: 'place-course', 'aria-hidden': 'true', title: c.title }, `${c.emoji ? `${c.emoji} ` : ''}${c.title}`));
       const chapters = c.chapters.length ? c.chapters : ['Chapitre 1'];
       for (const ch of chapters) children.push(item(ch, { course: c.title, chapter: ch }, { class: 'place-chapter' }));
     }

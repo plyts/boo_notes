@@ -3,6 +3,8 @@ import { DEFAULT_SETTINGS, DRAWER_MAX_WIDTH, DRAWER_MIN_WIDTH, type DrawerLayout
 import { attachStyles } from './overlay';
 
 const DEFAULT_WIDTH = DEFAULT_SETTINGS.drawerWidth;
+/** Room always left to the page beside the notes (and to the grip, to narrow them back). */
+const PAGE_ROOM = 160;
 /** Longest wait for a removed editor to save what was just typed. */
 const RETIRE_MS = 1500;
 
@@ -28,12 +30,18 @@ const CSS = `
 iframe { flex: 1; width: 100%; height: 100%; border: 0; display: block; background: transparent; }
 iframe.retired { display: none; }
 .drawer.resizing iframe { pointer-events: none; }
-.resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 1; touch-action: none; }
+.resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 1; touch-action: none; outline: none; }
 .resize::after {
   content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: #6d5ef0;
   opacity: 0; transition: opacity 0.12s ease;
 }
-.resize:hover::after, .drawer.resizing .resize::after { opacity: 1; }
+/* The grip: always visible, so the notes are seen to be resizable. */
+.resize::before {
+  content: ""; position: absolute; left: 1px; top: 50%; width: 6px; height: 44px; margin-top: -22px; border-radius: 3px;
+  background: rgba(128, 128, 140, 0.55); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); transition: background 0.12s ease;
+}
+.resize:hover::after, .resize:focus-visible::after, .drawer.resizing .resize::after { opacity: 1; }
+.resize:hover::before, .resize:focus-visible::before, .drawer.resizing .resize::before { background: #6d5ef0; }
 /* Overlay layout & fullscreen: a floating card that clearly sits above the page. */
 .drawer.floating {
   top: calc(var(--top, 0px) + 10px); right: 10px; bottom: 10px; border: 0; border-radius: 14px; overflow: hidden;
@@ -42,6 +50,7 @@ iframe.retired { display: none; }
 }
 .drawer.floating.open { transform: none; }
 .drawer.floating .resize { left: 0; }
+.drawer.floating .resize::before { left: 2px; }
 .drawer.floating .resize::after { left: 0; }
 @media (prefers-reduced-motion: reduce) { .drawer, .drawer.open { transition: none; } }
 `;
@@ -63,6 +72,8 @@ export class Drawer {
   private layout: DrawerLayout;
   private fullscreenTarget: Element | null = null;
   private savedMargin: { value: string; priority: string } | null = null;
+  private handle!: HTMLElement;
+  private readonly abort = new AbortController();
 
   constructor(private readonly opts: DrawerOptions) {
     this.width = opts.width;
@@ -71,11 +82,37 @@ export class Drawer {
     this.host.style.cssText = 'all:initial;display:block;position:fixed;top:0;right:0;width:0;height:0;z-index:2147483647;';
     const root = this.host.attachShadow({ mode: 'open' });
     attachStyles(root, CSS);
-    const handle = h('div', { class: 'resize', 'aria-hidden': 'true', title: 'Glisser pour redimensionner · double-clic : largeur par défaut' });
+    const handle = h('div', {
+      class: 'resize',
+      role: 'separator',
+      tabindex: '0',
+      'aria-orientation': 'vertical',
+      'aria-label': 'Largeur des notes',
+      'aria-valuemin': String(DRAWER_MIN_WIDTH),
+      'aria-valuemax': String(DRAWER_MAX_WIDTH),
+      title: 'Glisser pour élargir ou rétrécir les notes · double-clic : largeur par défaut · flèches ← → au clavier',
+    });
     this.panel = h('div', { class: 'drawer', role: 'complementary', 'aria-label': 'Notes Boo Notes' }, handle);
     root.append(this.panel);
+    this.handle = handle;
     this.bindResize(handle);
     this.applyWidth();
+    // A smaller window: the notes narrow with it (their chosen width comes back when it grows).
+    window.addEventListener(
+      'resize',
+      () => {
+        if (this.panel.style.getPropertyValue('--w') === `${this.shown}px`) return;
+        this.applyWidth();
+        this.applyDock();
+      },
+      { signal: this.abort.signal },
+    );
+  }
+
+  /** The width shown: the one chosen, as far as the window leaves room for the page. */
+  private get shown(): number {
+    const room = (window.innerWidth || this.width + PAGE_ROOM) - PAGE_ROOM;
+    return Math.round(Math.max(DRAWER_MIN_WIDTH, Math.min(this.width, room)));
   }
 
   get isOpen(): boolean {
@@ -205,6 +242,7 @@ export class Drawer {
   destroy(): void {
     this.opened = false;
     this.applyDock();
+    this.abort.abort();
     this.host.remove();
   }
 
@@ -234,7 +272,8 @@ export class Drawer {
   }
 
   private applyWidth(): void {
-    this.panel.style.setProperty('--w', `${this.width}px`);
+    this.panel.style.setProperty('--w', `${this.shown}px`);
+    this.handle?.setAttribute('aria-valuenow', String(this.shown));
   }
 
   private applyFloating(): void {
@@ -252,7 +291,7 @@ export class Drawer {
         value: html.style.getPropertyValue('margin-right'),
         priority: html.style.getPropertyPriority('margin-right'),
       };
-      const next = `${this.width}px`;
+      const next = `${this.shown}px`;
       if (html.style.getPropertyValue('margin-right') !== next) {
         html.style.setProperty('margin-right', next, 'important');
         window.dispatchEvent(new Event('resize'));
@@ -272,7 +311,7 @@ export class Drawer {
       if (e.button !== 0) return;
       e.preventDefault();
       startX = e.clientX;
-      startWidth = this.width;
+      startWidth = this.shown;
       handle.setPointerCapture(e.pointerId);
       this.panel.classList.add('resizing');
     });
@@ -293,6 +332,22 @@ export class Drawer {
     // Double-click resets the default width (macOS split-view convention).
     handle.addEventListener('dblclick', () => {
       this.setWidth(DEFAULT_WIDTH);
+      this.opts.onResized(this.width);
+    });
+    // From the keyboard: ← wider, → narrower (Maj: by larger steps), Entrée: the default width.
+    handle.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 80 : 20;
+      const next =
+        e.key === 'ArrowLeft' ? this.shown + step
+        : e.key === 'ArrowRight' ? this.shown - step
+        : e.key === 'Home' ? DRAWER_MIN_WIDTH
+        : e.key === 'End' ? DRAWER_MAX_WIDTH
+        : e.key === 'Enter' ? DEFAULT_WIDTH
+        : null;
+      if (next === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.setWidth(next);
       this.opts.onResized(this.width);
     });
   }

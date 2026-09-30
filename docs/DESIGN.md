@@ -58,7 +58,7 @@ grandit (`--tracking-*`, de +0,01 em à −0,024 em), chiffres tabulaires pour l
 │ ▶ 00:47  ──|──|───●────────── 12:30    │  chronologie : traits = notes, points = captures
 │ [⏱ Horodater] [📷 Capturer]      ↺  ⌨  │  actions libellées + saut arrière + aide
 └────────────────────────────────────────┘
-  ↔ 300–500 px (360 par défaut) ; glisser le bord, double-clic = largeur par défaut
+  ↔ 300–960 px, limité par la fenêtre (360 par défaut) ; glisser la poignée du bord (ou ← → au clavier), double-clic = largeur par défaut
 ```
 
 | Élément | Spécification |
