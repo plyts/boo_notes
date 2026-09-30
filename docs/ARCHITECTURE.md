@@ -25,20 +25,14 @@
 |  +-------------------------------------------+   |  - export / téléchargement |  |
 |  | Panneau (src/panel, page d’extension)     |   |  - DesktopSync (WebSocket) |  |
 |  |  iframe du drawer OU fenêtre pop-out      |   |  - ExtensionNotion : API   |  |
-|  |  - éditeur CodeMirror 6 (partagé Desktop) |   |    Notion si app fermée    |  |
+|  |  - éditeur CodeMirror 6                   |   |    Notion si app fermée    |  |
 |  |  - badge sync, export, pin, pop-out       |   +----------------------------+  |
 |  +-------------------------------------------+ -- note:save / get --^      |     |
 +----------------------------------------------------------------------------|-----+
                                     WebSocket ws://localhost:43117 + jeton   |
                                                                              v
-+----------------------------------------------------------------------------------+
-|                       BOO NOTES DESKTOP (desktop/, Electron)                     |
-|  core/server.ts  ── notes, captures, progression ──► core/library.ts             |
-|                                                      (dossier Markdown + .boo/)  |
-|  Lecteur PDF (pdf.js), lecteur audio / vidéo  ─────►        |                    |
-|                                                             v                    |
-|                                           core/notion/sync.ts ──HTTPS──► Notion  |
-+----------------------------------------------------------------------------------+
+                      BOO NOTES DESKTOP — application séparée (hors de ce dépôt),
+                      facultative : protocole décrit dans PROTOCOL.md
 ```
 
 ## Rôles
@@ -52,9 +46,9 @@
 | **Diagnostic** | `src/diagnostic/index.ts` | Rapport « Diagnostic de cette page » (clic droit sur l’icône, ou aide du panneau) : le SW (`src/background/diagnostic.ts`) sonde chaque cadre lisible de l’onglet (`chrome.scripting`, monde isolé et monde de la page : cadres, médias, API SCORM, agent), interroge le script de la page et les droits ; `src/shared/diagnostic.ts` en tire un constat en clair et un texte à copier. |
 | **Document hors écran** | `src/offscreen/pdf.ts` | Mise en page des PDF (`src/shared/pdf-notes.ts`, pdf-lib) : le service worker (`src/background/pdf.ts`) rassemble les notes et leurs images, l’ouvre le temps d’un export (`chrome.offscreen`) puis télécharge le résultat. La bibliothèque PDF reste ainsi hors du service worker, que Chrome relance souvent. |
 
-La logique pure est dans `src/shared/` et couverte par les tests unitaires. L’application Desktop
-(`desktop/`, voir [DESKTOP.md](DESKTOP.md)) réutilise `src/shared/`, l’éditeur `src/panel/editor.ts`
-et les jetons `src/tokens.css`.
+La logique pure est dans `src/shared/` et couverte par les tests unitaires. **Boo Notes Desktop**
+est un projet séparé : ce dépôt ne contient que l’extension, qui lui parle par le protocole de
+[PROTOCOL.md](PROTOCOL.md) (simulé par `tools/mock-desktop/` pour les tests).
 
 ## Médias et sites pris en charge
 

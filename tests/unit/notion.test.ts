@@ -3,7 +3,7 @@ import { ExtensionNotion, noteToSyncItem } from '../../src/background/notion';
 import type { NotionStatus } from '../../src/shared/messages';
 import { NoteStore } from '../../src/shared/store';
 import { TranscriptStore } from '../../src/shared/transcript-store';
-import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../desktop/tools/mock-notion.mjs';
+import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../tools/mock-notion/server.mjs';
 import { MemoryArea } from './helpers';
 
 const page = { platform: 'web' as const, url: 'https://cours.test/ohm', title: 'La loi d’Ohm', kind: 'page' as const };

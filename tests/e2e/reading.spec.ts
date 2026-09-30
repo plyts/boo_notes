@@ -1,5 +1,5 @@
 import type { Page, Worker } from '@playwright/test';
-import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../desktop/tools/mock-notion.mjs';
+import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../tools/mock-notion/server.mjs';
 import { expect, panel, runCommand, storedNote, test } from './fixtures';
 
 const ARTICLE = 'https://cours.example.test/ohm';

@@ -1,8 +1,8 @@
-// In-memory imitation of the Notion REST API endpoints used by Boo Notes Desktop, with
-// the same validation rules that matter (auth, version header, 100 children, 2000
-// characters per text, nesting, rate limiting). Used by the tests and for local development:
+// In-memory imitation of the Notion REST API endpoints used by Boo Notes (the extension's
+// direct Notion sync), with the same validation rules that matter (auth, version header,
+// 100 children, 2000 characters per text, nesting, rate limiting). Used by the tests and
+// for local development:
 //   npm run mock:notion -- [--port 43118] [--token secret_test]
-// then set NOTION_API_BASE=http://127.0.0.1:43118 before starting the app.
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';

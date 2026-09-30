@@ -2,7 +2,7 @@
   "name": "boo-notes-extension",
   "version": "0.1.0",
   "private": true,
-  "description": "Boo Notes — prise de notes horodatées sur YouTube / Udemy / Coursera (extension navigateur MV3).",
+  "description": "Boo Notes Extension — prise de notes horodatées sur toute vidéo, tout audio et toute page du web (extension navigateur MV3). Boo Notes Desktop est un projet séparé.",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:e2e": "node scripts/build.mjs --e2e && playwright test",
     "mock:desktop": "node tools/mock-desktop/server.mjs",
+    "mock:notion": "node tools/mock-notion/server.mjs",
     "fixtures": "node scripts/make-fixture-video.mjs",
     "screenshots": "node scripts/build.mjs --e2e && SCREENSHOTS=1 playwright test screenshots",
     "icons": "node scripts/make-icons.mjs"

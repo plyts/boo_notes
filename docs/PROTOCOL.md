@@ -2,8 +2,8 @@
 
 Transport : **WebSocket local**, messages **JSON** (un objet par message, champ `type`).
 Adresse par défaut : `ws://localhost:43117` (modifiable dans les options, boucle locale uniquement).
-Implémentation côté application : [`desktop/src/core/server.ts`](../desktop/src/core/server.ts)
-(Boo Notes Desktop). Un mock minimal sert aux tests de l’extension :
+Implémentation côté application : **Boo Notes Desktop** (projet séparé, hors de ce dépôt). Un
+mock minimal sert aux tests de l’extension :
 [`tools/mock-desktop/server.mjs`](../tools/mock-desktop/server.mjs).
 
 ## Sécurité côté application

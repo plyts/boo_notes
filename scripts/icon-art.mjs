@@ -1,5 +1,5 @@
 // Boo Notes icon artwork, rendered without any image dependency (PNG encoder included).
-// Shared by the extension (scripts/make-icons.mjs) and the desktop app (desktop/scripts/make-ico.mjs).
+// Used by scripts/make-icons.mjs (the same artwork as Boo Notes Desktop's icon).
 import { deflateSync } from 'node:zlib';
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {

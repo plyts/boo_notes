@@ -1,14 +1,19 @@
-# Boo Notes — des notes liées à tout ce que vous étudiez
+# Boo Notes Extension — des notes liées à ce que vous étudiez dans le navigateur
 
-Prise de notes **au clavier**, quel que soit le support : chaque note reste **liée à son origine**
-— l’instant d’une vidéo, d’un audio ou d’un flux en direct, la page d’un PDF, le passage d’un
-article ou d’une page Notion, le paragraphe d’un texte, le repère posé sur un graphe — et y ramène
-d’un clic, dans les deux sens. Organisées en **cours › chapitres › notes**, reliées entre elles par
-`[[liens]]` et à **plusieurs supports** à la fois, elles forment un **second cerveau** que la
-**carte mentale** dessine, que les **révisions** entretiennent, que l’**export** transforme en
-fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tableau de votre page.
+Prise de notes **au clavier** dans le navigateur (Chrome, Edge, Brave…) : chaque note reste **liée
+à son origine** — l’instant d’une vidéo, d’un audio ou d’un flux en direct, le passage d’un article
+ou d’une page Notion, la leçon d’un module de cours — et y ramène d’un clic, dans les deux sens.
+Rangées en **cours › chapitres**, reliées entre elles par `[[liens]]`, elles se copient dans
+Obsidian ou Notion, se téléchargent en Markdown ou en **PDF**, et **Notion** les garde dans un
+tableau de votre page.
 
-- **Extension navigateur** (Chrome, Edge, Brave…) : **toute vidéo ou tout audio du web** — YouTube,
+> **Boo Notes Extension** et **Boo Notes Desktop** sont deux projets séparés. Ce dépôt ne contient
+> que l’**extension navigateur** ; elle fonctionne entièrement seule. Quand l’application
+> **Boo Notes Desktop** (bibliothèque, PDF et fichiers locaux, carte mentale, révisions) tourne sur
+> la machine, l’extension lui envoie ses notes par le protocole décrit dans
+> [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+- **Toute vidéo ou tout audio du web** — YouTube,
   Udemy, Coursera, Notion, lecteurs intégrés (Vimeo, Kaltura, Panopto, Wistia…), lecteurs en web
   components, podcasts et radios `new Audio()`, et un **chronomètre** pour ce qu’aucun script ne
   peut lire — plus **toute page à lire** en **mode lecture** (citations liées au passage, surlignées
@@ -41,16 +46,10 @@ fiches, cartes Anki et données pour QCM, et que **Notion** garde dans un tablea
   **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
   note avec ses captures et extraits ; copier une partie d’une note emporte ses **images** ; **Copier
   l’image** d’une carte.
-- **Application Desktop Windows** ([docs/DESKTOP.md](docs/DESKTOP.md)) : cours, chapitres et notes ;
-  une note liée à plusieurs supports (**PDF**, **vidéo / audio** locaux ou **flux** par adresse —
-  HLS, radios —, **images**, **textes**, pages vues dans le navigateur) ; **carte mentale** de tout
-  le savoir (réseau groupé par cours, repliable, ou arborescence) ; **révisions** de cartes ;
-  **export** (fiches PDF, Anki, Markdown, JSON). Interface **React + React Aria**, design **Liquid
-  Glass**, typographie **SF Pro** (Apple) / **Inter** (Windows).
 - **Notion** ([docs/NOTION.md](docs/NOTION.md)) : le tableau « Boo Notes — Mes notes » intégré à la
   page de votre choix, une page par note avec ses colonnes **Cours**, **Chapitre**, **Supports**, les
-  `[[liens]]` en mentions et en relations — écrit par l’application, ou par l’extension quand
-  l’application est fermée.
+  `[[liens]]` en mentions et en relations — écrit directement par l’extension (ou par Boo Notes
+  Desktop quand elle tourne).
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
 
@@ -100,19 +99,9 @@ Captivate, iSpring) :
 | --- | --- |
 | ![Réglages](docs/screenshots/options.png) | ![HUD](docs/screenshots/hud-floating.png) |
 
-| Desktop : accueil | Desktop : une note, deux supports |
-| --- | --- |
-| ![Accueil](docs/screenshots/desktop-today.png) | ![Note](docs/screenshots/desktop-note.png) |
-
-| Desktop : carte mentale (réseau groupé par cours) | Desktop : cours › chapitres › notes |
-| --- | --- |
-| ![Carte mentale](docs/screenshots/desktop-graph.png) | ![Cours](docs/screenshots/desktop-course.png) |
-
 Extension Chrome / Chromium **Manifest V3** (TypeScript, DOM natif : légère, sans framework, pour ne
-jamais alourdir les pages visitées) et application **Electron** (TypeScript, **React 19**, **React
-Aria Components**, **Motion**, **Zustand**, **React Flow** + **d3**). L’éditeur, partagé par les
-deux, s’appuie sur **CodeMirror 6** (Markdown « à la volée ») ; les PDF sont affichés avec
-**pdf.js**, les flux HLS lus avec **hls.js**.
+jamais alourdir les pages visitées). L’éditeur s’appuie sur **CodeMirror 6** (Markdown « à la
+volée ») ; les PDF exportés sont produits avec **pdf-lib**, dans un document hors écran.
 
 ---
 
@@ -182,19 +171,19 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 
 ### Formats et sources : chaque note ramène à son origine
 
-| Support | Ancre d’une note | Extension | Application Desktop |
-| --- | --- | --- | --- |
-| **Vidéo** | `[04:15]` → l’instant | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé, **lecteurs intégrés** en iframe, lecteurs en **shadow DOM** ; captures | MP4, WebM, MKV, MOV… locaux ou **par adresse** (HLS `.m3u8`) ; captures ; notes du navigateur, « Reprendre à 21:00 » |
-| **Audio** | `[04:15]` | Podcasts, radios, audios Notion, tout `<audio>`, lecteurs `new Audio()` hors page (auto-pause, saut arrière) | MP3, M4A, WAV, OGG, Opus, FLAC… locaux ou par adresse (radios, podcasts) |
-| **Flux illisible** (DRM, application, cours en salle) | `[04:15]` → l’instant du **chronomètre** | Chronomètre lancé depuis le panneau | — |
-| **Page web / page Notion** | `> citation [↗](URL#:~:text=…)`, `[↗ Section](…)` → le passage, surligné | **Mode lecture** : citations, repères de section, passages surlignés dans la page, capture de la page, % lu | Notes reçues, « Rouvrir la page » |
-| **PDF** | `[p. 12]` → la page | — | Notes par page, surlignage 4 couleurs, citations, pastilles de notes dans la marge |
-| **Texte** (.txt, .md) | `[§ 4]` → le paragraphe | — | Paragraphes numérotés, citations |
-| **Image** (graphe, schéma, tableau blanc) | `[pin 3]` → le repère | — | Repères numérotés posés sur l’image, zoom / déplacement |
-| **Fiche de révision** | `[[Titre]]` → une autre note | Liens `[[…]]` (complétion des titres, clic = ouvrir la note) | Fiches reliées, aperçu au survol, « Liée depuis », révision espacée |
-| **Plusieurs supports dans une note** | `[04:15](res:…)`, `[p. 12](res:…)` → le bon support | — | Onglets numérotés, pastilles sur les repères, support principal modifiable |
-| **Cours › chapitre** | — | Classement depuis le panneau (cours de l’app proposés) | Arbre des cours, glisser-déposer, inspecteur, carte mentale |
-| **Notion** | — | Envoi direct quand l’app est fermée (options › Notion) | Tableau « Boo Notes — Mes notes » dans votre page, synchro automatique |
+| Support | Ancre d’une note | Dans l’extension |
+| --- | --- | --- |
+| **Vidéo** | `[04:15]` → l’instant | YouTube, Udemy, Coursera, vidéos déposées dans Notion, tout site activé, **lecteurs intégrés** en iframe, lecteurs en **shadow DOM**, vidéos au fond des **modules SCORM** ; captures |
+| **Audio** | `[04:15]` | Podcasts, radios, audios Notion, tout `<audio>`, lecteurs `new Audio()` hors page (auto-pause, saut arrière) |
+| **Flux illisible** (DRM, application, cours en salle) | `[04:15]` → l’instant du **chronomètre** | Chronomètre lancé depuis le panneau |
+| **Page web / page Notion / module de cours** | `> citation [↗](URL#:~:text=…)`, `[↗ Section](…)` → le passage, surligné | **Mode lecture** : citations, repères de section, passages surlignés dans la page, capture de la page, % lu |
+| **Autre note** | `[[Titre]]` → une autre note | Liens `[[…]]` (complétion des titres, clic = ouvrir la note) |
+| **Cours › chapitre** | — | Classement depuis le panneau (cours de Boo Notes Desktop proposés quand elle est connectée) |
+| **Notion** | — | Envoi direct (options › Notion), ou par Boo Notes Desktop quand elle tourne |
+
+Les PDF, fichiers vidéo / audio / texte / image locaux, notes à plusieurs supports, carte mentale et
+révisions relèvent de **Boo Notes Desktop** (projet séparé) : les notes prises ici y arrivent quand
+elle est connectée.
 
 ### Au-delà du cahier des charges (UX)
 
@@ -218,23 +207,23 @@ Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes :
 Les liens copiés ou exportés ont la forme demandée `URL#t=255`. Le script de contenu les interprète à
 l’ouverture sur les trois plateformes (Udemy et Coursera ne gèrent pas ce fragment nativement).
 
-## Application Desktop et Notion
+## Notion et Boo Notes Desktop (application séparée)
 
-L’extension fonctionne entièrement hors-ligne. Quand **Boo Notes Desktop** tourne (zone de
-notification), les notes, captures et positions de lecture lui sont envoyées sur
-`ws://localhost:43117` (badge vert) : elles rejoignent la bibliothèque, le dossier de notes
-Markdown et, si Notion est connecté, le tableau Notion. Application fermée, l’extension écrit
-elle-même dans Notion (connexion partagée par l’application ou saisie dans ses options).
+L’extension fonctionne entièrement hors-ligne. Connectée à Notion (options › Notion), elle écrit
+elle-même chaque note dans le tableau de votre page. Si l’application **Boo Notes Desktop** (projet
+séparé) tourne sur la machine, les notes, captures et positions de lecture lui sont envoyées sur
+`ws://localhost:43117` (badge vert) : elles rejoignent sa bibliothèque, et c’est elle qui écrit
+alors dans Notion.
 
-- Installation, utilisation, build de l’installeur Windows : [docs/DESKTOP.md](docs/DESKTOP.md)
 - Connexion à Notion en 3 étapes : [docs/NOTION.md](docs/NOTION.md)
 - Protocole extension ↔ application : [docs/PROTOCOL.md](docs/PROTOCOL.md)
 
-Pour développer l’extension sans l’application, un **mock** implémente le protocole et écrit les
-notes en Markdown :
+Pour développer sans l’application ni Notion, deux **mocks** : l’un implémente le protocole de
+Boo Notes Desktop et écrit les notes en Markdown, l’autre imite l’API Notion :
 
 ```bash
 npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
+npm run mock:notion                           # http://127.0.0.1:43118, secret « secret_test »
 ```
 
 ## Développement
@@ -247,7 +236,7 @@ npm run mock:desktop -- --token mon-jeton     # écrit dans ./.boo-desktop-data/
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
-| `cd desktop && npm start` | Application Desktop (voir [docs/DESKTOP.md](docs/DESKTOP.md) pour ses tests et l’installeur Windows) |
+| `npm run mock:desktop` / `npm run mock:notion` | Serveurs simulant Boo Notes Desktop et l’API Notion |
 
 Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Shift+T` (y compris le
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
@@ -272,13 +261,6 @@ vers Notion** sans l’application (connexion dans les options, API Notion simul
 domaine : horodatage, saut, capture ; lecteur non autorisé proposé à l’autorisation ; chronomètre)
 et le **classement cours › chapitre** depuis le panneau.
 
-Côté Desktop : tests unitaires (bibliothèque v2 et migration, graphe et carte mentale, serveur
-WebSocket avec le vrai client de l’extension, conversion Markdown → Notion, synchronisation
-incrémentale contre une API Notion simulée) et tests d’interface Playwright + Electron (cours et
-chapitres, note multi-supports, flux par adresse, PDF, audio, vidéo, texte, image, fiches,
-révisions, carte mentale, export, extension, Notion). La CI
-([.github/workflows/desktop.yml](.github/workflows/desktop.yml)) construit l’installeur Windows.
-
 ```
 src/
   background/   service worker : raccourcis, routage multi-onglets, stockage, export, sync Desktop, sync Notion directe
@@ -286,10 +268,12 @@ src/
   panel/        page du panneau (iframe du drawer + fenêtre pop-out) : éditeur CodeMirror
   options/      page d’options
   shared/       logique pure partagée (testée unitairement)
-tools/mock-desktop/   serveur WebSocket simulant l’application Desktop
+  diagnostic/   page « Diagnostic de cette page »
+  offscreen/    document hors écran : export PDF
+tools/mock-desktop/   serveur WebSocket simulant l’application Boo Notes Desktop
+tools/mock-notion/    API Notion simulée (tests, développement)
 tests/unit, tests/e2e
-desktop/      application Desktop (Electron) : core/ (bibliothèque v2, export, serveur, Notion), main/, preload/, renderer/ (React)
-docs/         architecture, protocole, design, Desktop, Notion
+docs/         architecture, protocole, design, transcription, Notion
 ```
 
 ## Limites connues

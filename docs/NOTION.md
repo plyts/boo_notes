@@ -149,14 +149,14 @@ La note est liée à la page Notion (identifiant de page) et apparaît dans le t
 
 ## Développement
 
-`api.notion.com` n’est pas nécessaire : `desktop/tools/mock-notion.mjs` imite les points d’API
+`api.notion.com` n’est pas nécessaire : `tools/mock-notion/server.mjs` imite les points d’API
 utilisés (bases inline, relations doubles, mentions, requêtes filtrées, fichiers, 100 blocs,
-2 000 caractères, 429…). Il sert aux tests de l’application **et** de l’extension.
+2 000 caractères, 429…) avec les mêmes validations que l’API réelle (un signet sans `url` est
+refusé, comme par Notion). Il sert aux tests de l’extension (`tests/unit/notion.test.ts`,
+`tests/e2e/reading.spec.ts`).
 
 ```bash
-cd desktop
 npm run mock:notion                                   # http://127.0.0.1:43118, secret « secret_test »
-NOTION_API_BASE=http://127.0.0.1:43118 npm start      # l’app (et l’extension appairée) parlent au mock
 ```
 
 Le lien de page hub du mock est `11111111-1111-4111-8111-111111111111`.

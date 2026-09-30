@@ -86,7 +86,7 @@ Deux principes :
 - **Capture en direct** : la part de la vidéo regardée avec les sous-titres affichés
   (« 38 % capturé »).
 
-### Application Desktop
+### Application Desktop (Boo Notes Desktop, projet séparé)
 
 La note d’une vidéo ou d’un audio a les mêmes onglets **Notes │ Transcription** (même vue), le
 même **bandeau de sous-titre** sous les notes, le même bouton **Passage** (`Alt + I` / `Alt + O`),
@@ -95,8 +95,6 @@ sur la barre de lecture), et la transcription s’épingle à la note à la fin 
 `cours.vtt`, `cours.en.srt`…) a sa transcription d’office ; **＋ Ajouter des sous-titres**
 importe un `.vtt` / `.srt` (les traductions et commentaires suivent le moment dont ils parlaient).
 La transcription d’une note du navigateur s’y **lit** (les annotations se font dans l’extension).
-
-![Transcription d’une vidéo locale dans l’application](screenshots/desktop-transcript.png)
 
 ## 3. D’où viennent les sous-titres
 
@@ -257,10 +255,8 @@ lecteur propose **⤓ Télécharger le fichier**.
 | Stockage de l’extension (fusion des sources, traductions et commentaires) | `src/shared/transcript-store.ts` |
 | Extraits et son conservé (IndexedDB) | `src/shared/media-db.ts` |
 | Collecte dans la page | `src/content/subtitles.ts` |
-| Copier / coller : ce que contient un collage, images, médias collés, format de Boo Notes | `src/panel/rich-clipboard.ts`, `src/shared/html-markdown.ts`, `src/shared/media-paths.ts`, `desktop/src/renderer/lib/clipboard.ts` |
+| Copier / coller : ce que contient un collage, images, médias collés, format de Boo Notes | `src/panel/rich-clipboard.ts`, `src/shared/html-markdown.ts`, `src/shared/media-paths.ts` |
 | Enregistrement (captureStream + MediaRecorder), carte d’un passage | `src/content/recorder.ts` |
 | Vue Transcription (panneau et application) | `src/panel/transcript-view.ts`, `src/panel/transcript.css` |
 | Traduction sur l’appareil | `src/panel/translator.ts` |
-| Application : dossier de notes, sous-titres voisins, extraits | `desktop/src/core/library.ts` |
-| Application : vue | `desktop/src/renderer/islands/TranscriptPanel.tsx`, `desktop/src/renderer/views/NoteView.tsx` |
 | Protocole (`transcript.put`, `media.chunk`, `media.put`) | [PROTOCOL.md](PROTOCOL.md) |
