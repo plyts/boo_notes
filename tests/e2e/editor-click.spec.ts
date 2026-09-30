@@ -26,6 +26,16 @@ const MD = [
   'Dernière ligne.',
 ].join('\n');
 
+/** Line (0-based) of the cursor, from the editor itself (a long note is not all drawn). */
+function editorLine(frame: Frame): Promise<number> {
+  return frame.evaluate(() => {
+    type View = { state: { doc: { lineAt(p: number): { number: number }; lines: number }; selection: { main: { head: number } } } };
+    // CodeMirror keeps its view on the content element.
+    const view = (document.querySelector('.cm-content') as unknown as { cmTile: { root: { view: View } } }).cmTile.root.view;
+    return view.state.doc.lineAt(view.state.selection.main.head).number - 1;
+  });
+}
+
 /** Line (0-based) of the editor's cursor, and the text selected, from the DOM. */
 function caret(frame: Frame): Promise<{ line: number; selected: string }> {
   return frame.evaluate(() => {
@@ -87,4 +97,38 @@ test('un clic place le curseur sur la ligne visée, jusqu’au bas d’une longu
     });
     expect(at).toBe(i);
   }
+});
+
+test('↑ et ↓ avancent d’une ligne à la fois, du bas au haut d’une longue note et retour', async ({ page, sw }) => {
+  await sw.evaluate(
+    async ({ key, md }) =>
+      chrome.storage.local.set({
+        [key]: { id: key.slice(5), platform: 'youtube', kind: 'video', url: 'https://www.youtube.com/watch?v=e2eTest0001', title: 'T', markdown: md, rev: 1, updatedAt: Date.now(), createdAt: Date.now() },
+      }),
+    { key: `note:${NOTE_ID}`, md: MD },
+  );
+  await openWatch(page);
+  await openNotes(sw, page);
+  const frame = page.frames().find((f) => f.url().includes('panel/panel.html'))!;
+  const lines = MD.split('\n');
+  const jumps: string[] = [];
+  await page.keyboard.press('Control+End');
+  let prev = await editorLine(frame);
+  expect(prev).toBe(lines.length - 1);
+  // A wrapped line takes several presses (one per row it is drawn on): never more than one line at a time.
+  for (let k = 0; k < 120 && prev > 0; k++) {
+    await page.keyboard.press('ArrowUp');
+    const now = await editorLine(frame);
+    if (prev - now > 1) jumps.push(`↑ ${prev} « ${lines[prev].slice(0, 24)} » → ${now} « ${lines[now].slice(0, 24)} »`);
+    prev = now;
+  }
+  expect(prev).toBe(0);
+  for (let k = 0; k < 120 && prev < lines.length - 1; k++) {
+    await page.keyboard.press('ArrowDown');
+    const now = await editorLine(frame);
+    if (now - prev > 1) jumps.push(`↓ ${prev} « ${lines[prev].slice(0, 24)} » → ${now} « ${lines[now].slice(0, 24)} »`);
+    prev = now;
+  }
+  expect(prev).toBe(lines.length - 1);
+  expect(jumps).toEqual([]);
 });

@@ -200,7 +200,7 @@ class ImageWidget extends WidgetType {
     return other.path === this.path && other.alt === this.alt;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = 'cm-boo-img';
     // « Passage 02:05–06:07 · Titre »: a passage card (range, title); otherwise a capture at one instant.
@@ -261,6 +261,9 @@ class ImageWidget extends WidgetType {
     // A picture pasted from the web may stay online (its site refused to hand it over).
     const remote = /^https?:\/\//.test(this.path);
     if (remote || seconds === null) wrap.classList.add('cm-boo-img-free');
+    // A picture drawn late changes the height of its line: measured again, or clicks and ↑ ↓ would aim by the old one.
+    const remeasure = () => view.requestMeasure();
+    img.addEventListener('load', remeasure, { once: true });
     (remote ? Promise.resolve(this.path) : this.load(this.path)).then(
       (url) => {
         img.src = url;
@@ -268,9 +271,18 @@ class ImageWidget extends WidgetType {
       () => {
         wrap.classList.add('missing');
         wrap.textContent = 'Capture introuvable';
+        remeasure();
       },
     );
-    if (remote) img.addEventListener('error', () => wrap.classList.add('missing'), { once: true });
+    if (remote)
+      img.addEventListener(
+        'error',
+        () => {
+          wrap.classList.add('missing');
+          remeasure();
+        },
+        { once: true },
+      );
     return wrap;
   }
 
