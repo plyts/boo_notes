@@ -1,7 +1,7 @@
 import { listModels, type ClaudeModel } from '../shared/claude';
 import { h, icon, type IconName } from '../shared/icons';
 import { IS_MAC, keycaps } from '../shared/keycaps';
-import { callBackground, type CommandId, type NotionStatus, type SyncStatus } from '../shared/messages';
+import { callBackground, type CommandId, type NotesSyncStatus, type NotionStatus, type SyncStatus } from '../shared/messages';
 import { PLATFORM_LABELS } from '../shared/platforms';
 import { loadQa, saveQa, type QaConfig } from '../shared/qa-config';
 import { isLoopbackWsUrl, loadSettings, saveSettings, type Settings } from '../shared/settings';
@@ -272,24 +272,100 @@ async function setUpQa(): Promise<void> {
   });
 }
 
+/** Notes picked in the list (kept across refreshes). */
+const picked = new Set<string>();
+
+type NoteSync = NotesSyncStatus['notes'][string];
+
+/** « Desktop » / « Notion » pills of a note: synced (green), waiting (orange), failed (red). */
+function syncPills(state: NoteSync | undefined, status: NotesSyncStatus | null): HTMLElement {
+  const pills: HTMLElement[] = [];
+  if (!status || (!status.desktop.configured && !status.notion.configured)) {
+    pills.push(h('span', { class: 'sync-pill', 'data-state': 'local', title: 'Ni l’app Desktop ni Notion ne sont connectés : la note reste dans ce navigateur.' }, 'Ce navigateur'));
+  }
+  if (state?.desktop) {
+    const synced = state.desktop === 'synced';
+    const title = synced ? 'App Desktop : synchronisée' : `App Desktop : en attente${status?.desktop.state === 'connected' ? '' : ' (l’app est hors-ligne)'}`;
+    pills.push(h('span', { class: 'sync-pill', 'data-state': state.desktop, title, 'aria-label': title }, 'Desktop'));
+  }
+  if (state?.notion) {
+    const n = state.notion;
+    const title =
+      n.state === 'synced' ? 'Notion : synchronisée (ouvrir la page)'
+      : n.state === 'error' ? `Notion : erreur — ${n.error ?? 'échec de l’écriture'}`
+      : n.state === 'new' ? 'Notion : pas encore envoyée (Notion › Synchroniser)'
+      : 'Notion : en attente';
+    const attrs = { class: 'sync-pill', 'data-state': n.state === 'new' ? 'pending' : n.state, title, 'aria-label': title };
+    pills.push(n.url && n.state === 'synced' ? h('a', { ...attrs, href: n.url, target: '_blank', rel: 'noopener' }, 'Notion') : h('span', attrs, 'Notion'));
+  }
+  return h('span', { class: 'sync' }, ...pills);
+}
+
+/** Summary of the sync: what waits, where. */
+function syncSummary(status: NotesSyncStatus | null, ids: string[]): string {
+  if (!status) return '';
+  const parts: string[] = [];
+  if (status.desktop.configured) {
+    const pending = ids.filter((id) => status.notes[id]?.desktop === 'pending').length;
+    const offline = status.desktop.state !== 'connected';
+    parts.push(`App Desktop : ${pending ? `${pending} note${pending > 1 ? 's' : ''} en attente${offline ? ' (hors-ligne)' : ''}` : 'tout est synchronisé'}`);
+  }
+  if (status.notion.configured) {
+    const states = ids.map((id) => status.notes[id]?.notion?.state);
+    const errors = states.filter((st) => st === 'error').length;
+    const waiting = states.filter((st) => st === 'pending' || st === 'new').length;
+    const bits = [errors ? `${errors} en erreur` : '', waiting ? `${waiting} en attente` : ''].filter(Boolean);
+    parts.push(`Notion : ${bits.length ? bits.join(', ') : 'tout est synchronisé'}`);
+  }
+  return parts.length ? parts.join(' · ') : 'Vos notes restent dans ce navigateur : ni l’app Desktop ni Notion ne sont connectés.';
+}
+
+async function deleteNotes(ids: string[], titles: string[]): Promise<void> {
+  const what = ids.length === 1 ? `« ${titles[0] || 'cette note'} »` : `ces ${ids.length} notes`;
+  // eslint-disable-next-line no-alert
+  if (!confirm(`Supprimer ${what} de ce navigateur ?\n\nLeurs captures, transcriptions et extraits aussi. Ce qui a déjà été envoyé à l’app Desktop ou à Notion y reste.`)) return;
+  const { deleted } = await callBackground({ type: 'notes:delete', noteIds: ids });
+  for (const id of ids) picked.delete(id);
+  flashSaved(deleted > 1 ? `${deleted} notes supprimées` : 'Note supprimée');
+  await renderData();
+}
+
 async function renderData(): Promise<void> {
-  const notes = await callBackground({ type: 'notes:list' });
-  const bytes = await chrome.storage.local.getBytesInUse(null);
+  const [notes, status, bytes] = await Promise.all([
+    callBackground({ type: 'notes:list' }),
+    callBackground({ type: 'notes:status' }).catch(() => null),
+    chrome.storage.local.getBytesInUse(null),
+  ]);
   const entries = Object.entries(notes).sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+  for (const id of [...picked]) if (!notes[id]) picked.delete(id);
   const size = bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} Ko` : `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
   (document.getElementById('data-summary') as HTMLElement).textContent =
     entries.length === 0
       ? 'Aucune note pour l’instant.'
       : `${entries.length} note${entries.length > 1 ? 's' : ''} · ${size} utilisés (captures comprises)`;
+  const sync = document.getElementById('data-sync') as HTMLElement;
+  sync.textContent = entries.length ? syncSummary(status, entries.map(([id]) => id)) : '';
+  sync.hidden = !sync.textContent;
   const list = document.getElementById('note-list') as HTMLElement;
   const dateFmt = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
   list.replaceChildren(
-    ...entries.slice(0, 50).map(([, n]) =>
-      h(
+    ...entries.map(([id, n]) => {
+      const title = n.title || n.url;
+      const pick = h('input', { type: 'checkbox', 'aria-label': `Sélectionner « ${title} »` });
+      pick.checked = picked.has(id);
+      pick.addEventListener('change', () => {
+        if (pick.checked) picked.add(id);
+        else picked.delete(id);
+        renderSelection(entries.length);
+      });
+      const remove = h('button', { type: 'button', class: 'delete', title: 'Supprimer cette note de ce navigateur', 'aria-label': `Supprimer « ${title} »` }, icon('trash', 15));
+      remove.addEventListener('click', () => void deleteNotes([id], [title]));
+      return h(
         'li',
-        {},
+        { 'data-note': id },
+        h('label', { class: 'pick' }, pick),
         h('span', { class: 'platform' }, PLATFORM_LABELS[n.platform] ?? n.platform),
-        h('a', { href: n.url, target: '_blank', rel: 'noopener' }, n.title || n.url),
+        h('a', { href: n.url, target: '_blank', rel: 'noopener', title }, title),
         n.progress && n.progress.duration > 0
           ? h(
               'span',
@@ -302,10 +378,31 @@ async function renderData(): Promise<void> {
               `${Math.round(Math.min(1, n.progress.position / n.progress.duration) * 100)} %`,
             )
           : null,
+        syncPills(status?.notes[id], status),
         h('time', { datetime: new Date(n.updatedAt).toISOString() }, dateFmt.format(n.updatedAt)),
-      ),
-    ),
+        remove,
+      );
+    }),
   );
+  (document.querySelector('.select-all') as HTMLElement).hidden = entries.length === 0;
+  renderSelection(entries.length);
+}
+
+/** « 3 notes sélectionnées — Supprimer la sélection ». */
+function renderSelection(total: number): void {
+  const actions = document.getElementById('data-actions') as HTMLElement;
+  actions.hidden = picked.size === 0;
+  (document.getElementById('data-selected') as HTMLElement).textContent = `${picked.size} note${picked.size > 1 ? 's' : ''} sélectionnée${picked.size > 1 ? 's' : ''}`;
+  const all = document.getElementById('select-all') as HTMLInputElement;
+  all.checked = total > 0 && picked.size === total;
+  all.indeterminate = picked.size > 0 && picked.size < total;
+}
+
+let dataTimer: ReturnType<typeof setTimeout> | null = null;
+/** Many keys change while syncing: the list is redrawn once they settle. */
+function scheduleRenderData(): void {
+  if (dataTimer) clearTimeout(dataTimer);
+  dataTimer = setTimeout(() => void renderData(), 250);
 }
 
 /** « Activer sur tous les sites »: every page may be read (optional permission), scripts registered everywhere. */
@@ -468,7 +565,8 @@ async function main(): Promise<void> {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'session' && changes['sync:status']) renderStatus(changes['sync:status'].newValue as SyncStatus);
     if (area === 'session' && changes['notion:status']) renderNotion(changes['notion:status'].newValue as NotionStatus);
-    if (area === 'local' && changes['notes:index']) void renderData();
+    if (area === 'local' && Object.keys(changes).some((k) => k === 'notes:index' || k === 'sync:outbox' || k === 'notion:pending' || k.startsWith('notion:link:'))) scheduleRenderData();
+    if (area === 'session' && (changes['sync:status'] || changes['notion:status'])) scheduleRenderData();
     if (area === 'local' && changes['sites:enabled']) void renderSites();
   });
   document.addEventListener('visibilitychange', () => {
@@ -494,6 +592,21 @@ async function main(): Promise<void> {
       allPdf.disabled = false;
       allPdf.textContent = 'Télécharger le PDF';
     }
+  });
+  const selectAll = document.getElementById('select-all') as HTMLInputElement;
+  selectAll.addEventListener('change', () => {
+    const ids = [...document.querySelectorAll<HTMLElement>('#note-list li[data-note]')].map((li) => li.dataset.note!);
+    picked.clear();
+    if (selectAll.checked) for (const id of ids) picked.add(id);
+    for (const box of document.querySelectorAll<HTMLInputElement>('#note-list .pick input')) box.checked = selectAll.checked;
+    renderSelection(ids.length);
+  });
+  document.getElementById('delete-selected')?.addEventListener('click', () => {
+    const rows = [...document.querySelectorAll<HTMLElement>('#note-list li[data-note]')].filter((li) => picked.has(li.dataset.note!));
+    void deleteNotes(
+      rows.map((li) => li.dataset.note!),
+      rows.map((li) => li.querySelector('a')?.textContent ?? ''),
+    );
   });
   const allSites = document.getElementById('all-sites') as HTMLInputElement;
   allSites.addEventListener('change', () => void toggleAllSites(allSites));

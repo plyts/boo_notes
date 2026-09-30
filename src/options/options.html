@@ -432,9 +432,17 @@
           <header class="group-head"><h2 id="h-data">Données</h2></header>
           <div class="card">
             <div class="data-summary">
+              <label class="select-all" hidden>
+                <input type="checkbox" id="select-all" aria-label="Tout sélectionner" />
+              </label>
               <span id="data-summary" role="status">…</span>
             </div>
-            <ul id="note-list" class="note-list"></ul>
+            <p class="data-sync" id="data-sync" hidden></p>
+            <div class="data-actions" id="data-actions" hidden>
+              <span id="data-selected" role="status"></span>
+              <button type="button" id="delete-selected" class="btn danger">Supprimer la sélection</button>
+            </div>
+            <ul id="note-list" class="note-list" aria-label="Notes de ce navigateur"></ul>
           </div>
           <div class="card rows">
             <div class="row">

@@ -16,7 +16,7 @@ import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/mar
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
 import { NoteStore, type CourseOption } from '../shared/store';
-import { clearMedia, getMedia, markAllMediaUnsynced, markMediaSynced, putMedia, unsyncedMedia } from '../shared/media-db';
+import { clearMedia, deleteMedia, getMedia, listMedia, markAllMediaUnsynced, markMediaSynced, putMedia, unsyncedMedia } from '../shared/media-db';
 import { findMediaRefs, pinTranscriptLine, transcriptLine, transcriptPath, transcriptToMarkdown, transcriptToVtt } from '../shared/transcript';
 import { TranscriptStore } from '../shared/transcript-store';
 import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
@@ -542,6 +542,31 @@ const handlers: Handlers = {
     await sync.notifyChanged();
   },
 
+  'notes:delete': async ({ noteIds }) => {
+    let deleted = 0;
+    for (const id of noteIds) {
+      if (!(await store.deleteNote(id))) continue;
+      deleted++;
+      await transcripts.remove(id);
+      for (const m of await listMedia(id).catch(() => [])) await deleteMedia(m.path).catch(noop);
+      await notion.forget(id);
+    }
+    await sync.notifyChanged();
+    return { deleted };
+  },
+
+  'notes:status': async () => {
+    const [index, outbox, settings, desktop, notionOn] = await Promise.all([store.listNotes(), store.getOutbox(), loadSettings(), sync.status(), notion.isConfigured()]);
+    const ids = Object.keys(index);
+    const paired = Boolean(settings.desktopToken);
+    const states = notionOn ? await notion.noteStates(ids) : {};
+    return {
+      desktop: { configured: paired, state: desktop.state },
+      notion: { configured: notionOn },
+      notes: Object.fromEntries(ids.map((id) => [id, { desktop: paired ? (outbox[id] !== undefined ? 'pending' : 'synced') : null, notion: states[id] ?? null }])),
+    };
+  },
+
   'transcript:put': async (msg) => {
     // Watching alone is never recorded: the note must exist, or the user be taking notes.
     if (!msg.engaged && !(await store.getNote(msg.noteId))) return { stored: false };
@@ -908,6 +933,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes['notion:config']) notion.refresh();
   if (area !== 'sync' || !changes.settings) return;
   const before = normalizeSettings(changes.settings.oldValue);
   const after = normalizeSettings(changes.settings.newValue);

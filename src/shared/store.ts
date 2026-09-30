@@ -1,4 +1,4 @@
-import { appendBlock } from './markdown';
+import { appendBlock, findAssetRefs } from './markdown';
 import { noteSlug, type MediaKind, type Platform } from './platforms';
 import { formatTimecode } from './time';
 
@@ -80,6 +80,8 @@ export interface StorageAreaLike {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
   remove(keys: string | string[]): Promise<void>;
+  /** The keys alone (Chrome 130+): no need to read every value. */
+  getKeys?(): Promise<string[]>;
 }
 
 const noteKey = (id: string) => `note:${id}`;
@@ -309,6 +311,33 @@ export class NoteStore {
       const synced = (res[SYNCED_ASSETS] as Record<string, true> | undefined) ?? {};
       synced[path] = true;
       await this.area.set({ [SYNCED_ASSETS]: synced });
+    });
+  }
+
+  /**
+   * Deletes one note from this browser: its text, its pictures, its position
+   * and its sync markers. False when there was no such note.
+   */
+  deleteNote(id: string): Promise<boolean> {
+    return this.exclusive(async () => {
+      const res = await this.area.get([noteKey(id), INDEX, OUTBOX, SYNCED_ASSETS, PENDING_PROGRESS]);
+      const note = res[noteKey(id)] as Note | undefined;
+      const index = (res[INDEX] as Record<string, NoteSummary> | undefined) ?? {};
+      if (!note && !index[id]) return false;
+      // Its pictures: those it shows, and every one saved for it (named after it).
+      const prefix = assetKey(`assets/${noteSlug(id)}-`);
+      const keys = this.area.getKeys ? await this.area.getKeys() : Object.keys(await this.area.get(null));
+      const pictures = new Set([...findAssetRefs(note?.markdown ?? '').map(assetKey), ...keys.filter((k) => k.startsWith(prefix))]);
+      const outbox = (res[OUTBOX] as Record<string, number> | undefined) ?? {};
+      const synced = (res[SYNCED_ASSETS] as Record<string, true> | undefined) ?? {};
+      const pending = (res[PENDING_PROGRESS] as Record<string, true> | undefined) ?? {};
+      delete index[id];
+      delete outbox[id];
+      delete pending[id];
+      for (const k of pictures) delete synced[k.slice('asset:'.length)];
+      await this.area.remove([noteKey(id), progressKey(id), ...pictures]);
+      await this.area.set({ [INDEX]: index, [OUTBOX]: outbox, [SYNCED_ASSETS]: synced, [PENDING_PROGRESS]: pending });
+      return true;
     });
   }
 

@@ -133,7 +133,14 @@ export class TranscriptStore {
     });
   }
 
+  /** The transcript of a note deleted: gone, and no longer waiting for the desktop app. */
   remove(noteId: string): Promise<void> {
-    return this.exclusive(() => this.area.remove(transcriptKey(noteId)));
+    return this.exclusive(async () => {
+      const outbox = await this.getOutbox();
+      await this.area.remove(transcriptKey(noteId));
+      if (outbox[noteId] === undefined) return;
+      delete outbox[noteId];
+      await this.area.set({ [OUTBOX]: outbox });
+    });
   }
 }

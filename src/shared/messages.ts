@@ -216,6 +216,10 @@ export type BackgroundRequest =
   /** The text of the course in the tab (its page, its frames): sources of the answers to questions. */
   | { type: 'course:text'; tabId: number }
   | { type: 'notes:clear' }
+  /** Notes deleted from this browser (their copies in the desktop app and Notion stay). */
+  | { type: 'notes:delete'; noteIds: string[] }
+  /** Whether each note is synced: desktop app, Notion. */
+  | { type: 'notes:status' }
   /** Sites where Boo Notes is always active (optional host permission already granted). */
   | { type: 'sites:list' }
   | { type: 'sites:enable'; origin: string }
@@ -300,6 +304,8 @@ export interface BackgroundResponses {
   'diagnostic:run': void;
   'course:text': CourseText[];
   'notes:clear': void;
+  'notes:delete': { deleted: number };
+  'notes:status': NotesSyncStatus;
   'sites:list': string[];
   'sites:enable': string[];
   'sites:disable': string[];
@@ -321,6 +327,21 @@ export interface BackgroundResponses {
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /** Typed request to the background; rejects with the background's error message. */
+/** Where the notes stand (options › Données): the desktop app and Notion, note by note. */
+export interface NotesSyncStatus {
+  desktop: { configured: boolean; state: SyncStatus['state'] };
+  notion: { configured: boolean };
+  notes: Record<
+    string,
+    {
+      /** null: the desktop app is not paired. */
+      desktop: 'synced' | 'pending' | null;
+      /** null: Notion is not connected. */
+      notion: { state: 'synced' | 'pending' | 'error' | 'new'; url?: string; error?: string } | null;
+    }
+  >;
+}
+
 export async function callBackground<R extends BackgroundRequest>(
   request: R,
 ): Promise<BackgroundResponses[R['type']]> {

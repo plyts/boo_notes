@@ -651,7 +651,7 @@ input[aria-invalid='true'] {
 }
 
 .note-list {
-  max-height: 280px;
+  max-height: 360px;
   margin: 0;
   padding: 0;
   overflow: auto;
@@ -698,6 +698,117 @@ input[aria-invalid='true'] {
 
 .note-list:empty {
   display: none;
+}
+
+/* Selection, sync state and deletion of the notes (Données). */
+.data-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.select-all,
+.note-list .pick {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.select-all input,
+.note-list .pick input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent-strong);
+  cursor: pointer;
+}
+
+.data-sync {
+  margin: 0;
+  padding: 0 16px 10px;
+  color: var(--muted);
+  font-size: var(--text-s);
+}
+
+.data-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--hairline);
+  background: var(--accent-soft);
+  font-size: var(--text-s);
+  font-weight: 600;
+}
+
+.note-list .sync {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.note-list a.sync-pill {
+  flex: none;
+  color: var(--muted);
+}
+
+.sync-pill::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.sync-pill[data-state='synced']::before {
+  background: var(--ok);
+}
+
+.sync-pill[data-state='pending']::before {
+  background: var(--warn);
+}
+
+.sync-pill[data-state='error'] {
+  color: var(--danger);
+}
+
+.sync-pill[data-state='error']::before {
+  background: var(--danger);
+}
+
+.note-list .delete {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.note-list .delete:hover,
+.note-list .delete:focus-visible {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
 }
 
 .danger-zone {

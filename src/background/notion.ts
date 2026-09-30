@@ -38,6 +38,13 @@ export interface SharedNotionConfig {
   apiBase?: string;
 }
 
+/** Where a note stands in Notion (options › Données). */
+export interface NoteNotionState {
+  state: 'synced' | 'pending' | 'error' | 'new';
+  url?: string;
+  error?: string;
+}
+
 type PendingKind = 'content' | 'progress';
 /** `at`: when it was queued, so a change made during its sync is not dropped. */
 type Pending = Record<string, { kind: PendingKind; at: number }>;
@@ -138,6 +145,11 @@ export class ExtensionNotion {
     const run = this.queue.then(fn, fn);
     this.queue = run.catch(() => undefined);
     return run;
+  }
+
+  /** The connection changed in the storage (written elsewhere): read again at the next use. */
+  refresh(): void {
+    this.loaded = null;
   }
 
   private load(): Promise<void> {
@@ -322,6 +334,39 @@ export class ExtensionNotion {
     if (!added) return;
     this.schedule();
     await this.emit();
+  }
+
+  /** A note deleted from this browser: nothing more to write for it (its page stays in Notion). */
+  async forget(noteId: string): Promise<void> {
+    await this.exclusive(async () => {
+      const res = await this.opts.area.get(PENDING_KEY);
+      const pending = (res[PENDING_KEY] as Pending | undefined) ?? {};
+      if (!pending[noteId]) return;
+      delete pending[noteId];
+      await this.opts.area.set({ [PENDING_KEY]: pending });
+    });
+    await this.opts.area.remove(linkKey(noteId));
+    await this.emit();
+  }
+
+  /**
+   * Where each note stands in Notion: written (its page), waiting to be
+   * written, failed (why), or never sent yet.
+   */
+  async noteStates(ids: string[]): Promise<Record<string, NoteNotionState>> {
+    const res = await this.opts.area.get([PENDING_KEY, ...ids.map(linkKey)]);
+    const pending = (res[PENDING_KEY] as Pending | undefined) ?? {};
+    const out: Record<string, NoteNotionState> = {};
+    for (const id of ids) {
+      const link = res[linkKey(id)] as NotionLink | undefined;
+      const url = link?.url;
+      if (pending[id]) out[id] = { state: 'pending', ...(url ? { url } : {}) };
+      else if (link?.error) out[id] = { state: 'error', error: link.error, ...(url ? { url } : {}) };
+      else if (link && link.syncedRev >= 0) out[id] = { state: 'synced', ...(url ? { url } : {}) };
+      else if (link) out[id] = { state: 'pending', ...(url ? { url } : {}) };
+      else out[id] = { state: 'new' };
+    }
+    return out;
   }
 
   async hasPending(): Promise<boolean> {

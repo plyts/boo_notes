@@ -103,6 +103,31 @@ describe('NoteStore', () => {
     expect((await store.listNotes())['youtube:abcdefghijk'].progress?.position).toBe(42.5);
   });
 
+  it('deletes one note with its pictures, position and sync markers — the others stay', async () => {
+    const area = new MemoryArea();
+    const store = new NoteStore(area);
+    const shot = await store.saveAsset({ noteId: 'youtube:abcdefghijk', mime: 'image/png', dataUrl: 'data:image/png;base64,AA', width: 2, height: 2, time: 12 });
+    const unused = await store.saveAsset({ noteId: 'youtube:abcdefghijk', mime: 'image/png', dataUrl: 'data:image/png;base64,AA', width: 2, height: 2, time: 30 });
+    await store.saveNote('youtube:abcdefghijk', meta, `[00:12] ![Capture](${shot.path})`);
+    await store.saveProgress('youtube:abcdefghijk', 42, 600);
+    await store.markAssetSynced(shot.path);
+    const other = await store.saveAsset({ noteId: 'youtube:zzzzzzzzzzz', mime: 'image/png', dataUrl: 'data:image/png;base64,AA', width: 2, height: 2, time: 1 });
+    await store.saveNote('youtube:zzzzzzzzzzz', meta, `![](${other.path})`);
+
+    expect(await store.deleteNote('youtube:abcdefghijk')).toBe(true);
+    expect(await store.getNote('youtube:abcdefghijk')).toBeNull();
+    expect(await store.getAsset(shot.path)).toBeNull();
+    expect(await store.getAsset(unused.path)).toBeNull();
+    expect(await store.getProgress('youtube:abcdefghijk')).toBeNull();
+    expect(Object.keys(await store.listNotes())).toEqual(['youtube:zzzzzzzzzzz']);
+    expect(await store.getOutbox()).toEqual({ 'youtube:zzzzzzzzzzz': 1 });
+    expect(await store.pendingProgress()).toEqual([]);
+    expect(await store.isAssetSynced(shot.path)).toBe(false);
+    // The other note is untouched.
+    expect(await store.getAsset(other.path)).not.toBeNull();
+    expect(await store.deleteNote('youtube:abcdefghijk')).toBe(false);
+  });
+
   it('ignores invalid durations (live streams)', async () => {
     const store = new NoteStore(new MemoryArea());
     await store.saveNote('n', meta, 'x');
