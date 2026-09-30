@@ -137,6 +137,44 @@ test.describe('UX du panneau', () => {
     expect(await layout()).toMatchObject({ overflow: 0 });
   });
 
+  test('titre très long dans la fenêtre détachée : « … » à toute largeur, en entier quand la fenêtre est assez large', async ({ context, page, sw }) => {
+    const course = 'ai-orchestration-from-llm-to-running-agents';
+    const chapter = 'HookToolset : Transformer les hooks de flux d’air en outils d’agent';
+    await sw.evaluate((c) => chrome.storage.local.set({ 'desktop:courses': [{ title: c.course, emoji: '', chapters: [c.chapter] }] }), { course, chapter });
+    await openWatch(page);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await p.locator('.place').click();
+    await p.getByRole('menu', { name: 'Ranger dans un cours' }).getByRole('menuitemradio', { name: chapter }).click();
+    const opened = context.waitForEvent('page', { predicate: (w) => w.url().includes('mode=popout') });
+    await p.getByRole('button', { name: 'Détacher dans une fenêtre' }).click();
+    const popup = await opened;
+    await expect(popup.locator('.place')).toHaveAttribute('title', `Rangée dans ${course} › ${chapter} (changer)`);
+    const layout = () =>
+      popup.evaluate(() => ({
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        cut: [...document.querySelectorAll<HTMLElement>('.place-part')].map((el) => el.scrollWidth > el.clientWidth),
+      }));
+    const toolbarInside = async () => {
+      const width = await popup.evaluate(() => innerWidth);
+      for (const name of ['Rattacher', 'Exporter la note']) {
+        const box = (await popup.getByRole('button', { name: new RegExp(`^${name}`) }).first().boundingBox())!;
+        expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+      }
+    };
+    // (Headless Chromium ignores the size asked for the window: each width is set here.)
+    // Widened by hand: the whole title.
+    await popup.setViewportSize({ width: 1400, height: 700 });
+    await expect.poll(layout).toEqual({ overflow: 0, cut: [false, false] });
+    await toolbarInside();
+    // As opened (the width of the notes + 40), then narrowed: cut short, nothing out of view.
+    for (const width of [400, 320]) {
+      await popup.setViewportSize({ width, height: 700 });
+      await expect.poll(layout).toEqual({ overflow: 0, cut: [true, true] });
+      await toolbarInside();
+    }
+  });
+
   test('les notes s’élargissent au-delà de 500 px : poignée visible, souris ou clavier', async ({ page, sw }) => {
     await openWatch(page);
     await openNotes(sw, page);
