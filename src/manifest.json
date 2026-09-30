@@ -31,7 +31,8 @@
     "alarms",
     "clipboardWrite",
     "offscreen",
-    "contextMenus"
+    "contextMenus",
+    "identity"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

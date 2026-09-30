@@ -112,6 +112,11 @@ export class NotionClient {
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
+  /** What the integration may see: the pages and databases the user shared with it. */
+  search(body: Json): Promise<NotionList<Json>> {
+    return this.request('POST', '/v1/search', body);
+  }
+
   me(): Promise<{ id: string; name?: string; bot?: { workspace_name?: string } }> {
     return this.request('GET', '/v1/users/me');
   }

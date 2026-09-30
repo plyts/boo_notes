@@ -32,7 +32,42 @@ Extension (navigateur) ──ws://localhost──► Boo Notes Desktop ──HTT
   quelques secondes après chaque modification. Quand l’application revient, chacune apprend de
   l’autre quelle page Notion correspond à quelle note (identifiant « Boo ID ») : pas de doublon.
 
-## Mise en place (2 minutes)
+## Se connecter avec Notion (1 clic)
+
+Dans les **options de l’extension** › Notion, **« Se connecter avec Notion »** :
+
+1. la fenêtre de Notion s’ouvre (comme « Se connecter avec Google ») : connectez-vous si besoin,
+   choisissez l’espace de travail et les **pages auxquelles Boo Notes aura accès**, puis
+   **Autoriser l’accès** ;
+2. de retour dans les options, choisissez la page où créer le tableau (« Mes cours »…) et
+   **Créer le tableau ici** — rien à choisir si un tableau « Boo Notes — Mes notes » existe déjà
+   ou si une seule page est partagée.
+
+L’option indique « Connecté avec votre compte Notion · *votre espace* ». Rien à copier, aucun
+secret à manipuler ; « Déconnecter » l’oublie, et l’accès se retire aussi côté Notion
+(Paramètres › Connexions).
+
+### Pour le développeur : activer le bouton (une fois)
+
+Le bouton repose sur une **intégration publique** de Boo Notes et un tout petit serveur
+d’échange (un Cloudflare Worker, gratuit) qui garde le *client secret* hors de l’extension —
+tout est décrit dans [`tools/notion-oauth/README.md`](../tools/notion-oauth/README.md) :
+
+1. intégration **publique** sur [notion.so/profile/integrations](https://www.notion.so/profile/integrations),
+   adresse de redirection `https://<id-de-l’extension>.chromiumapp.org/notion` (affichée dans les
+   options tant que le bouton n’est pas activé) ;
+2. `npx wrangler deploy` dans `tools/notion-oauth`, puis `wrangler secret put NOTION_CLIENT_ID` et
+   `NOTION_CLIENT_SECRET` ;
+3. `notion-oauth.json` à la racine du projet — `{ "clientId": "…", "exchangeUrl": "https://…workers.dev/token" }`
+   (ou `BOO_NOTION_CLIENT_ID` / `BOO_NOTION_OAUTH_URL`) — puis `npm run build`.
+
+Sans cette configuration, le bouton est grisé, l’explique, et le secret d’intégration
+ci-dessous reste disponible.
+
+## Avec un secret d’intégration (avancé, 2 minutes)
+
+Pour l’application Desktop, ou dans les options de l’extension › Notion › « Méthode avancée : avec
+un secret d’intégration » :
 
 1. **Créez une intégration interne.** [notion.so › Paramètres › Intégrations](https://www.notion.so/profile/integrations),
    « Nouvelle intégration », type **Interne**. Capacités : *Lire*, *Mettre à jour* et *Insérer du

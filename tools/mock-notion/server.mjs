@@ -12,7 +12,11 @@ export const PARENT_PAGE_ID = '11111111-1111-4111-8111-111111111111';
 
 const compact = (id) => String(id).replace(/-/g, '').toLowerCase();
 
-export function startMockNotion({ port = 0, token = 'secret_test', log = () => {} } = {}) {
+export const OAUTH_CLIENT = { clientId: 'client-test', clientSecret: 'client-secret-test' };
+
+export function startMockNotion({ port = 0, token = 'secret_test', log = () => {}, oauth = OAUTH_CLIENT } = {}) {
+  /** Codes of the OAuth consent, until exchanged: their redirect address. */
+  const codes = new Map();
   const state = {
     pages: new Map(),
     databases: new Map(),
@@ -181,6 +185,15 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       return publicPage(page);
     }
 
+    // The pages and databases shared with the integration (all of them, here).
+    if (method === 'POST' && path === '/v1/search') {
+      const kind = body.filter?.property === 'object' ? body.filter.value : null;
+      const query = String(body.query ?? '').toLowerCase();
+      const pages = kind === 'database' ? [] : [...state.pages.values()].filter((p) => !p.archived && !p.in_trash && p.parent?.type === 'workspace').map(publicPage);
+      const dbs = kind === 'page' ? [] : [...state.databases.values()].filter((d) => !d.archived && !d.in_trash);
+      const title = (o) => (o.object === 'database' ? o.title : Object.values(o.properties).find((x) => x.title)?.title ?? []).map((r) => r.text?.content ?? '').join('');
+      return { object: 'list', results: [...pages, ...dbs].filter((o) => !query || title(o).toLowerCase().includes(query)), has_more: false, next_cursor: null };
+    }
     if (method === 'POST' && path === '/v1/databases') {
       const parentId = body.parent?.page_id;
       const parent = parentId && state.pages.get(compact(parentId));
@@ -311,6 +324,38 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       }
       state.requests.push({ method: req.method, path: url.pathname, body });
       log(`${req.method} ${url.pathname}`);
+      // OAuth (public integration): the consent page, then the code exchanged for the token.
+      if (req.method === 'GET' && url.pathname === '/v1/oauth/authorize') {
+        const q = url.searchParams;
+        if (q.get('client_id') !== oauth.clientId) return reply(400, { error: 'invalid_client' });
+        const back = (params) => `${q.get('redirect_uri')}?${new URLSearchParams({ ...params, state: q.get('state') ?? '' })}`;
+        const code = randomUUID();
+        codes.set(code, q.get('redirect_uri'));
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Notion — autoriser Boo Notes</title></head><body>
+          <h1>Boo Notes souhaite accéder à votre espace Notion</h1>
+          <p>Pages partagées : ${[...state.pages.values()].filter((pg) => pg.parent?.type === 'workspace').map((pg) => titleOf(pg.id)).join(', ')}</p>
+          <a id="allow" href="${back({ code })}">Autoriser l’accès</a> <a id="cancel" href="${back({ error: 'access_denied' })}">Annuler</a>
+        </body></html>`);
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/oauth/token') {
+        const expected = `Basic ${Buffer.from(`${oauth.clientId}:${oauth.clientSecret}`).toString('base64')}`;
+        if (req.headers.authorization !== expected) return reply(401, { error: 'invalid_client', error_description: 'Client authentication failed.' });
+        if (body.grant_type !== 'authorization_code' || !codes.has(body.code) || codes.get(body.code) !== body.redirect_uri)
+          return reply(400, { error: 'invalid_grant', error_description: 'Invalid code.' });
+        codes.delete(body.code);
+        return reply(200, {
+          access_token: token,
+          token_type: 'bearer',
+          bot_id: 'bot-1',
+          workspace_id: 'ws-1',
+          workspace_name: 'Espace de test',
+          workspace_icon: null,
+          owner: { type: 'user', user: { object: 'user', id: 'user-1' } },
+          duplicated_template_id: null,
+        });
+      }
       if (req.headers.authorization !== `Bearer ${token}`)
         return reply(401, { object: 'error', status: 401, code: 'unauthorized', message: 'API token is invalid.' });
       if (!req.headers['notion-version'])

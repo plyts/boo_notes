@@ -6,3 +6,4 @@ playwright-report/
 .boo-desktop-data/
 *.log
 .DS_Store
+.wrangler/

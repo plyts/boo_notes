@@ -1,7 +1,7 @@
 import { countNotes, linkedTitles, normalizeTitle } from '../shared/markdown';
-import type { NotionStatus } from '../shared/messages';
-import { explainNotionError, NotionError, type NotionClientOptions } from '../shared/notion/client';
-import { NotionEngine, type NotionLink, type NotionSource, type SyncItem } from '../shared/notion/engine';
+import type { NotionPlace, NotionStatus } from '../shared/messages';
+import { explainNotionError, NotionClient, NotionError, type NotionClientOptions } from '../shared/notion/client';
+import { DATABASE_TITLE, NotionEngine, type NotionLink, type NotionSource, type SyncItem } from '../shared/notion/engine';
 import { positionLabel, progressRatio, studyStatus } from '../shared/study';
 import type { MediaProgress, Note, NoteStore, StorageAreaLike } from '../shared/store';
 import { TranscriptStore } from '../shared/transcript-store';
@@ -19,6 +19,10 @@ import { TranscriptStore } from '../shared/transcript-store';
  */
 export interface NotionConfig {
   token: string;
+  /** How it was connected: Notion's consent (OAuth), or an integration secret. */
+  via?: 'oauth' | 'secret';
+  /** OAuth: to renew the access when Notion asks. */
+  refreshToken?: string;
   databaseId: string | null;
   databaseUrl: string | null;
   /** Page holding the database (inline table). */
@@ -215,6 +219,7 @@ export class ExtensionNotion {
     return {
       configured: await this.isConfigured(),
       origin: this.config?.origin ?? null,
+      via: this.config ? (this.config.via ?? 'secret') : null,
       workspace: this.config?.workspace ?? null,
       databaseUrl: this.config?.databaseUrl ?? null,
       pending: Object.keys((res[PENDING_KEY] as Pending | undefined) ?? {}).length,
@@ -236,12 +241,45 @@ export class ExtensionNotion {
 
   // --- Connection ---------------------------------------------------------------------------------
 
-  /** Options page: an integration secret and the page that will hold the notes table. */
-  async connect(token: string, target: string): Promise<NotionStatus> {
+  /**
+   * The pages (and the table of a former connection) this token may write
+   * to: where to put the notes table. The table first, then the pages at
+   * the top of the workspace.
+   */
+  async places(token: string): Promise<NotionPlace[]> {
+    await this.load();
+    const client = new NotionClient({ token, baseUrl: this.config?.apiBase ?? this.apiBase, ...this.opts.clientOptions });
+    let found;
+    try {
+      found = await client.search({ page_size: 100 });
+    } catch (e) {
+      throw new Error(explainNotionError(e));
+    }
+    type Item = { object?: string; id?: string; archived?: boolean; in_trash?: boolean; parent?: { type?: string }; icon?: { emoji?: string } | null; title?: Array<{ plain_text?: string; text?: { content?: string } }>; properties?: Record<string, { title?: Array<{ plain_text?: string; text?: { content?: string } }> }> };
+    const text = (rich: Array<{ plain_text?: string; text?: { content?: string } }> | undefined) => (rich ?? []).map((r) => r.plain_text ?? r.text?.content ?? '').join('').trim();
+    const out: Array<NotionPlace & { rank: number }> = [];
+    for (const raw of found.results as Item[]) {
+      if (!raw.id || raw.archived || raw.in_trash) continue;
+      if (raw.object === 'database') {
+        const title = text(raw.title);
+        if (title === DATABASE_TITLE) out.push({ id: raw.id, kind: 'database', title, rank: 0 });
+        continue;
+      }
+      if (raw.object !== 'page' || raw.parent?.type === 'database_id') continue;
+      const title = text(Object.values(raw.properties ?? {}).find((p) => p.title)?.title) || 'Sans titre';
+      out.push({ id: raw.id, kind: 'page', title, ...(raw.icon?.emoji ? { icon: raw.icon.emoji } : {}), rank: raw.parent?.type === 'workspace' ? 1 : 2 });
+    }
+    return out.sort((a, b) => a.rank - b.rank).map(({ rank: _r, ...p }) => p);
+  }
+
+  /** Options page: an access (integration secret, or Notion's consent) and the page that will hold the notes table. */
+  async connect(token: string, target: string, access: { via?: 'oauth' | 'secret'; refreshToken?: string } = {}): Promise<NotionStatus> {
     await this.load();
     const previous = this.config;
     this.config = {
       token: token.trim(),
+      via: access.via ?? 'secret',
+      ...(access.refreshToken ? { refreshToken: access.refreshToken } : {}),
       databaseId: null,
       databaseUrl: null,
       parentId: null,

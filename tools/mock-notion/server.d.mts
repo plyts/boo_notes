@@ -1,4 +1,5 @@
 export const PARENT_PAGE_ID: string;
+export const OAUTH_CLIENT: { clientId: string; clientSecret: string };
 
 export interface MockBlockView {
   type: string;
@@ -23,4 +24,4 @@ export interface MockNotion {
   close(): Promise<void>;
 }
 
-export function startMockNotion(opts?: { port?: number; token?: string; log?: (m: string) => void }): MockNotion;
+export function startMockNotion(opts?: { port?: number; token?: string; log?: (m: string) => void; oauth?: { clientId: string; clientSecret: string } }): MockNotion;

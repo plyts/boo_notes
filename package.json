@@ -12,6 +12,7 @@
     "test:e2e": "node scripts/build.mjs --e2e && playwright test",
     "mock:desktop": "node tools/mock-desktop/server.mjs",
     "mock:notion": "node tools/mock-notion/server.mjs",
+    "mock:notion-oauth": "node tools/notion-oauth/server.mjs",
     "fixtures": "node scripts/make-fixture-video.mjs",
     "screenshots": "node scripts/build.mjs --e2e && SCREENSHOTS=1 playwright test screenshots",
     "icons": "node scripts/make-icons.mjs"

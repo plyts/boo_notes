@@ -213,7 +213,7 @@ macOS Option).
 | `progress:<noteId>` | dernière position de lecture `{ position, duration, updatedAt }` |
 | `sync:progress` | positions pas encore envoyées à l’application Desktop |
 | `sites:enabled` | origines où Boo Notes s’active à chaque visite |
-| `notion:config` | connexion Notion (secret, tableau, page hub, origine : `desktop` ou `extension`) |
+| `notion:config` | connexion Notion (jeton — secret ou accès OAuth `via: 'oauth'` —, tableau, page hub, origine : `desktop` ou `extension`) |
 | `notion:link:<noteId>` | page Notion de la note et empreintes de ses blocs (synchro incrémentale) |
 | `notion:pending` | notes à écrire dans Notion (application fermée) |
 | `qa:config` | réponses aux questions : Claude (clé API, modèle) ou passages sans IA ; jamais synchronisé |
@@ -279,6 +279,11 @@ synchronisation lu par le badge. `chrome.storage.sync` : réglages.
 - Notion : seule permission d’hôte ajoutée, `https://api.notion.com/*` (l’API n’accepte pas les
   requêtes CORS des pages). Le secret n’est lu que par le service worker ; les sites n’ont pas accès à
   `chrome.storage` de l’extension.
+- « Se connecter avec Notion » : permission `identity` (`chrome.identity.launchWebAuthFlow`, retour sur
+  `https://<id>.chromiumapp.org/notion`, paramètre `state` vérifié). Le *client secret* de
+  l’intégration publique n’est jamais dans l’extension : le code de consentement est échangé par
+  `tools/notion-oauth/worker.mjs` (Cloudflare Worker), qui n’accepte qu’une adresse de retour
+  `chromiumapp.org` (liste d’extensions autorisées possible) et ne conserve rien.
 - Les icônes sont construites en DOM (pas d’`innerHTML`), compatible Trusted Types (YouTube).
 - `media-bridge.js` s’exécute dans le monde de la page mais ne lit ni n’envoie rien : il déplace
   seulement un média qui joue hors du document dans un élément caché. Les agents d’iframe parlent au

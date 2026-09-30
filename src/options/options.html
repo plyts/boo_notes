@@ -343,22 +343,47 @@
               </div>
               <a id="notion-open" class="btn" href="#" target="_blank" rel="noopener" hidden>Ouvrir le tableau</a>
             </div>
-            <form class="rows inset" id="notion-form">
-              <div class="row stacked">
-                <label class="row-label" for="notion-token">Secret de l’intégration</label>
-                <input type="password" id="notion-token" spellcheck="false" autocomplete="off" placeholder="ntn_… (notion.so/profile/integrations)" required />
-                <span class="row-desc">Créez une intégration interne dans Notion, puis copiez son secret.</span>
-              </div>
-              <div class="row stacked">
-                <label class="row-label" for="notion-page">Page qui accueillera le tableau</label>
-                <input type="url" id="notion-page" spellcheck="false" autocomplete="off" placeholder="https://www.notion.so/Mes-cours-…" required />
-                <span class="row-desc">Ouvrez la page dans Notion › ••• › Connexions › ajoutez l’intégration, puis copiez son lien.</span>
-              </div>
+            <div class="rows inset" id="notion-oauth">
               <div class="row">
-                <span class="row-text"><span class="row-desc" id="notion-hint">Ou lancez l’app Desktop : elle partage sa connexion Notion avec l’extension.</span></span>
-                <button type="submit" class="btn" id="notion-connect">Connecter Notion</button>
+                <span class="row-text">
+                  <span class="row-label">Se connecter avec Notion</span>
+                  <span class="row-desc" id="notion-oauth-desc">
+                    Une fenêtre Notion s’ouvre : connectez-vous, cochez la page qui accueillera vos notes, puis « Autoriser
+                    l’accès ». Rien à copier.
+                  </span>
+                </span>
+                <button type="button" class="btn primary" id="notion-oauth-btn">Se connecter avec Notion</button>
+              </div>
+            </div>
+            <form class="rows inset" id="notion-place" hidden>
+              <fieldset class="row stacked place-choice">
+                <legend class="row-label">Où créer le tableau « Boo Notes — Mes notes » ?</legend>
+                <div id="notion-place-list" class="place-list" role="radiogroup"></div>
+              </fieldset>
+              <div class="row">
+                <span class="row-text"><span class="row-desc">Le tableau y sera ajouté ; une page par note ensuite.</span></span>
+                <button type="submit" class="btn primary" id="notion-place-btn">Créer le tableau ici</button>
               </div>
             </form>
+            <details class="advanced" id="notion-advanced">
+              <summary>Méthode avancée : avec un secret d’intégration</summary>
+              <form class="rows inset" id="notion-form">
+                <div class="row stacked">
+                  <label class="row-label" for="notion-token">Secret de l’intégration</label>
+                  <input type="password" id="notion-token" spellcheck="false" autocomplete="off" placeholder="ntn_… (notion.so/profile/integrations)" required />
+                  <span class="row-desc">Créez une intégration interne dans Notion, puis copiez son secret.</span>
+                </div>
+                <div class="row stacked">
+                  <label class="row-label" for="notion-page">Page qui accueillera le tableau</label>
+                  <input type="url" id="notion-page" spellcheck="false" autocomplete="off" placeholder="https://www.notion.so/Mes-cours-…" required />
+                  <span class="row-desc">Ouvrez la page dans Notion › ••• › Connexions › ajoutez l’intégration, puis copiez son lien.</span>
+                </div>
+                <div class="row">
+                  <span class="row-text"><span class="row-desc" id="notion-hint">Ou lancez l’app Desktop : elle partage sa connexion Notion avec l’extension.</span></span>
+                  <button type="submit" class="btn" id="notion-connect">Connecter Notion</button>
+                </div>
+              </form>
+            </details>
             <div class="rows inset" id="notion-actions" hidden>
               <div class="row">
                 <span class="row-text">

@@ -13,8 +13,21 @@ const out = watch ? dist : join(root, 'dist.building');
 // End-to-end builds may inject the content script on test hosts without a permission prompt.
 const e2e = process.argv.includes('--e2e');
 
+/**
+ * « Se connecter avec Notion »: the public Notion integration and its exchange server
+ * (tools/notion-oauth), from notion-oauth.json or BOO_NOTION_CLIENT_ID / BOO_NOTION_OAUTH_URL.
+ * Neither is a secret. Without them, the extension connects with an integration secret.
+ */
+async function notionOAuth() {
+  const file = await readFile(join(root, 'notion-oauth.json'), 'utf8').then(JSON.parse, () => ({}));
+  const clientId = process.env.BOO_NOTION_CLIENT_ID || file.clientId;
+  const exchangeUrl = process.env.BOO_NOTION_OAUTH_URL || file.exchangeUrl;
+  return clientId && exchangeUrl ? { clientId, exchangeUrl } : null;
+}
+
 const common = {
   bundle: true,
+  define: { __NOTION_OAUTH__: JSON.stringify(await notionOAuth()) },
   target: 'chrome116',
   sourcemap: watch ? 'inline' : false,
   minify: !watch,

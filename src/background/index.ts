@@ -12,6 +12,7 @@ import {
   type TabMessage,
 } from '../shared/messages';
 import { readCourseText, type CourseText } from '../shared/course-text';
+import { authorizeUrl, BUILT_IN_NOTION_OAUTH, codeFrom, exchangeCode, type NotionOAuthConfig } from '../shared/notion-oauth';
 import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
@@ -31,6 +32,8 @@ import { DesktopSync } from './sync';
  * active player (multi-tab routing), the link to the desktop app, and the
  * direct Notion sync used while the app is closed.
  */
+/** « Se connecter avec Notion »: the public integration set in this build (null: not set up). */
+let notionOAuth: NotionOAuthConfig | null = BUILT_IN_NOTION_OAUTH;
 const store = new NoteStore(chrome.storage.local);
 const transcripts = new TranscriptStore(chrome.storage.local);
 const session = new SessionState();
@@ -772,7 +775,25 @@ const handlers: Handlers = {
 
   'notion:status': () => notion.status(),
 
-  'notion:connect': (msg) => notion.connect(msg.token, msg.target),
+  'notion:connect': (msg) => notion.connect(msg.token, msg.target, { via: msg.via, refreshToken: msg.refreshToken }),
+
+  'notion:oauth-info': async () => ({ available: Boolean(notionOAuth), redirectUri: chrome.identity?.getRedirectURL('notion') ?? '' }),
+
+  'notion:oauth': async () => {
+    if (!notionOAuth) throw new Error('la connexion en un clic n’est pas configurée dans cette installation : utilisez le secret d’intégration (voir docs/NOTION.md)');
+    const redirect = chrome.identity.getRedirectURL('notion');
+    const state = crypto.randomUUID();
+    let responseUrl: string | undefined;
+    try {
+      responseUrl = await chrome.identity.launchWebAuthFlow({ url: authorizeUrl(notionOAuth, redirect, state), interactive: true });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // The window closed before the end.
+      throw new Error(/approve|cancel|closed/i.test(message) ? 'connexion annulée' : `fenêtre de connexion Notion : ${message}`);
+    }
+    const grant = await exchangeCode(notionOAuth, codeFrom(responseUrl ?? '', state), redirect);
+    return { ...grant, places: await notion.places(grant.token) };
+  },
 
   'notion:disconnect': () => notion.disconnect(),
 
@@ -960,5 +981,12 @@ Object.assign(globalThis, {
     sync,
     session,
     notion,
+    /** The public Notion integration of « Se connecter avec Notion » (the E2E mock sets its own). */
+    get notionOAuth() {
+      return notionOAuth;
+    },
+    set notionOAuth(cfg: NotionOAuthConfig | null) {
+      notionOAuth = cfg;
+    },
   },
 });
