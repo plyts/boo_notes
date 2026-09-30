@@ -50,6 +50,7 @@ import {
   type TimestampMatch,
 } from '../shared/markdown';
 import { parseTimecode } from '../shared/time';
+import { CaretSnapshot, pointerPressed, pointerTracking, pressChanged, type CaretView } from './pointer';
 import { blockAtLine, blockExtensions, dropAnswer, inQuestionOrFreeNote, intoFreeNote, openBlockMenu, putAnswer, type AskRequest } from './blocks';
 
 export interface EditorHooks {
@@ -282,12 +283,12 @@ class ImageWidget extends WidgetType {
 
 const hide = Decoration.replace({});
 
-function buildPreview(view: EditorView, load: (path: string) => Promise<string>, badge: BadgeFn, copyable: boolean): DecorationSet {
+function buildPreview(view: EditorView, load: (path: string) => Promise<string>, badge: BadgeFn, copyable: boolean, caret: CaretView): DecorationSet {
   const { state } = view;
   const tree = syntaxTree(state);
   const active = new Set<number>();
-  if (view.hasFocus) {
-    for (const r of state.selection.ranges) {
+  if (caret.hasFocus) {
+    for (const r of caret.ranges) {
       const a = state.doc.lineAt(r.from).number;
       const b = state.doc.lineAt(r.to).number;
       for (let n = a; n <= b; n++) active.add(n);
@@ -381,7 +382,7 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
       pushMediaChips(out, line.text, line.from, capture?.[1] ?? null, lineActive);
       const stamps = findTimestamps(line.text, line.from);
       const touches = (from: number, to: number) =>
-        view.hasFocus && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+        caret.hasFocus && caret.ranges.some((r) => r.from <= to && r.to >= from);
       const anchors = documentAnchors(line.text, line.from);
       if (!capture && anchors[0]?.from === line.from && !inCode(tree, line.from)) {
         out.push(Decoration.line({ class: 'cm-boo-stamped' }).range(line.from));
@@ -456,7 +457,7 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
         );
         // Reveal the raw `[MM:SS](url)` only when the cursor touches it (Typora-style),
         // so typing after a timestamp never makes the line jump.
-        const touched = view.hasFocus && state.selection.ranges.some((r) => r.from <= m.to && r.to >= m.from);
+        const touched = caret.hasFocus && caret.ranges.some((r) => r.from <= m.to && r.to >= m.from);
         if (!touched) {
           out.push(hide.range(m.from, m.from + 1), hide.range(m.labelTo - 1, m.labelTo));
           if (m.url !== null) out.push(hide.range(m.labelTo, m.to));
@@ -496,19 +497,23 @@ function livePreview(load: (path: string) => Promise<string>, badge: BadgeFn, co
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
+      private readonly caret = new CaretSnapshot();
       constructor(view: EditorView) {
-        this.decorations = buildPreview(view, load, badge, copyable);
+        this.decorations = buildPreview(view, load, badge, copyable, this.caret.of(view));
       }
       update(u: ViewUpdate) {
+        const pressed = u.state.field(pointerPressed, false) ?? false;
+        // A click or a drag under way: the lines keep their look until the button is released.
+        const caretMoved = !pressed && (u.selectionSet || u.focusChanged);
         if (
           u.docChanged ||
           u.viewportChanged ||
-          u.selectionSet ||
-          u.focusChanged ||
+          caretMoved ||
+          pressChanged(u.startState.field(pointerPressed, false) ?? false, pressed) ||
           syntaxTree(u.startState) !== syntaxTree(u.state) ||
           u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshPreview)))
         ) {
-          this.decorations = buildPreview(u.view, load, badge, copyable);
+          this.decorations = buildPreview(u.view, load, badge, copyable, this.caret.of(u.view, u.docChanged ? u.changes : null));
         }
       }
     },
@@ -640,6 +645,7 @@ export class NotesEditor {
       livePreview(hooks.loadAsset, hooks.resourceBadge, Boolean(hooks.onCopyImage)),
       nowLine,
       pendingInserts,
+      pointerTracking(),
       hooks.onAsk ? blockExtensions({ onAsk: hooks.onAsk }) : [],
       this.editable.of(EditorView.editable.of(true)),
       placeholder(hooks.placeholderText ?? 'Écrivez ici…'),

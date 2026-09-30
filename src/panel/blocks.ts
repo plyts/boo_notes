@@ -1,5 +1,6 @@
 import { EditorState, Facet, Prec, StateEffect, StateField, type Extension, type Range, type Text, type Transaction, type TransactionSpec } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { CaretSnapshot, pointerPressed, pressChanged, type CaretView } from './pointer';
 import {
   answerLines,
   convertBlock,
@@ -332,21 +333,23 @@ class StatusWidget extends WidgetType {
 const hideMark = Decoration.replace({});
 const QUESTION_LABEL = /^Question(?:[ \t]+\d+)?/;
 
-function activeLines(view: EditorView): Set<number> {
+function activeLines(view: EditorView, caret: CaretView): Set<number> {
   const active = new Set<number>();
-  if (!view.hasFocus) return active;
-  const { state } = view;
-  for (const r of state.selection.ranges) {
-    for (let n = state.doc.lineAt(r.from).number; n <= state.doc.lineAt(r.to).number; n++) active.add(n);
+  if (!caret.hasFocus) return active;
+  const { doc } = view.state;
+  for (const r of caret.ranges) {
+    const from = Math.min(r.from, doc.length);
+    const to = Math.min(r.to, doc.length);
+    for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) active.add(n);
   }
   return active;
 }
 
-function buildBlocks(view: EditorView): DecorationSet {
+function buildBlocks(view: EditorView, caret: CaretView): DecorationSet {
   const { state } = view;
   const { doc } = state;
   const { lines, callouts } = blocksOf(doc);
-  const active = activeLines(view);
+  const active = activeLines(view, caret);
   const pending = new Set(state.field(asking).map((a) => doc.lineAt(Math.min(a.pos, doc.length)).number));
   const visible = (from: number, to: number) => view.visibleRanges.some((r) => r.from <= to && r.to >= from);
   const out: Range<Decoration>[] = [];
@@ -388,12 +391,22 @@ function buildBlocks(view: EditorView): DecorationSet {
 const blockLook = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    private readonly caret = new CaretSnapshot();
     constructor(view: EditorView) {
-      this.decorations = buildBlocks(view);
+      this.decorations = buildBlocks(view, this.caret.of(view));
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || u.startState.field(asking) !== u.state.field(asking)) {
-        this.decorations = buildBlocks(u.view);
+      const pressed = u.state.field(pointerPressed, false) ?? false;
+      // A click or a drag under way: the blocks keep their look until the button is released (see pointer.ts).
+      const caretMoved = !pressed && (u.selectionSet || u.focusChanged);
+      if (
+        u.docChanged ||
+        u.viewportChanged ||
+        caretMoved ||
+        pressChanged(u.startState.field(pointerPressed, false) ?? false, pressed) ||
+        u.startState.field(asking) !== u.state.field(asking)
+      ) {
+        this.decorations = buildBlocks(u.view, this.caret.of(u.view, u.docChanged ? u.changes : null));
       }
     }
   },
@@ -460,12 +473,11 @@ class BlockHandle {
   private onMove(e: MouseEvent): void {
     if (this.menu || e.target === this.button || this.button.contains(e.target as Node)) return;
     if (!this.view.state.facet(EditorView.editable)) return this.hide();
-    const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
     const { doc } = this.view.state;
-    let n = doc.lineAt(pos).number;
-    // Past the end of the text: no line there.
-    const lineBox = this.view.coordsAtPos(doc.line(n).from, 1);
-    if (!lineBox) return this.hide();
+    // The line under the mouse, as drawn (beside the text: the line at that height).
+    const lineEl = (e.target as Element | null)?.closest?.('.cm-line');
+    const pos = lineEl && this.view.contentDOM.contains(lineEl) ? this.view.posAtDOM(lineEl, 0) : this.view.lineBlockAtHeight(e.clientY - this.view.documentTop).from;
+    let n = doc.lineAt(Math.min(pos, doc.length)).number;
     const block = blockAtLine(doc, n);
     if (block) n = block.from + 1;
     this.show(n);
@@ -476,9 +488,11 @@ class BlockHandle {
     if (n > doc.lines) return this.hide();
     const at = this.view.coordsAtPos(doc.line(n).from, 1);
     if (!at) return this.hide();
-    const box = this.view.scrollDOM.getBoundingClientRect();
+    // Placed in its own container (the scroller: it scrolls with the text).
+    const parent = (this.button.offsetParent as HTMLElement | null) ?? this.view.scrollDOM;
+    const box = parent.getBoundingClientRect();
     const lineHeight = this.view.defaultLineHeight;
-    const top = at.top - box.top + this.view.scrollDOM.scrollTop + Math.max(0, (at.bottom - at.top - lineHeight) / 2) + (lineHeight - 22) / 2;
+    const top = at.top - box.top + parent.scrollTop + Math.max(0, (at.bottom - at.top - lineHeight) / 2) + (lineHeight - 22) / 2;
     this.button.style.top = `${Math.round(top)}px`;
     this.button.classList.add('visible');
     this.line = n;
