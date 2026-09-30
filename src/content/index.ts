@@ -1093,7 +1093,9 @@ class ContentApp {
   private updateQuoteBubble(): void {
     // Cheapest checks first: this runs on every scroll / selection change of the page.
     const open = this.notesShown || this.popoutPort !== null;
-    const rect = open && this.ctx?.requiresMedia && this.reading && this.reader.selection().length >= 3 ? this.reader.selectionRect() : null;
+    // Reading mode, or beside a video: the course's text can be quoted while the video plays on.
+    const quotable = this.reading ? Boolean(this.ctx?.requiresMedia) : Boolean(this.ctx);
+    const rect = open && quotable && this.reader.selection().length >= 3 ? this.reader.selectionRect() : null;
     if (!rect || rect.bottom < 0 || rect.top > innerHeight) this.overlay.hideQuoteButton();
     else this.overlay.showQuoteButton(rect, this.quoteShortcut, () => void this.quote());
   }
@@ -1401,6 +1403,12 @@ class ContentApp {
   }
 
   private async insertTimestamp(): Promise<void> {
+    // Text of the course selected beside the video (the page has the focus, not the notes): quoted, the video plays on.
+    const inPage = document.hasFocus() && document.activeElement !== this.drawer.host;
+    if (inPage && (this.reader.selection().length >= 2 || (this.frameSelection?.text.length ?? 0) >= 2)) {
+      await this.quote();
+      return;
+    }
     const seconds = this.player.time();
     const port = await this.inputEditor();
     port.postMessage({ type: 'insert-timestamp', seconds, focus: true } satisfies ContentToPanel);

@@ -442,3 +442,196 @@
   font-style: normal;
   opacity: 0.7;
 }
+
+/* --- Questions and free notes (the + of a line, see blocks.ts) ------------------- */
+
+.cm-line.cm-boo-callout {
+  --block: var(--accent);
+  padding-left: 12px !important;
+  padding-right: 10px !important;
+  background: color-mix(in srgb, var(--block) 7%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--block) 70%, transparent);
+}
+
+.cm-line.cm-boo-callout-free {
+  --block: var(--ok);
+}
+
+.cm-line.cm-boo-callout-other {
+  --block: var(--faint);
+}
+
+.cm-line.cm-boo-callout-head {
+  margin-top: 6px;
+  padding-top: 5px !important;
+  border-radius: 0 8px 0 0;
+}
+
+.cm-line.cm-boo-callout-last {
+  margin-bottom: 6px;
+  padding-bottom: 5px !important;
+  border-radius: 0 0 8px 0;
+}
+
+.cm-line.cm-boo-callout-head.cm-boo-callout-last {
+  border-radius: 0 8px 8px 0;
+}
+
+.cm-boo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in srgb, var(--block, var(--accent)) 80%, var(--text));
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: 0.05em;
+  margin-right: 6px;
+}
+
+.cm-boo-badge svg {
+  flex: none;
+}
+
+/* The state of a question: being answered, to ask, to write. */
+.cm-boo-qstate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  color: var(--faint);
+  font-size: 0.8em;
+  white-space: nowrap;
+  vertical-align: 0.05em;
+}
+
+.cm-boo-qstate-pending {
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  animation: cm-boo-pulse 1.2s ease-in-out infinite;
+}
+
+.cm-boo-qstate-ask {
+  padding: 1px 9px 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cm-boo-qstate-ask:hover {
+  background: var(--accent-soft);
+}
+
+.cm-boo-qstate-empty,
+.cm-boo-qstate-enter {
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-boo-qstate-pending {
+    animation: none;
+  }
+}
+
+/* The + beside the line under the mouse. */
+.boo-block-handle {
+  position: absolute;
+  z-index: 3;
+  left: 3px;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast, 120ms) ease;
+}
+
+.boo-block-handle.visible,
+.boo-block-handle.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.boo-block-handle:hover,
+.boo-block-handle.open {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.boo-block-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 232px;
+  max-width: calc(100vw - 16px);
+  padding: 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--elevated);
+  box-shadow: var(--shadow-l);
+  font-family: var(--font-sans);
+  animation: pop var(--dur, 180ms) var(--ease-out, ease-out);
+}
+
+.boo-block-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.boo-block-menu button > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.boo-block-menu button[data-action='question'] > svg {
+  color: var(--accent);
+}
+
+.boo-block-menu button[data-action='free'] > svg {
+  color: var(--ok);
+}
+
+.boo-block-menu button small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.boo-block-menu button:hover,
+.boo-block-menu button:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.boo-block-menu button[aria-checked='true'] {
+  background: var(--accent-soft);
+}
+
+.boo-block-menu button[aria-checked='true'] .boo-block-menu-label::after {
+  content: ' ✓';
+  color: var(--accent);
+}

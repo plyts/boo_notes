@@ -1,7 +1,9 @@
+import { listModels, type ClaudeModel } from '../shared/claude';
 import { h, icon, type IconName } from '../shared/icons';
 import { IS_MAC, keycaps } from '../shared/keycaps';
 import { callBackground, type CommandId, type NotionStatus, type SyncStatus } from '../shared/messages';
 import { PLATFORM_LABELS } from '../shared/platforms';
+import { loadQa, saveQa, type QaConfig } from '../shared/qa-config';
 import { isLoopbackWsUrl, loadSettings, saveSettings, type Settings } from '../shared/settings';
 import { DEFAULT_SHORTCUTS, inPageBindings } from '../shared/shortcuts';
 
@@ -207,6 +209,67 @@ function renderNotion(status: NotionStatus | undefined): void {
   (document.getElementById('notion-actions') as HTMLElement).hidden = !configured;
   // A connection shared by the app is managed there.
   (document.getElementById('notion-disconnect-row') as HTMLElement).hidden = status?.origin === 'desktop';
+}
+
+/** Options › Questions: answers written by Claude (the user's key), or the closest passages without AI. */
+function renderQa(qa: QaConfig, models: ClaudeModel[] | null, error = ''): void {
+  const on = qa.provider === 'claude';
+  (document.getElementById('qa-card') as HTMLElement).dataset.state = on ? (error ? 'offline' : 'connected') : 'offline';
+  (document.getElementById('qa-badge') as HTMLElement).textContent = on ? 'Réponses rédigées par Claude' : 'Réponses sans IA';
+  const model = models?.find((m) => m.id === qa.model);
+  (document.getElementById('qa-detail') as HTMLElement).textContent = on
+    ? error || `Modèle : ${model?.name ?? qa.model}`
+    : 'Les questions reçoivent les passages du cours les plus proches. Ajoutez une clé Claude pour une réponse rédigée.';
+  (document.getElementById('qa-form') as HTMLElement).hidden = on;
+  (document.getElementById('qa-actions') as HTMLElement).hidden = !on;
+  const select = document.getElementById('qa-model') as HTMLSelectElement;
+  const list = models?.length ? models : qa.model ? [{ id: qa.model, name: qa.model }] : [];
+  select.replaceChildren(...list.map((m) => h('option', { value: m.id }, m.name)));
+  select.value = qa.model;
+}
+
+async function setUpQa(): Promise<void> {
+  let qa = await loadQa();
+  renderQa(qa, null);
+  if (qa.provider === 'claude') {
+    listModels(qa.key, qa.base).then(
+      (models) => renderQa(qa, models),
+      (e: unknown) => renderQa(qa, null, e instanceof Error ? e.message : String(e)),
+    );
+  }
+  const key = document.getElementById('qa-key') as HTMLInputElement;
+  const button = document.getElementById('qa-connect') as HTMLButtonElement;
+  document.getElementById('qa-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = 'Vérification…';
+    try {
+      // The key is tried first: the models it may use, the most recent chosen.
+      const models = await listModels(key.value.trim(), qa.base);
+      if (!models.length) throw new Error('aucun modèle n’est disponible pour cette clé');
+      qa = await saveQa({ provider: 'claude', key: key.value.trim(), model: models[0].id });
+      key.value = '';
+      renderQa(qa, models);
+      flashSaved('Claude activé : vos questions reçoivent une réponse rédigée');
+    } catch (err) {
+      flashSaved(err instanceof Error ? err.message : String(err), false);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Vérifier et activer';
+    }
+  });
+  const select = document.getElementById('qa-model') as HTMLSelectElement;
+  select.addEventListener('change', async () => {
+    qa = await saveQa({ model: select.value });
+    const models = [...select.options].map((o) => ({ id: o.value, name: o.textContent ?? o.value }));
+    renderQa(qa, models);
+    flashSaved('Modèle enregistré');
+  });
+  document.getElementById('qa-remove')?.addEventListener('click', async () => {
+    qa = await saveQa({ provider: 'extracts', key: '', model: '' });
+    renderQa(qa, null);
+    flashSaved('Clé retirée');
+  });
 }
 
 async function renderData(): Promise<void> {
@@ -434,7 +497,7 @@ async function main(): Promise<void> {
   });
   const allSites = document.getElementById('all-sites') as HTMLInputElement;
   allSites.addEventListener('change', () => void toggleAllSites(allSites));
-  await Promise.all([renderShortcuts(), renderData(), renderSites(), renderAllSites()]);
+  await Promise.all([renderShortcuts(), renderData(), renderSites(), renderAllSites(), setUpQa()]);
 }
 
 void main();

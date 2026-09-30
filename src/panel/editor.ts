@@ -36,6 +36,7 @@ import {
 import { tags as t } from '@lezer/highlight';
 import type { Tree } from '@lezer/common';
 import { shouldAutoStamp } from '../shared/autostamp';
+import { calloutHeader, type Answer } from '../shared/callouts';
 import {
   findFragmentLinks,
   findPageRefs,
@@ -49,6 +50,7 @@ import {
   type TimestampMatch,
 } from '../shared/markdown';
 import { parseTimecode } from '../shared/time';
+import { blockAtLine, blockExtensions, dropAnswer, inQuestionOrFreeNote, intoFreeNote, openBlockMenu, putAnswer, type AskRequest } from './blocks';
 
 export interface EditorHooks {
   /** Current video position, `null` when no video is attached. */
@@ -108,6 +110,11 @@ export interface EditorHooks {
   onCopyImage?(path: string): void;
   /** Text of an empty note. */
   placeholderText?: string;
+  /**
+   * A question of the note (+ › Question) to answer from the course: the
+   * answer comes back through `answer(id, …)`. No questions without it.
+   */
+  onAsk?(req: AskRequest): void;
 }
 
 export type AnchorKind = 'page' | 'section' | 'pin';
@@ -309,6 +316,8 @@ function buildPreview(view: EditorView, load: (path: string) => Promise<string>,
           return;
         }
         if (name === 'Blockquote') {
+          // A question or a free note has its own look (see blocks.ts); a quote in it keeps this one.
+          if (calloutHeader(state.doc.lineAt(node.from).text)) return;
           for (let pos = node.from; pos <= node.to; ) {
             const line = state.doc.lineAt(pos);
             out.push(Decoration.line({ class: 'cm-boo-quote' }).range(line.from));
@@ -600,7 +609,8 @@ const theme = EditorView.theme({
   '&': { height: '100%', fontSize: '14px', color: 'var(--text)', backgroundColor: 'transparent' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { fontFamily: 'var(--font-sans)', lineHeight: '1.6', overflowX: 'hidden' },
-  '.cm-content': { padding: '12px 16px 48px', caretColor: 'var(--accent)' },
+  // Room on the left for the + of the line under the mouse.
+  '.cm-content': { padding: '12px 16px 48px 26px', caretColor: 'var(--accent)' },
   '.cm-line': { padding: '0 2px' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground': {
@@ -630,6 +640,7 @@ export class NotesEditor {
       livePreview(hooks.loadAsset, hooks.resourceBadge, Boolean(hooks.onCopyImage)),
       nowLine,
       pendingInserts,
+      hooks.onAsk ? blockExtensions({ onAsk: hooks.onAsk }) : [],
       this.editable.of(EditorView.editable.of(true)),
       placeholder(hooks.placeholderText ?? 'Écrivez ici…'),
       keymap.of([
@@ -868,6 +879,34 @@ export class NotesEditor {
    */
   insertBlock(text: string, at: 'cursor' | 'end' = 'cursor'): void {
     const { state } = this.view;
+    // Writing in a free note (even with the page or the video focused since): it goes into the note.
+    if (at === 'cursor') {
+      const line = state.doc.lineAt(state.selection.main.head);
+      const block = blockAtLine(state.doc, line.number);
+      if (block?.kind === 'free') {
+        const insert = `\n${intoFreeNote(text)}`;
+        const where = line.number - 1 === block.from ? state.doc.line(block.to + 1).to : line.to;
+        this.view.dispatch({
+          changes: { from: where, insert },
+          selection: { anchor: where + insert.length },
+          scrollIntoView: true,
+          userEvent: 'input.capture',
+        });
+        return;
+      }
+      // Not inside a question: under it.
+      if (block?.kind === 'question' && this.view.hasFocus) {
+        const end = state.doc.line(block.to + 1).to;
+        const insert = `\n\n${text}${text.startsWith('>') ? '\n\n' : block.to + 1 === state.doc.lines ? '\n' : ''}`;
+        this.view.dispatch({
+          changes: { from: end, insert },
+          selection: { anchor: end + insert.length },
+          scrollIntoView: true,
+          userEvent: 'input.capture',
+        });
+        return;
+      }
+    }
     // A quote needs a blank line after it: the next line would otherwise continue the quote.
     const quote = text.startsWith('>');
     if (at === 'cursor' && this.view.hasFocus) {
@@ -950,6 +989,21 @@ export class NotesEditor {
       scrollIntoView: focused,
       userEvent: 'input.paste',
     });
+  }
+
+  /** The answer to question `id` (see `EditorHooks.onAsk`), into its block. */
+  answer(id: number, answer: Answer): boolean {
+    return putAnswer(this.view, id, answer);
+  }
+
+  /** No answer to question `id`: it can be asked again. */
+  answerFailed(id: number): void {
+    dropAnswer(this.view, id);
+  }
+
+  /** The + menu of line `n` (1-based). */
+  openBlockMenu(n: number): void {
+    openBlockMenu(this.view, n);
   }
 
   /** Main resource of the note (anchors without a target point to it). */
@@ -1104,6 +1158,8 @@ export class NotesEditor {
     const line = view.state.doc.lineAt(from);
     if (from !== line.to || !shouldAutoStamp(line.text, text)) return false;
     if (inCode(syntaxTree(view.state), Math.max(line.from, from - 1))) return false;
+    // A free note (and a question) is not tied to the video.
+    if (inQuestionOrFreeNote(view.state.doc, line.number)) return false;
     const stamp = `${token} `;
     view.dispatch({
       changes: { from, to, insert: stamp + text },

@@ -1,4 +1,5 @@
 import { PDFDocument, PDFName, PDFNull, PDFString, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage, type PDFRef } from 'pdf-lib';
+import { calloutHeader, findCallouts, unquote, type Callout } from './callouts';
 import { formatTimecode, parseTimecode } from './time';
 import { PASSAGE_LINE, TRANSCRIPT_LINE } from './transcript';
 
@@ -50,6 +51,8 @@ const WIDTH = A4[0] - MARGIN.left - MARGIN.right;
 const INK = rgb(0.11, 0.11, 0.13);
 const MUTED = rgb(0.43, 0.43, 0.46);
 const ACCENT = rgb(0.36, 0.29, 0.86);
+/** Free notes (« Note libre »). */
+const FREE = rgb(0.12, 0.52, 0.3);
 const LINK = rgb(0.2, 0.33, 0.8);
 const RULE = rgb(0.85, 0.85, 0.88);
 const HIGHLIGHT = rgb(1, 0.93, 0.55);
@@ -351,9 +354,12 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
   l.rule();
 
   const lines = note.markdown.replace(/\r\n?/g, '\n').split('\n');
+  // Questions and free notes: a titled block, a coloured bar along it.
+  const blocks = new Map<number, { kind: Callout['kind']; header: boolean }>();
+  for (const c of findCallouts(lines)) for (let i = c.from; i <= c.to; i++) blocks.set(i, { kind: c.kind, header: i === c.from });
   let fence: string | null = null;
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '');
+  for (const [i, raw] of lines.entries()) {
+    let line = raw.replace(/\s+$/, '');
     // Code blocks: monospace, grey background.
     const f = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
     if (f) {
@@ -368,6 +374,35 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
     if (!line.trim()) {
       l.gap(6);
       continue;
+    }
+
+    const block = blocks.get(i);
+    if (block) {
+      const color = block.kind === 'question' ? ACCENT : block.kind === 'free' ? FREE : MUTED;
+      const bar = (y: number, h: number) => l.page.drawRectangle({ x: MARGIN.left + 2, y: y - 3.5, width: 2.2, height: h, color });
+      if (block.header) {
+        const title = calloutHeader(line)?.title || (block.kind === 'free' ? 'Note libre' : 'Question');
+        l.gap(6);
+        l.need(48);
+        l.paragraph(inlineRuns(title, note, src, { bold: true }), { indent: 12, color, before: bar, size: 10.5 });
+        continue;
+      }
+      const inner = unquote(line);
+      if (!inner.trim()) {
+        l.gap(4);
+        continue;
+      }
+      if (!/!\[[^\]\n]*\]\(assets\//.test(inner)) {
+        const nested = /^>\s?(.*)$/.exec(inner);
+        l.paragraph(inlineRuns(nested ? nested[1] : inner, note, src, nested ? { italic: true } : {}), {
+          indent: nested ? 22 : 12,
+          before: bar,
+          ...(nested ? { color: rgb(0.3, 0.3, 0.34) } : {}),
+        });
+        continue;
+      }
+      // A picture in the block: drawn as any picture.
+      line = inner;
     }
 
     // A passage (clip): its card, a link replaying it at the source, its extract.

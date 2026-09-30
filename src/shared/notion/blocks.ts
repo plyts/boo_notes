@@ -7,6 +7,7 @@
  * screenshots are uploaded as image blocks captioned with their timestamp.
  */
 
+import { calloutHeader, unquote } from '../callouts';
 import { formatTimecode } from '../time';
 import { languagesLabel, type Transcript } from '../transcript';
 
@@ -240,6 +241,25 @@ export function markdownToBlocks(markdown: string, ctx: InlineContext = {}): Blo
     }
     if (DIVIDER.test(line)) {
       out.push({ type: 'divider' });
+      lastTopList = null;
+      continue;
+    }
+    // A question (and its answer) or a free note: a callout holding its lines.
+    const callout = calloutHeader(line);
+    if (callout) {
+      const body: string[] = [];
+      while (i + 1 < lines.length && QUOTE.test(lines[i + 1]) && !calloutHeader(lines[i + 1])) body.push(unquote(lines[++i]));
+      const kind = callout.type === 'question' ? 'question' : callout.type === 'note' ? 'free' : 'other';
+      const title = callout.title || (kind === 'question' ? 'Question' : kind === 'free' ? 'Note libre' : callout.type);
+      // Two levels of blocks per request: what the lines nest is flattened under the callout.
+      const children = markdownToBlocks(body.join('\n'), ctx).flatMap((b) => ('children' in b && b.children?.length ? [{ ...b, children: undefined }, ...b.children] : [b]));
+      out.push({
+        type: 'callout',
+        rich: parseInlineCtx(title, { bold: true }, null, ctx),
+        emoji: kind === 'question' ? '❓' : kind === 'free' ? '📝' : '💡',
+        color: kind === 'question' ? 'blue_background' : kind === 'free' ? 'green_background' : 'gray_background',
+        ...(children.length ? { children } : {}),
+      });
       lastTopList = null;
       continue;
     }

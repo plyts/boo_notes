@@ -22,6 +22,8 @@ export const COMMAND_LABELS: Record<CommandId, string> = {
 
 const EDITOR_TIPS: Array<[string, string]> = [
   ['Nouvelle ligne horodatée', 'Entrée'],
+  ['Question ou note libre (aussi le + au survol d’une ligne)', 'Mod+.'],
+  ['Poser la question · sortir du bloc', 'Entrée'],
   ['Aller au moment d’un horodatage', 'Clic'],
   ['Modifier un horodatage', 'Alt+Clic'],
   ['Enregistrer', 'Mod+S'],

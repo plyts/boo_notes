@@ -18,6 +18,21 @@ tableau de votre page.
   components, podcasts et radios `new Audio()`, et un **chronomètre** pour ce qu’aucun script ne
   peut lire — plus **toute page à lire** en **mode lecture** (citations liées au passage, surlignées
   dans la page). Chaque note se range dans un cours › chapitre depuis le panneau.
+- **Questions et notes libres** ([détails](docs/QUESTIONS.md)) : survolez une ligne de vos notes, un
+  **+** apparaît à côté d’elle (et seulement là) ; un clic, puis **Question** ou **Note libre** —
+  sans syntaxe à retenir (au clavier : `Ctrl + .`).
+  - **Question** : la ligne devient « Question 1, 2, 3… » (dans l’ordre de la note, avec l’instant
+    où elle a été posée) et sa **réponse est cherchée dans le cours** — la **transcription** de la
+    vidéo d’abord, puis le **texte du cours** (la page, un module dans ses cadres) et les **notes**
+    déjà prises (celle-ci et les autres du cours). La réponse s’écrit sous la question avec ses
+    **sources** : le passage de la transcription et son **horodatage cliquable** (« Source du cours
+    — 23:41 »), le passage de la page (lien surligné), la note. Rédigée par **Claude** avec votre
+    clé API (options › Questions), sinon faite des passages du cours les plus proches.
+  - **Note libre** : une note personnelle, **pas associée à l’horodatage** de la vidéo ; tout y
+    reste possible — texte, **citations** du cours, **captures**, images, liens, réflexions.
+  - **Vidéo, notes et cours ne se bloquent pas** : la vidéo continue pendant qu’on écrit, qu’on
+    cite du texte de la page (bulle « Citer » ou `Alt+Shift+T` sur une sélection, même à côté d’une
+    vidéo), qu’on capture ou qu’une réponse est cherchée.
 - **Transcription** ([docs/TRANSCRIPTION.md](docs/TRANSCRIPTION.md)) : pendant la lecture, les
   **sous-titres horodatés** sont recopiés en arrière-plan dans une transcription à part (onglet
   **Transcription**), **traduits** sur l’appareil ou à la main (anglais → français, français →
@@ -138,6 +153,7 @@ arrête le build avec un message clair : `dist/` n’est remplacé que par un bu
 | Début / fin du passage | `Alt+I` / `Alt+O` | Découpe un passage (02:05–06:07) : carte dans la note, extrait image + son, sous-titres et notes de l’intervalle. |
 | Épingler la réplique en cours | `Ctrl+Shift+K` (`⌘⇧K`) | Dans le panneau : cite le sous-titre en cours (et sa traduction) dans la note. |
 | Notes ⇄ Transcription | `Alt+T` | Dans le panneau et l’application. |
+| Question ou note libre | `Ctrl+.` (`⌘.`) | Dans le panneau : le menu du **+** pour la ligne du curseur (Question, Note libre, Note normale). `Entrée` au bout d’une question la pose et continue sous le bloc ; `Entrée` sur la dernière ligne vide d’un bloc en sort. |
 | Aide | `Ctrl+/` (`⌘/`) | Dans le panneau : feuille de tous les raccourcis (et `?` hors de l’éditeur). |
 
 Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bouton dans les réglages).
@@ -258,8 +274,13 @@ surlignage dans la page, retour au passage, bulle « Citer », repère de sectio
 lecture), **`[[liens]]`** (complétion sans accents, ouverture de la note liée), **envoi direct
 vers Notion** sans l’application (connexion dans les options, API Notion simulée), **tout flux**
 (vidéo dans un shadow DOM fermé, `new Audio()` hors page, lecteur dans une iframe d’un autre
-domaine : horodatage, saut, capture ; lecteur non autorisé proposé à l’autorisation ; chronomètre)
-et le **classement cours › chapitre** depuis le panneau.
+domaine : horodatage, saut, capture ; lecteur non autorisé proposé à l’autorisation ; chronomètre),
+le **classement cours › chapitre** depuis le panneau, et les **questions et notes libres** (le **+**
+au survol seulement, son menu à la souris et au clavier ; question numérotée et renumérotée dans
+l’ordre de la note, réponse tirée de la transcription avec son horodatage cliquable, sans IA puis
+avec l’API Claude simulée — clé, modèle, transcription et texte de la page envoyés ; note libre
+sans horodatage où vont une capture et une citation de la page ; sortie d’un bloc par `Entrée` ; la
+vidéo qui continue de jouer ; section Questions des options).
 
 ```
 src/
@@ -273,7 +294,7 @@ src/
 tools/mock-desktop/   serveur WebSocket simulant l’application Boo Notes Desktop
 tools/mock-notion/    API Notion simulée (tests, développement)
 tests/unit, tests/e2e
-docs/         architecture, protocole, design, transcription, Notion
+docs/         architecture, protocole, design, transcription, questions, Notion
 ```
 
 ## Limites connues
@@ -311,6 +332,12 @@ docs/         architecture, protocole, design, transcription, Notion
   sélectionne pas : capture et notes restent possibles.
 - **Notion depuis l’extension** : le secret de l’intégration est alors conservé dans le stockage
   local de l’extension (voir [docs/NOTION.md](docs/NOTION.md)).
+- **Réponses aux questions** : rédigées par Claude seulement avec une clé API Anthropic (options ›
+  Questions : la clé reste dans le stockage local ; la question et les extraits du cours partent
+  directement à l’API Claude). Sans clé, la réponse est faite des passages les plus proches, trouvés
+  par les mots de la question : une question en français sur un cours en anglais les trouve par la
+  traduction des sous-titres (onglet Transcription) ou le traducteur de Chrome s’il est déjà prêt.
+  Sans transcription (vidéo sans sous-titres), la réponse s’appuie sur le texte de la page et vos notes.
 - **Lecteurs intégrés** (iframes) : pris en charge dès que l’extension peut lire l’hôte du lecteur
   (YouTube, et tout hôte autorisé en un clic depuis le panneau). Une iframe dans une iframe est
   pilotée, mais le HUD ne peut pas s’y superposer. Les lecteurs `new Audio()` sont vus dès leur

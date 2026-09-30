@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest';
+import {
+  answerLines,
+  calloutAt,
+  convertBlock,
+  findCallouts,
+  inBlock,
+  lineToBlock,
+  questionNumberAt,
+  questionOf,
+  renumberQuestions,
+  withAnswer,
+} from '../../src/shared/callouts';
+
+const note = [
+  '[01:10] Le professeur explique la différence entre X et Y.',
+  '> [!question] Question 1 · [02:05]',
+  '> Pourquoi cette méthode fonctionne-t-elle dans ce cas ?',
+  '',
+  '> [!note] Note libre',
+  '> Cette partie me fait penser à un concept vu avant.',
+  '> > « Extrait du cours » [↗](https://ex.test/c#:~:text=Extrait)',
+  '> ![Capture](assets/n/1.png)',
+  'Suite de la prise de notes.',
+  '> [!question] Question 7',
+  '> Quelle est la différence entre X et Y ?',
+];
+
+describe('blocks of a note', () => {
+  it('finds questions and free notes, each with all its lines', () => {
+    expect(findCallouts(note).map((c) => [c.kind, c.from, c.to, c.title])).toEqual([
+      ['question', 1, 2, 'Question 1 · [02:05]'],
+      ['free', 4, 7, 'Note libre'],
+      ['question', 9, 10, 'Question 7'],
+    ]);
+    expect(calloutAt(note, 6)?.kind).toBe('free');
+    expect(calloutAt(note, 8)).toBeNull();
+    expect(inBlock(note, 5)).toBe(true);
+    expect(inBlock(note, 0)).toBe(false);
+  });
+
+  it('ignores callouts written in code, and other callout types are « other »', () => {
+    const lines = ['```', '> [!question] Question 1', '```', '> [!tip] Astuce', '> texte'];
+    expect(findCallouts(lines).map((c) => [c.kind, c.type, c.from])).toEqual([['other', 'tip', 3]]);
+    expect(inBlock(lines, 4)).toBe(false);
+  });
+
+  it('numbers questions in the order of the note', () => {
+    expect(renumberQuestions(note)).toEqual([{ line: 9, from: 14, to: 24, text: 'Question 2' }]);
+    expect(questionNumberAt(note, 8)).toBe(2);
+    expect(questionNumberAt(note, 0)).toBe(1);
+    // A title the user wrote otherwise is left alone.
+    expect(renumberQuestions(['> [!question] Ma question', '> ?'])).toEqual([]);
+  });
+});
+
+describe('making a block from a line', () => {
+  it('a question keeps the moment it was asked, in its header', () => {
+    expect(lineToBlock('[15:32] Pourquoi cette méthode ?', 'question', 4)).toEqual(['> [!question] Question 4 · [15:32]', '> Pourquoi cette méthode ?']);
+    expect(lineToBlock('- Pourquoi ?', 'question', 1)).toEqual(['> [!question] Question 1', '> Pourquoi ?']);
+    expect(lineToBlock('', 'question', 2)).toEqual(['> [!question] Question 2', '>']);
+  });
+
+  it('a free note is not tied to the video: its timestamp goes', () => {
+    expect(lineToBlock('[15:32] Me fait penser au cours 2', 'free', 1)).toEqual(['> [!note] Note libre', '> Me fait penser au cours 2']);
+    expect(lineToBlock('> « cité » [↗](https://x.test/#:~:text=cit%C3%A9)', 'free', 1)).toEqual([
+      '> [!note] Note libre',
+      '> > « cité » [↗](https://x.test/#:~:text=cit%C3%A9)',
+    ]);
+  });
+
+  it('changes kind, or goes back to normal lines with its content', () => {
+    const q = ['> [!question] Question 1 · [02:05]', '> Pourquoi ?', '>', '> **Réponse :** Parce que.'];
+    expect(convertBlock(q, 'free', 1)).toEqual(['> [!note] Note libre', '> Pourquoi ?', '>', '> **Réponse :** Parce que.']);
+    expect(convertBlock(q, 'normal', 1)).toEqual(['[02:05] Pourquoi ?', '', '**Réponse :** Parce que.']);
+    expect(convertBlock(['> [!note] Note libre', '> Idée'], 'question', 3)).toEqual(['> [!question] Question 3', '> Idée']);
+  });
+});
+
+describe('questions and their answers', () => {
+  it('reads the question (and whether it has its answer)', () => {
+    const [q1] = findCallouts(note);
+    expect(questionOf(note, q1)).toEqual({ text: 'Pourquoi cette méthode fonctionne-t-elle dans ce cas ?', stamp: 125, lastLine: 2, answered: false });
+  });
+
+  it('writes the answer with its sources, their moment and the passage', () => {
+    const lines = answerLines({
+      method: 'ai',
+      text: 'La méthode fonctionne parce que les gradients sont bornés.',
+      sources: [
+        { kind: 'transcript', ref: '[23:41]', quote: 'Because the gradients\nstay bounded.' },
+        { kind: 'page', ref: '[↗ Méthode](https://c.test/l#:~:text=M%C3%A9thode)', quote: 'La méthode…' },
+        { kind: 'note', ref: '[12:05]', quote: 'gradients bornés' },
+      ],
+    });
+    expect(lines).toEqual([
+      '>',
+      '> **Réponse :** La méthode fonctionne parce que les gradients sont bornés.',
+      '>',
+      '> **Source du cours — [23:41]**',
+      '> « Because the gradients stay bounded. »',
+      '>',
+      '> **Source du cours — [↗ Méthode](https://c.test/l#:~:text=M%C3%A9thode)**',
+      '> « La méthode… »',
+      '>',
+      '> **Vos notes — [12:05]**',
+      '> « gradients bornés »',
+    ]);
+    // Without an AI: the closest passages; nothing close: said so.
+    expect(answerLines({ method: 'extracts', text: '', sources: [] })).toEqual([
+      '>',
+      '> **Réponse — passages du cours les plus proches (sans IA) :** aucun passage du cours ne s’en approche.',
+    ]);
+  });
+
+  it('an answer cannot break its block (no callout header in it)', () => {
+    const lines = answerLines({ method: 'ai', text: 'Un\n\n> [!note] piège', sources: [] });
+    expect(findCallouts(['> [!question] Question 1', '> ?', ...lines])).toHaveLength(1);
+  });
+
+  it('a new answer replaces the old one, the question stays', () => {
+    const block = ['> [!question] Question 1', '> Pourquoi ?', '>', '> **Réponse :** Ancienne.', '>', '> **Source du cours — [01:00]**'];
+    expect(withAnswer(block, ['>', '> **Réponse :** Nouvelle.'])).toEqual(['> [!question] Question 1', '> Pourquoi ?', '>', '> **Réponse :** Nouvelle.']);
+    expect(withAnswer(['> [!question] Question 1', '> Pourquoi ?'], ['>', '> **Réponse :** Oui.'])).toEqual([
+      '> [!question] Question 1',
+      '> Pourquoi ?',
+      '>',
+      '> **Réponse :** Oui.',
+    ]);
+  });
+});

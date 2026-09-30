@@ -44,6 +44,7 @@
 | **Panneau** | `src/panel/index.ts` | Éditeur de notes ; tourne soit dans l’iframe du drawer, soit dans la fenêtre pop-out. Communique avec le script de contenu de l’onglet vidéo par un *port*. |
 | **Options** | `src/options/index.ts` | Réglages (`chrome.storage.sync`), état des raccourcis, état de la synchronisation, données (dont « Télécharger toutes les notes en PDF »). |
 | **Diagnostic** | `src/diagnostic/index.ts` | Rapport « Diagnostic de cette page » (clic droit sur l’icône, ou aide du panneau) : le SW (`src/background/diagnostic.ts`) sonde chaque cadre lisible de l’onglet (`chrome.scripting`, monde isolé et monde de la page : cadres, médias, API SCORM, agent), interroge le script de la page et les droits ; `src/shared/diagnostic.ts` en tire un constat en clair et un texte à copier. |
+| **Questions et notes libres** | `src/panel/blocks.ts`, `src/panel/answers.ts` | Le **+** au survol d’une ligne et son menu (Question, Note libre, Note normale), l’apparence et la numérotation des blocs (callouts `> [!question]` / `> [!note]`, format dans `src/shared/callouts.ts`) ; la réponse d’une question cherchée dans le cours sans toucher à la vidéo : transcription, texte du cours de l’onglet (requête `course:text` : `chrome.scripting` dans chaque cadre lisible, `src/shared/course-text.ts`), notes du cours ; classement BM25 et requête à l’API Claude avec la clé de l’utilisateur (`src/shared/qa.ts`, `src/shared/claude.ts`). Voir [QUESTIONS.md](QUESTIONS.md). |
 | **Document hors écran** | `src/offscreen/pdf.ts` | Mise en page des PDF (`src/shared/pdf-notes.ts`, pdf-lib) : le service worker (`src/background/pdf.ts`) rassemble les notes et leurs images, l’ouvre le temps d’un export (`chrome.offscreen`) puis télécharge le résultat. La bibliothèque PDF reste ainsi hors du service worker, que Chrome relance souvent. |
 
 La logique pure est dans `src/shared/` et couverte par les tests unitaires. **Boo Notes Desktop**
@@ -215,6 +216,7 @@ macOS Option).
 | `notion:config` | connexion Notion (secret, tableau, page hub, origine : `desktop` ou `extension`) |
 | `notion:link:<noteId>` | page Notion de la note et empreintes de ses blocs (synchro incrémentale) |
 | `notion:pending` | notes à écrire dans Notion (application fermée) |
+| `qa:config` | réponses aux questions : Claude (clé API, modèle) ou passages sans IA ; jamais synchronisé |
 | `desktop:titles` | titres de la bibliothèque Desktop (complétion `[[`) |
 | `desktop:courses` | cours et chapitres de la bibliothèque Desktop (classement depuis le panneau) |
 | `players:allowed` | hôtes de lecteurs intégrés autorisés (agent injecté dans leurs iframes) |

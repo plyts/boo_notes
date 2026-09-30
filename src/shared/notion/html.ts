@@ -82,7 +82,10 @@ export function blocksHtml(blocks: BlockSpec[], asset: (path: string) => string,
         out += `<p><a href="${esc(b.url)}">${esc(b.url)}</a></p>`;
         break;
       case 'callout':
-        out += `<aside>${richHtml(b.rich)}</aside>`;
+        // A question and its answer, a free note: a titled quote holding its lines.
+        out += b.children?.length
+          ? `<blockquote><p><strong>${b.emoji ? `${esc(b.emoji)} ` : ''}</strong>${richHtml(b.rich)}</p>${blocksHtml(b.children, asset, headingShift)}</blockquote>`
+          : `<aside>${richHtml(b.rich)}</aside>`;
         break;
       default:
         out += `<p>${richHtml(b.rich)}</p>`;

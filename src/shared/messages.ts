@@ -2,6 +2,7 @@ import type { MediaKind, VideoContext } from './platforms';
 import type { DrawerLayout } from './settings';
 import type { InPageBinding } from './shortcuts';
 import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
+import type { CourseText } from './course-text';
 import type { Cue, Transcript, TranscriptSource } from './transcript';
 import type { CuePatch, TranscriptInfo } from './transcript-store';
 
@@ -212,6 +213,8 @@ export type BackgroundRequest =
   | { type: 'notes:pdf' }
   /** « Diagnostic de cette page »: probes the tab and opens the report. */
   | { type: 'diagnostic:run'; tabId: number }
+  /** The text of the course in the tab (its page, its frames): sources of the answers to questions. */
+  | { type: 'course:text'; tabId: number }
   | { type: 'notes:clear' }
   /** Sites where Boo Notes is always active (optional host permission already granted). */
   | { type: 'sites:list' }
@@ -295,6 +298,7 @@ export interface BackgroundResponses {
   'notes:list': Record<string, NoteSummary>;
   'notes:pdf': { message: string };
   'diagnostic:run': void;
+  'course:text': CourseText[];
   'notes:clear': void;
   'sites:list': string[];
   'sites:enable': string[];

@@ -61,6 +61,8 @@ import { EmptyState, ShortcutsSheet, type ShortcutMap } from './sheet';
 import { Timeline } from './timeline';
 import { TranscriptView } from './transcript-view';
 import { CueTranslator, type TranslateStatus } from './translator';
+import { answerQuestion } from './answers';
+import type { AskRequest } from './blocks';
 
 /**
  * The notes panel. The same page runs embedded in the drawer iframe and in
@@ -255,6 +257,7 @@ class PanelApp {
       },
       onWikiLinkClick: (title) => void this.openWiki(title),
       onFragmentClick: (url) => this.openFragment(url),
+      onAsk: (req) => void this.answer(req),
       placeholderText: 'Écrivez ici… ([[ pour lier une fiche)',
     });
     this.editor.setEditable(false);
@@ -439,6 +442,33 @@ class PanelApp {
       case 'media-ended':
         void this.loading.then(() => this.pinTranscript(false));
         break;
+    }
+  }
+
+  /**
+   * + › Question: the answer looked for in the course (transcript, page,
+   * notes) while the video plays on, then written under the question.
+   */
+  private async answer(req: AskRequest): Promise<void> {
+    const note = this.note;
+    try {
+      const answer = await answerQuestion({
+        question: req.question,
+        stamp: req.stamp,
+        tabId: TAB_ID,
+        noteId: note?.id ?? this.ctx?.noteId ?? null,
+        title: this.title || note?.title || '',
+        url: this.ctx?.canonicalUrl ?? note?.url ?? null,
+        transcript: this.transcript,
+        lines: this.editor.content.split('\n'),
+        course: note?.course ?? null,
+      });
+      // Another note opened meanwhile: the question is not in this one.
+      if (this.note?.id !== note?.id) return;
+      if (this.editor.answer(req.id, answer) && answer.note) this.notify(answer.note, 'error');
+    } catch (e) {
+      this.editor.answerFailed(req.id);
+      this.notify(`Réponse impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }
 

@@ -11,6 +11,7 @@ import {
   type SyncStatus,
   type TabMessage,
 } from '../shared/messages';
+import { readCourseText, type CourseText } from '../shared/course-text';
 import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
@@ -706,6 +707,12 @@ const handlers: Handlers = {
   'notes:pdf': async () => ({ message: await downloadPdf(store, null) }),
 
   'diagnostic:run': (msg) => diagnose(msg.tabId),
+
+  'course:text': async ({ tabId }) => {
+    // Every frame Boo Notes may read: the page, a course module in its frames.
+    const results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: readCourseText }).catch(() => []);
+    return results.map((r) => r.result as CourseText | null).filter((r): r is CourseText => r !== null && r !== undefined);
+  },
 
   'wiki:titles': async () => {
     const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_TITLES)]);
