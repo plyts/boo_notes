@@ -341,27 +341,44 @@ export interface Prompt {
   user: string;
 }
 
-export function buildPrompt(question: string, passages: readonly Passage[], ctx: { title: string; stamp: number | null }): Prompt {
-  const system = [
-    'Tu es l’assistant d’étude de Boo Notes. Un étudiant suit un cours et pose une question dans ses notes.',
-    'Réponds uniquement à partir des extraits du cours fournis : la transcription de la vidéo (T…), le texte de la page du cours (P…), les notes de l’étudiant (N…). Privilégie la transcription, puis le texte du cours, puis les notes.',
-    'Réponds dans la langue de la question, clairement et brièvement (2 à 6 phrases), sans formule de politesse.',
-    'Si les extraits ne permettent pas de répondre, dis-le en une phrase et mets "found" à false : n’invente rien.',
-    'Réponds par un seul objet JSON, sans texte autour : {"answer": "…", "found": true, "sources": [{"id": "T12", "quote": "phrase recopiée mot pour mot de l’extrait"}]}.',
-    'Cite 1 à 3 sources, les plus utiles, avec une citation courte (moins de 40 mots) recopiée exactement de l’extrait.',
-  ].join('\n');
+/**
+ * The request to the AI. `lang`: the language it answers in — French (the
+ * question's, as asked), or English for a model that writes only English
+ * (the answer is translated afterwards).
+ */
+export function buildPrompt(question: string, passages: readonly Passage[], ctx: { title: string; stamp: number | null; lang?: 'fr' | 'en' }): Prompt {
+  const en = ctx.lang === 'en';
+  const system = (
+    en
+      ? [
+          'You are the study assistant of Boo Notes. A student follows a course and asks a question in their notes.',
+          'Answer only from the course excerpts given: the video transcript (T…), the text of the course page (P…), the student’s notes (N…). Prefer the transcript, then the course text, then the notes.',
+          'Answer in English, clearly and briefly (2 to 6 sentences).',
+          'If the excerpts do not answer the question, say so in one sentence and set "found" to false: never invent.',
+          'Reply with one JSON object only: {"answer": "…", "found": true, "sources": [{"id": "T12", "quote": "sentence copied word for word from the excerpt"}]}.',
+          'Cite 1 to 3 sources, the most useful, each with a short quote (under 40 words) copied exactly from the excerpt.',
+        ]
+      : [
+          'Tu es l’assistant d’étude de Boo Notes. Un étudiant suit un cours et pose une question dans ses notes.',
+          'Réponds uniquement à partir des extraits du cours fournis : la transcription de la vidéo (T…), le texte de la page du cours (P…), les notes de l’étudiant (N…). Privilégie la transcription, puis le texte du cours, puis les notes.',
+          'Réponds dans la langue de la question, clairement et brièvement (2 à 6 phrases), sans formule de politesse.',
+          'Si les extraits ne permettent pas de répondre, dis-le en une phrase et mets "found" à false : n’invente rien.',
+          'Réponds par un seul objet JSON, sans texte autour : {"answer": "…", "found": true, "sources": [{"id": "T12", "quote": "phrase recopiée mot pour mot de l’extrait"}]}.',
+          'Cite 1 à 3 sources, les plus utiles, avec une citation courte (moins de 40 mots) recopiée exactement de l’extrait.',
+        ]
+  ).join('\n');
   const lines = passages.map((p) => {
     if (p.kind === 'transcript') return `[${p.id}] ${formatTimecode(p.start ?? 0)}–${formatTimecode(p.end ?? p.start ?? 0)} : ${p.display}`;
-    if (p.kind === 'page') return `[${p.id}]${p.where ? ` (section « ${p.where} »)` : ''} : ${p.display}`;
-    return `[${p.id}]${p.where ? ` (note « ${p.where} »)` : ' (cette note)'} : ${p.display}`;
+    if (p.kind === 'page') return `[${p.id}]${p.where ? (en ? ` (section “${p.where}”)` : ` (section « ${p.where} »)`) : ''} : ${p.display}`;
+    return `[${p.id}]${p.where ? (en ? ` (note “${p.where}”)` : ` (note « ${p.where} »)`) : en ? ' (this note)' : ' (cette note)'} : ${p.display}`;
   });
   const user = [
-    `Cours : ${ctx.title || 'sans titre'}`,
-    ctx.stamp !== null ? `Question posée à ${formatTimecode(ctx.stamp)} de la vidéo.` : '',
-    `Question : ${question}`,
+    en ? `Course: ${ctx.title || 'untitled'}` : `Cours : ${ctx.title || 'sans titre'}`,
+    ctx.stamp !== null ? (en ? `Question asked at ${formatTimecode(ctx.stamp)} of the video.` : `Question posée à ${formatTimecode(ctx.stamp)} de la vidéo.`) : '',
+    en ? `Question: ${question}` : `Question : ${question}`,
     '',
-    'Extraits du cours :',
-    lines.length ? lines.join('\n') : '(aucun extrait disponible)',
+    en ? 'Course excerpts:' : 'Extraits du cours :',
+    lines.length ? lines.join('\n') : en ? '(no excerpt available)' : '(aucun extrait disponible)',
   ]
     .filter((l, i) => l !== '' || i === 3)
     .join('\n');

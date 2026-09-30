@@ -59,18 +59,29 @@ note.
 
 ### Qui écrit la réponse
 
-- **Claude** (Anthropic), avec **votre clé API** : options › Questions › *Vérifier et activer*. La
-  clé est essayée, puis les modèles qu’elle permet sont proposés, le plus récent choisi. La clé reste
-  dans le stockage local du navigateur (non synchronisé) ; pour chaque question, la question et les
-  extraits du cours (transcription, texte de la page, notes) partent **directement** à l’API Claude,
-  à aucun autre serveur. Claude ne répond qu’à partir de ces extraits et cite ceux qu’il utilise ;
-  les horodatages viennent toujours de la transcription elle-même.
-- **Sans clé** : la réponse est faite des **passages du cours les plus proches** de la question
-  (« Réponse — passages du cours les plus proches (sans IA) »), classés par les mots de la question.
-  Une question en français sur un cours en anglais les trouve par la traduction des sous-titres, ou
-  par le traducteur de Chrome quand il est déjà prêt sur l’appareil.
-- Si Claude ne répond pas (clé refusée, réseau), les passages les plus proches sont donnés, et la
-  raison est écrite sous la réponse.
+Options › Questions › **Qui rédige les réponses** :
+
+- **IA de Chrome** (par défaut) : l’IA intégrée de Chrome (Gemini Nano), **sur cet ordinateur,
+  gratuite, rien n’est envoyé**. Son modèle se télécharge une fois (bouton *Télécharger le
+  modèle* : quelques Go, en arrière-plan), sur les ordinateurs assez puissants, avec Chrome 138 ou
+  plus récent. Elle n’écrit pas encore le français (Chrome 141 : anglais, espagnol, japonais) :
+  la question lui est posée en anglais et sa réponse est traduite en français par le **traducteur
+  de Chrome**, téléchargé avec elle (lui aussi sur l’appareil). Tant qu’elle n’est pas là, la
+  réponse est faite des passages les plus proches, et une ligne dit comment l’activer.
+- **Claude** (Anthropic), avec **votre clé API** : *Vérifier et activer* essaie la clé, puis
+  propose les modèles qu’elle permet, le plus récent choisi. La clé reste dans le stockage local
+  du navigateur (non synchronisé) ; pour chaque question, la question et les extraits du cours
+  (transcription, texte de la page, notes) partent **directement** à l’API Claude, à aucun autre
+  serveur. Payant à l’usage, sur votre compte Anthropic.
+- **Sans IA** : la réponse est faite des **passages du cours les plus proches** de la question
+  (« Réponse — passages du cours les plus proches (sans IA) »), classés par les mots de la
+  question ; une question en français sur un cours en anglais les trouve par la traduction des
+  sous-titres, ou par le traducteur de Chrome quand il est prêt.
+
+Dans tous les cas, l’IA ne répond qu’à partir des extraits du cours et cite ceux qu’elle utilise ;
+les horodatages viennent toujours de la transcription elle-même. Si elle ne répond pas (clé
+refusée, réseau, modèle indisponible), les passages les plus proches sont donnés, et la raison est
+écrite sous la réponse.
 
 ## Note libre
 
@@ -114,6 +125,7 @@ Les blocs sont des **callouts** Markdown (syntaxe d’Obsidian) : la note reste 
 | Éditeur : le +, son menu, `Ctrl + .`, `Entrée`, apparence, numérotation, questions en attente | `src/panel/blocks.ts` (branché dans `src/panel/editor.ts`) |
 | Recherche : sources, passages, classement (BM25), requête et réponse de l’IA | `src/shared/qa.ts`, `src/panel/answers.ts` |
 | Texte du cours dans l’onglet (page et cadres) | `src/shared/course-text.ts` (requête `course:text` du service worker) |
+| IA intégrée de Chrome (état, téléchargement, réponse, traduction) | `src/shared/chrome-ai.ts` |
 | API Claude (modèles, message) | `src/shared/claude.ts` ; réglage `qa:config` (`src/shared/qa-config.ts`) |
 | Exports | `src/shared/pdf-notes.ts`, `src/shared/notion/blocks.ts`, `src/shared/notion/html.ts` |
 | Tests | `tests/unit/callouts.test.ts`, `tests/unit/qa.test.ts`, `tests/unit/blocks-export.test.ts`, `tests/e2e/questions.spec.ts` |

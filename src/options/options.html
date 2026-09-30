@@ -387,11 +387,31 @@
               texte de la page et vos notes —, avec ses sources et leurs horodatages. La vidéo continue pendant ce temps.
             </p>
           </header>
-          <div class="card">
+          <div class="card rows">
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label" id="l-qa-provider">Qui rédige les réponses</span>
+                <span class="row-desc" id="qa-provider-desc"></span>
+              </span>
+              <div class="segmented" role="radiogroup" aria-labelledby="l-qa-provider">
+                <label><input type="radio" name="qaProvider" value="chrome" /><span>IA de Chrome</span></label>
+                <label><input type="radio" name="qaProvider" value="claude" /><span>Claude</span></label>
+                <label><input type="radio" name="qaProvider" value="none" /><span>Sans IA</span></label>
+              </div>
+            </div>
+            <div class="row" id="chrome-ai-row">
+              <span class="row-text">
+                <span class="row-label">IA intégrée de Chrome (Gemini Nano)</span>
+                <span class="row-desc" id="chrome-ai-state" role="status">…</span>
+              </span>
+              <button type="button" class="btn" id="chrome-ai-download" hidden>Télécharger le modèle</button>
+            </div>
+          </div>
+          <div class="card" id="qa-claude-card">
             <div class="status-card" id="qa-card" data-state="offline">
               <span class="status-orb" aria-hidden="true"></span>
               <div class="status-text">
-                <span id="qa-badge" class="status-title">Réponses sans IA</span>
+                <span id="qa-badge" class="status-title">Claude : pas de clé</span>
                 <span id="qa-detail" class="row-desc" role="status"></span>
               </div>
             </div>
@@ -405,7 +425,7 @@
                 </span>
               </div>
               <div class="row">
-                <span class="row-text"><span class="row-desc">Sans clé, la réponse est faite des passages du cours les plus proches de la question.</span></span>
+                <span class="row-text"><span class="row-desc">Payant à l’usage, sur votre compte Anthropic.</span></span>
                 <button type="submit" class="btn" id="qa-connect">Vérifier et activer</button>
               </div>
             </form>
@@ -420,7 +440,7 @@
               <div class="row">
                 <span class="row-text">
                   <span class="row-label">Retirer la clé</span>
-                  <span class="row-desc">Les questions reçoivent alors les passages du cours les plus proches, sans IA.</span>
+                  <span class="row-desc">Les réponses reviennent à l’IA intégrée de Chrome (ou aux passages les plus proches).</span>
                 </span>
                 <button type="button" id="qa-remove" class="btn danger">Retirer</button>
               </div>

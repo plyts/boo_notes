@@ -1,3 +1,4 @@
+import { chromeAiState, frenchReady, prepareChromeAi, type ChromeAiState } from '../shared/chrome-ai';
 import { listModels, type ClaudeModel } from '../shared/claude';
 import { h, icon, type IconName } from '../shared/icons';
 import { IS_MAC, keycaps } from '../shared/keycaps';
@@ -211,32 +212,101 @@ function renderNotion(status: NotionStatus | undefined): void {
   (document.getElementById('notion-disconnect-row') as HTMLElement).hidden = status?.origin === 'desktop';
 }
 
-/** Options › Questions: answers written by Claude (the user's key), or the closest passages without AI. */
-function renderQa(qa: QaConfig, models: ClaudeModel[] | null, error = ''): void {
-  const on = qa.provider === 'claude';
-  (document.getElementById('qa-card') as HTMLElement).dataset.state = on ? (error ? 'offline' : 'connected') : 'offline';
-  (document.getElementById('qa-badge') as HTMLElement).textContent = on ? 'Réponses rédigées par Claude' : 'Réponses sans IA';
+const PROVIDER_DESC: Record<QaConfig['provider'], string> = {
+  chrome: 'Sur cet ordinateur, gratuitement : rien n’est envoyé. Sans elle, les passages du cours les plus proches.',
+  claude: 'Claude (Anthropic), avec votre clé : la question et les extraits du cours lui sont envoyés.',
+  none: 'Les passages du cours les plus proches de la question, sans réponse rédigée.',
+};
+
+/** Options › Questions: who writes the answers — Chrome's built-in AI, Claude (the user's key), or no AI. */
+function renderQa(qa: QaConfig, shown: QaConfig['provider'], models: ClaudeModel[] | null, error = ''): void {
+  checkRadio('qaProvider', shown);
+  (document.getElementById('qa-provider-desc') as HTMLElement).textContent = PROVIDER_DESC[shown];
+  (document.getElementById('chrome-ai-row') as HTMLElement).hidden = shown !== 'chrome';
+  (document.getElementById('qa-claude-card') as HTMLElement).hidden = shown !== 'claude';
+  const keyed = Boolean(qa.key && qa.model);
+  (document.getElementById('qa-card') as HTMLElement).dataset.state = keyed ? (error ? 'offline' : 'connected') : 'offline';
+  (document.getElementById('qa-badge') as HTMLElement).textContent = keyed ? 'Claude activé' : 'Claude : ajoutez votre clé';
   const model = models?.find((m) => m.id === qa.model);
-  (document.getElementById('qa-detail') as HTMLElement).textContent = on
+  (document.getElementById('qa-detail') as HTMLElement).textContent = keyed
     ? error || `Modèle : ${model?.name ?? qa.model}`
-    : 'Les questions reçoivent les passages du cours les plus proches. Ajoutez une clé Claude pour une réponse rédigée.';
-  (document.getElementById('qa-form') as HTMLElement).hidden = on;
-  (document.getElementById('qa-actions') as HTMLElement).hidden = !on;
+    : 'Votre clé est vérifiée, puis le modèle le plus récent est choisi.';
+  (document.getElementById('qa-form') as HTMLElement).hidden = keyed;
+  (document.getElementById('qa-actions') as HTMLElement).hidden = !keyed;
   const select = document.getElementById('qa-model') as HTMLSelectElement;
   const list = models?.length ? models : qa.model ? [{ id: qa.model, name: qa.model }] : [];
   select.replaceChildren(...list.map((m) => h('option', { value: m.id }, m.name)));
   select.value = qa.model;
 }
 
+const CHROME_AI_TEXT: Record<ChromeAiState['state'], string> = {
+  unsupported: 'Absente de ce navigateur : il faut Chrome 138 ou plus récent, sur ordinateur. Les réponses sont faites des passages les plus proches.',
+  unavailable: 'Indisponible sur cet ordinateur (il faut une machine assez puissante et de l’espace disque libre). Les réponses sont faites des passages les plus proches.',
+  downloadable: 'Le modèle n’est pas encore sur cet ordinateur : téléchargez-le une fois (quelques Go, en arrière-plan).',
+  downloading: 'Téléchargement du modèle en cours…',
+  available: 'Prête : vos questions reçoivent une réponse rédigée sur cet ordinateur.',
+};
+
+async function renderChromeAi(): Promise<ChromeAiState> {
+  const ai = await chromeAiState();
+  // It writes English (French is not offered yet): its answers are translated, the translator downloaded with it.
+  const french = ai.lang === 'en' ? await frenchReady() : true;
+  const text =
+    ai.state === 'available' && !french
+      ? 'Prête, mais elle écrit en anglais : téléchargez aussi le traducteur de Chrome pour des réponses en français.'
+      : ai.state === 'available' && ai.lang === 'en'
+        ? 'Prête : elle écrit en anglais, ses réponses sont traduites en français par le traducteur de Chrome, sur cet ordinateur.'
+        : CHROME_AI_TEXT[ai.state];
+  (document.getElementById('chrome-ai-state') as HTMLElement).textContent = text;
+  const button = document.getElementById('chrome-ai-download') as HTMLButtonElement;
+  button.hidden = !(ai.state === 'downloadable' || (ai.state === 'available' && !french));
+  button.textContent = ai.state === 'available' ? 'Télécharger le traducteur' : 'Télécharger le modèle';
+  (document.getElementById('chrome-ai-row') as HTMLElement).dataset.state = ai.state;
+  return ai;
+}
+
 async function setUpQa(): Promise<void> {
   let qa = await loadQa();
-  renderQa(qa, null);
-  if (qa.provider === 'claude') {
+  let shown: QaConfig['provider'] = qa.provider;
+  let models: ClaudeModel[] | null = null;
+  renderQa(qa, shown, models);
+  void renderChromeAi();
+  if (qa.key && qa.model) {
     listModels(qa.key, qa.base).then(
-      (models) => renderQa(qa, models),
-      (e: unknown) => renderQa(qa, null, e instanceof Error ? e.message : String(e)),
+      (list) => renderQa(qa, shown, (models = list)),
+      (e: unknown) => renderQa(qa, shown, models, e instanceof Error ? e.message : String(e)),
     );
   }
+  for (const radio of field('qaProvider')) {
+    radio.addEventListener('change', async () => {
+      shown = radio.value as QaConfig['provider'];
+      // Claude needs its key first: chosen once the key is checked.
+      if (shown !== 'claude' || (qa.key && qa.model)) {
+        qa = await saveQa({ provider: shown });
+        flashSaved();
+      }
+      renderQa(qa, shown, models);
+      if (shown === 'chrome') void renderChromeAi();
+    });
+  }
+  const download = document.getElementById('chrome-ai-download') as HTMLButtonElement;
+  download.addEventListener('click', async () => {
+    const state = document.getElementById('chrome-ai-state') as HTMLElement;
+    download.disabled = true;
+    try {
+      const ai = await chromeAiState();
+      await prepareChromeAi(ai.lang ?? 'en', (ratio) => {
+        state.textContent = `Téléchargement… ${Math.round(ratio * 100)} %`;
+      });
+      await renderChromeAi();
+      flashSaved('IA intégrée de Chrome prête');
+    } catch (e) {
+      flashSaved(e instanceof Error ? e.message : String(e), false);
+      await renderChromeAi();
+    } finally {
+      download.disabled = false;
+    }
+  });
   const key = document.getElementById('qa-key') as HTMLInputElement;
   const button = document.getElementById('qa-connect') as HTMLButtonElement;
   document.getElementById('qa-form')?.addEventListener('submit', async (e) => {
@@ -245,11 +315,12 @@ async function setUpQa(): Promise<void> {
     button.textContent = 'Vérification…';
     try {
       // The key is tried first: the models it may use, the most recent chosen.
-      const models = await listModels(key.value.trim(), qa.base);
-      if (!models.length) throw new Error('aucun modèle n’est disponible pour cette clé');
-      qa = await saveQa({ provider: 'claude', key: key.value.trim(), model: models[0].id });
+      const list = await listModels(key.value.trim(), qa.base);
+      if (!list.length) throw new Error('aucun modèle n’est disponible pour cette clé');
+      qa = await saveQa({ provider: 'claude', key: key.value.trim(), model: list[0].id });
+      shown = 'claude';
       key.value = '';
-      renderQa(qa, models);
+      renderQa(qa, shown, (models = list));
       flashSaved('Claude activé : vos questions reçoivent une réponse rédigée');
     } catch (err) {
       flashSaved(err instanceof Error ? err.message : String(err), false);
@@ -261,13 +332,15 @@ async function setUpQa(): Promise<void> {
   const select = document.getElementById('qa-model') as HTMLSelectElement;
   select.addEventListener('change', async () => {
     qa = await saveQa({ model: select.value });
-    const models = [...select.options].map((o) => ({ id: o.value, name: o.textContent ?? o.value }));
-    renderQa(qa, models);
+    renderQa(qa, shown, models);
     flashSaved('Modèle enregistré');
   });
   document.getElementById('qa-remove')?.addEventListener('click', async () => {
-    qa = await saveQa({ provider: 'extracts', key: '', model: '' });
-    renderQa(qa, null);
+    qa = await saveQa({ provider: 'chrome', key: '', model: '' });
+    shown = 'chrome';
+    models = null;
+    renderQa(qa, shown, models);
+    void renderChromeAi();
     flashSaved('Clé retirée');
   });
 }
@@ -485,7 +558,8 @@ async function main(): Promise<void> {
   });
   form.addEventListener('change', async (e) => {
     const target = e.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement) || !target.name) return;
+    // Fields of their own (Questions): saved by their section.
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement) || !target.name || target.name.startsWith('qa')) return;
     const patch = readPatch(target);
     if (!patch) {
       flashSaved('Adresse invalide : ws://localhost:PORT', false);

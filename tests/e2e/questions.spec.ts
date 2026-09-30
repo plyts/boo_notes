@@ -253,31 +253,128 @@ test('Claude répond : réponse rédigée, sources citées, questions numéroté
   }
 });
 
-test('options › Questions : la clé Claude vérifiée, le modèle le plus récent choisi, puis retirée', async ({ context, sw }) => {
+test('options › Questions : Claude choisi, sa clé vérifiée, le modèle le plus récent pris, puis la clé retirée', async ({ context, sw }) => {
   const claude = await mockClaude();
   try {
-    await sw.evaluate(async (base) => chrome.storage.local.set({ 'qa:config': { provider: 'extracts', key: '', model: '', base } }), claude.base);
+    await sw.evaluate(async (base) => chrome.storage.local.set({ 'qa:config': { provider: 'chrome', key: '', model: '', base } }), claude.base);
     const options = await context.newPage();
     await options.goto(`chrome-extension://${new URL(sw.url()).host}/options/options.html#questions`);
     const qa = () => options.evaluate(async () => (await chrome.storage.local.get('qa:config'))['qa:config'] as { provider: string; key: string; model: string });
-    await expect(options.locator('#qa-badge')).toHaveText('Réponses sans IA');
+    // Chrome's built-in AI by default: its state said (the test browser has the API, not the model).
+    await expect(options.getByRole('radio', { name: 'IA de Chrome' })).toBeChecked();
+    await expect(options.locator('#chrome-ai-state')).toContainText(/Absente de ce navigateur|Indisponible sur cet ordinateur|pas encore sur cet ordinateur/);
+    await expect(options.locator('#qa-claude-card')).toBeHidden();
+    // Claude: its key first.
+    await options.getByText('Claude', { exact: true }).click();
+    await expect(options.locator('#qa-badge')).toHaveText('Claude : ajoutez votre clé');
+    expect((await qa()).provider).toBe('chrome');
     // A wrong key: said so, nothing kept.
     await options.locator('#qa-key').fill('sk-ant-wrong');
     await options.getByRole('button', { name: 'Vérifier et activer' }).click();
     await expect(options.locator('#saved')).toContainText('clé API Claude refusée');
-    expect((await qa()).provider).toBe('extracts');
+    expect((await qa()).provider).toBe('chrome');
     // The right one: the models it may use, the most recent chosen.
     await options.locator('#qa-key').fill('sk-ant-test');
     await options.getByRole('button', { name: 'Vérifier et activer' }).click();
-    await expect(options.locator('#qa-badge')).toHaveText('Réponses rédigées par Claude');
+    await expect(options.locator('#qa-badge')).toHaveText('Claude activé');
     await expect(options.locator('#qa-model option')).toHaveText(['Modèle récent', 'Modèle ancien']);
     expect(await qa()).toMatchObject({ provider: 'claude', key: 'sk-ant-test', model: 'model-newest' });
     await options.locator('#qa-model').selectOption('model-older');
     await expect.poll(async () => (await qa()).model).toBe('model-older');
+    // « Sans IA », then back to Claude: the key is kept meanwhile.
+    await options.getByText('Sans IA', { exact: true }).click();
+    await expect.poll(async () => (await qa()).provider).toBe('none');
+    await options.getByText('Claude', { exact: true }).click();
+    await expect.poll(async () => (await qa()).provider).toBe('claude');
     await options.getByRole('button', { name: 'Retirer' }).click();
-    await expect(options.locator('#qa-badge')).toHaveText('Réponses sans IA');
-    expect(await qa()).toMatchObject({ provider: 'extracts', key: '' });
+    await expect(options.getByRole('radio', { name: 'IA de Chrome' })).toBeChecked();
+    expect(await qa()).toMatchObject({ provider: 'chrome', key: '' });
   } finally {
     await claude.close();
   }
+});
+
+/**
+ * Chrome's built-in AI (the Prompt API), stood in for in the extension's
+ * pages: the test browser has no model. `fr`: it writes French (else
+ * English, translated by Chrome's translator); `state`: whether its model is
+ * already on the computer.
+ */
+async function stubChromeAi(context: import('@playwright/test').BrowserContext, o: { fr: boolean; state?: 'available' | 'downloadable' }): Promise<void> {
+  await context.addInitScript((o) => {
+    if (location.protocol !== 'chrome-extension:') return;
+    type Opts = { expectedOutputs?: Array<{ languages?: string[] }>; initialPrompts?: Array<{ content: string }>; monitor?(m: EventTarget): void };
+    let state = o.state ?? 'available';
+    const LanguageModel = {
+      async availability(opts?: Opts) {
+        if (opts?.expectedOutputs?.[0]?.languages?.[0] === 'fr' && !o.fr) return 'unavailable';
+        return state;
+      },
+      async create(opts?: Opts) {
+        if (opts?.monitor) {
+          const target = new EventTarget();
+          opts.monitor(target);
+          for (const loaded of [0, 0.5, 1]) target.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded }));
+        }
+        state = 'available';
+        const system = opts?.initialPrompts?.[0]?.content ?? '';
+        return {
+          inputQuota: 6000,
+          inputUsage: 50,
+          async measureInputUsage(t: string) {
+            return Math.ceil(t.length / 4);
+          },
+          async prompt(input: string) {
+            const id = /\[(T\d+)\][^\n]*gradients/.exec(input)?.[1] ?? 'T1';
+            const answer = system.startsWith('You are') ? 'Because the gradients stay bounded.' : 'Parce que les gradients restent bornés (IA de Chrome).';
+            return JSON.stringify({ answer, found: true, sources: [{ id, quote: 'the gradients stay bounded' }] });
+          },
+          destroy() {},
+        };
+      },
+    };
+    Object.defineProperty(globalThis, 'LanguageModel', { value: LanguageModel, configurable: true });
+    const Translator = {
+      async availability() {
+        return 'available';
+      },
+      async create(opts: { sourceLanguage: string }) {
+        return {
+          async translate(t: string) {
+            return opts.sourceLanguage === 'en' && t === 'Because the gradients stay bounded.' ? 'Parce que les gradients restent bornés (traduit).' : t;
+          },
+          destroy() {},
+        };
+      },
+    };
+    Object.defineProperty(globalThis, 'Translator', { value: Translator, configurable: true });
+  }, o);
+}
+
+for (const fr of [true, false]) {
+  test(`IA intégrée de Chrome (${fr ? 'écrit le français' : 'écrit l’anglais, traduite'}) : réponse rédigée sur l’appareil, sans clé`, async ({ context, page, sw }) => {
+    await stubChromeAi(context, { fr });
+    await seedTranscript(sw);
+    await openWatch(page);
+    await playing(page);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await page.keyboard.type('Pourquoi les gradients restent-ils bornés ?');
+    await turnInto(p, 'gradients restent', 'Question');
+    await expect
+      .poll(() => markdown(sw), { timeout: 10_000 })
+      .toContain(`> **Réponse :** Parce que les gradients restent bornés (${fr ? 'IA de Chrome' : 'traduit'}).`);
+    expect(await markdown(sw)).toContain('> **Source du cours — [00:14]**\n> « the gradients stay bounded »');
+    expect(await videoPaused(page)).toBe(false);
+  });
+}
+
+test('options › Questions : le modèle de l’IA de Chrome téléchargé d’un clic, sa progression affichée', async ({ context, sw }) => {
+  await stubChromeAi(context, { fr: true, state: 'downloadable' });
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${new URL(sw.url()).host}/options/options.html#questions`);
+  await expect(options.locator('#chrome-ai-state')).toContainText('pas encore sur cet ordinateur');
+  await options.getByRole('button', { name: 'Télécharger le modèle' }).click();
+  await expect(options.locator('#chrome-ai-state')).toContainText('Prête');
+  await expect(options.getByRole('button', { name: 'Télécharger le modèle' })).toBeHidden();
 });

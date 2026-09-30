@@ -26,8 +26,9 @@ tableau de votre page.
     vidéo d’abord, puis le **texte du cours** (la page, un module dans ses cadres) et les **notes**
     déjà prises (celle-ci et les autres du cours). La réponse s’écrit sous la question avec ses
     **sources** : le passage de la transcription et son **horodatage cliquable** (« Source du cours
-    — 23:41 »), le passage de la page (lien surligné), la note. Rédigée par **Claude** avec votre
-    clé API (options › Questions), sinon faite des passages du cours les plus proches.
+    — 23:41 »), le passage de la page (lien surligné), la note. Rédigée par l’**IA intégrée de
+    Chrome** (Gemini Nano, sur l’appareil, gratuite — par défaut) ou par **Claude** avec votre clé
+    API (options › Questions), sinon faite des passages du cours les plus proches.
   - **Note libre** : une note personnelle, **pas associée à l’horodatage** de la vidéo ; tout y
     reste possible — texte, **citations** du cours, **captures**, images, liens, réflexions.
   - **Vidéo, notes et cours ne se bloquent pas** : la vidéo continue pendant qu’on écrit, qu’on
@@ -332,9 +333,11 @@ docs/         architecture, protocole, design, transcription, questions, Notion
   sélectionne pas : capture et notes restent possibles.
 - **Notion depuis l’extension** : le secret de l’intégration est alors conservé dans le stockage
   local de l’extension (voir [docs/NOTION.md](docs/NOTION.md)).
-- **Réponses aux questions** : rédigées par Claude seulement avec une clé API Anthropic (options ›
-  Questions : la clé reste dans le stockage local ; la question et les extraits du cours partent
-  directement à l’API Claude). Sans clé, la réponse est faite des passages les plus proches, trouvés
+- **Réponses aux questions** : l’IA intégrée de Chrome demande Chrome 138+ sur un ordinateur assez
+  puissant et le téléchargement de son modèle ; elle écrit en anglais (sa réponse est traduite en
+  français par le traducteur de Chrome). Claude demande une clé API Anthropic (la clé reste dans le
+  stockage local ; la question et les extraits du cours partent directement à l’API Claude). Sans
+  l’une ni l’autre, la réponse est faite des passages les plus proches, trouvés
   par les mots de la question : une question en français sur un cours en anglais les trouve par la
   traduction des sous-titres (onglet Transcription) ou le traducteur de Chrome s’il est déjà prêt.
   Sans transcription (vidéo sans sous-titres), la réponse s’appuie sur le texte de la page et vos notes.

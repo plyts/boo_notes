@@ -3,7 +3,8 @@ import { ClaudeError, sendMessage } from '../shared/claude';
 import { findCallouts } from '../shared/callouts';
 import type { CourseText } from '../shared/course-text';
 import { callBackground } from '../shared/messages';
-import { buildPrompt, extracts, forPrompt, notePassages, pagePassages, parseAnswer, rank, sourceOf, transcriptPassages, type NoteSource, type Passage } from '../shared/qa';
+import { askChromeAi, chromeAiState, toFrench } from '../shared/chrome-ai';
+import { buildPrompt, extracts, forPrompt, notePassages, pagePassages, parseAnswer, rank, sourceOf, transcriptPassages, type NoteSource, type Passage, type Ranked } from '../shared/qa';
 import { loadQa, type QaConfig } from '../shared/qa-config';
 import type { Note, NoteSummary } from '../shared/store';
 import type { Transcript } from '../shared/transcript';
@@ -12,9 +13,10 @@ import type { Transcript } from '../shared/transcript';
  * Answers a question of the note from the course: the transcript of the
  * video first, then the text of the course (its page, a module in its
  * frames), then the notes already taken (this one and the others of the
- * course). Claude writes the answer when a key is set in the options;
- * without it, the closest passages are given. Nothing here touches the
- * video: it plays on while the answer is looked for.
+ * course). Chrome's built-in AI writes the answer on this computer (the
+ * default), or Claude with a key set in the options; without either, the
+ * closest passages are given. Nothing here touches the video: it plays on
+ * while the answer is looked for.
  */
 
 export interface AnswerContext {
@@ -105,7 +107,8 @@ export async function answerQuestion(ctx: AnswerContext, config?: QaConfig): Pro
   const ranked = rank(ctx.question, passages, { stamp: ctx.stamp, extra });
   const query = `${ctx.question} ${extra}`;
   const closest = (note?: string): Answer => ({ method: 'extracts', text: '', sources: extracts(ranked).map((p) => sourceOf(p, null, query)), ...(note ? { note } : {}) });
-  if (qa.provider !== 'claude') return closest();
+  if (qa.provider === 'none') return closest();
+  if (qa.provider === 'chrome') return answerOnDevice(ctx, passages, ranked, query, closest);
   if (!passages.length) return { method: 'ai', text: 'Aucune source du cours n’est encore disponible (transcription, texte de la page, notes) : impossible de chercher la réponse.', sources: [] };
   const { system, user } = buildPrompt(ctx.question, forPrompt(passages, ranked), { title: ctx.title, stamp: ctx.stamp });
   try {
@@ -117,5 +120,46 @@ export async function answerQuestion(ctx: AnswerContext, config?: QaConfig): Pro
   } catch (e) {
     // No answer from Claude: the closest passages, and why.
     return closest(`Claude n’a pas pu répondre : ${e instanceof ClaudeError || e instanceof Error ? e.message : String(e)}.`);
+  }
+}
+
+/**
+ * Chrome's built-in AI (on this computer): the answer written from the
+ * passages it can read. Not there (yet): the closest passages, and how to
+ * get it when it can be had.
+ */
+async function answerOnDevice(ctx: AnswerContext, passages: Passage[], ranked: Ranked[], query: string, closest: (note?: string) => Answer): Promise<Answer> {
+  const ai = await chromeAiState();
+  if (ai.state !== 'available' || !ai.lang) {
+    const why =
+      ai.state === 'downloadable'
+        ? 'Pour une réponse rédigée, activez l’IA intégrée de Chrome (options › Questions).'
+        : ai.state === 'downloading'
+          ? 'L’IA intégrée de Chrome se télécharge : les prochaines réponses seront rédigées.'
+          : undefined;
+    return closest(why);
+  }
+  if (!passages.length) return { method: 'ai', text: 'Aucune source du cours n’est encore disponible (transcription, texte de la page, notes) : impossible de chercher la réponse.', sources: [] };
+  const lang = ai.lang;
+  try {
+    // A model writing English: asked in English (the question translated when Chrome can), answer translated back.
+    const question = lang === 'en' ? ((await translated(ctx.question, 'en')) || ctx.question) : ctx.question;
+    const base = { title: ctx.title, stamp: ctx.stamp, lang };
+    const reply = await askChromeAi(lang, {
+      system: buildPrompt(question, [], base).system,
+      user: (budget) => buildPrompt(question, forPrompt(passages, ranked, budget), base).user,
+    });
+    const parsed = parseAnswer(reply, passages);
+    let text = parsed.answer;
+    let note: string | undefined;
+    if (lang === 'en' && text) {
+      const fr = await toFrench(text);
+      if (fr) text = fr;
+      else note = 'Réponse en anglais : l’IA intégrée de Chrome n’écrit pas encore le français, et son traducteur n’est pas prêt.';
+    }
+    const sources = parsed.sources.length || !parsed.found ? parsed.sources : extracts(ranked, 2).map((p) => sourceOf(p, null, query));
+    return { method: 'ai', text, sources, ...(note ? { note } : {}) };
+  } catch (e) {
+    return closest(`L’IA intégrée de Chrome n’a pas pu répondre : ${e instanceof Error ? e.message : String(e)}.`);
   }
 }
