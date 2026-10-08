@@ -492,7 +492,7 @@ class ContentApp {
         else if (before?.frameId === frameId) this.lesson = null;
         else return;
         if (before?.route === this.lesson?.route) {
-          if (this.lesson?.title && this.lesson.title !== this.title && this.ctx) {
+          if (this.lesson?.title && this.lesson.title !== this.title && this.ctx?.noteId.includes('#lesson/')) {
             this.title = this.lesson.title;
             this.postPanels({ type: 'context', ctx: this.ctx, title: this.title });
             this.registeredNoteId = null;

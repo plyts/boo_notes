@@ -1,9 +1,12 @@
 import type { Worker } from '@playwright/test';
+import { PARENT_PAGE_ID, startMockNotion } from '../../tools/mock-notion/server.mjs';
 import { expect, test } from './fixtures';
 
 /**
- * Options › Données: whether each note is synced (desktop app, Notion) or
- * waits, and notes deleted by hand — one, or a selection.
+ * Options › Données: each note — the lesson (a click reopens it), where it
+ * is filed, whether it is in Notion (its page a click away) or a « Sync »
+ * button that writes it there now, in its course's page; notes deleted by
+ * hand — one, or a selection. No progress bars.
  */
 
 const NOTES = [
@@ -45,11 +48,15 @@ test('Données : chaque note dit si elle est synchronisée (app Desktop, Notion)
   await expect(options.locator('#note-list li')).toHaveCount(3);
   // The summary says what waits, where.
   await expect(options.locator('#data-sync')).toHaveText(/App Desktop : 1 note en attente.* · Notion : 1 en erreur, 1 en attente/);
-  // Note by note: green synced, orange waiting, red failed.
-  await expect(row('Leçon synchronisée').locator('.sync-pill[data-state="synced"]')).toHaveText(['Desktop', 'Notion']);
-  await expect(row('Leçon synchronisée').getByRole('link', { name: /Notion : synchronisée/ })).toHaveAttribute('href', 'https://www.notion.so/page-a');
-  await expect(row('Leçon en attente').locator('.sync-pill[data-state="pending"]')).toHaveText(['Desktop', 'Notion']);
-  await expect(row('Leçon en erreur').locator('.sync-pill[data-state="error"]')).toHaveAttribute('title', 'Notion : erreur — body failed validation');
+  // Note by note: in Notion (its page a click away), or a « Sync » button; the app's pill beside.
+  await expect(row('Leçon synchronisée').locator('.sync-pill[data-state="synced"]')).toHaveText(['Desktop', 'Dans Notion']);
+  await expect(row('Leçon synchronisée').getByRole('link', { name: /^Dans Notion/ })).toHaveAttribute('href', 'https://www.notion.so/page-a');
+  await expect(row('Leçon en attente').locator('.sync-pill[data-state="pending"]')).toHaveText(['Desktop']);
+  await expect(row('Leçon en attente').getByRole('button', { name: /^Notion : en attente\. Envoyer « Leçon en attente » maintenant/ })).toHaveText('Sync');
+  await expect(row('Leçon en erreur').getByRole('button', { name: /^Notion : erreur — body failed validation\./ })).toHaveText('Sync');
+  // No progress bars; where each one is filed instead.
+  await expect(options.locator('#note-list .progress-bar')).toHaveCount(0);
+  await expect(row('Leçon synchronisée').locator('.note-place')).toHaveText('Non rangée');
 
   // One note deleted (after confirming): gone from the list and from the browser, its picture too.
   options.once('dialog', (d) => void d.accept());
@@ -82,4 +89,40 @@ test('Données : chaque note dit si elle est synchronisée (app Desktop, Notion)
   await options.getByRole('button', { name: 'Supprimer la sélection' }).click();
   await expect(options.locator('#data-summary')).toHaveText('Aucune note pour l’instant.');
   expect(await stored()).toEqual([]);
+});
+
+test('Données : « Sync » écrit la note dans Notion, dans la page de son cours — puis elle y est, sa page à un clic', async ({ context, sw }) => {
+  const notion = startMockNotion();
+  await notion.ready;
+  try {
+    notion.seedPage(PARENT_PAGE_ID, 'Mes cours');
+    await sw.evaluate(async ({ api, parent }) => {
+      const id = 'web:academy.test/airflow/hooks';
+      const url = 'https://academy.test/airflow/hooks';
+      await chrome.storage.local.set({
+        [`note:${id}`]: { id, platform: 'web', kind: 'page', url, title: 'HookToolset', markdown: 'Un hook enveloppe une connexion', rev: 1, createdAt: 1, updatedAt: 1, course: 'AI Orchestration', chapter: 'Hooks', placedAt: 1 },
+        'notes:index': { [id]: { platform: 'web', kind: 'page', url, title: 'HookToolset', updatedAt: 1, course: 'AI Orchestration', chapter: 'Hooks' } },
+      });
+      const hook = (globalThis as unknown as { booNotes: { notion: { apiBase?: string; connect(t: string, p: string): Promise<unknown> } } }).booNotes;
+      hook.notion.apiBase = api;
+      await hook.notion.connect('secret_test', parent);
+    }, { api: notion.url, parent: PARENT_PAGE_ID });
+    const options = await context.newPage();
+    await options.goto(`chrome-extension://${new URL(sw.url()).host}/options/options.html#donnees`);
+    const row = options.locator('#note-list li', { hasText: 'HookToolset' });
+    await expect(row.locator('.note-place')).toHaveText('AI Orchestration › Hooks');
+    await expect(row.getByRole('link', { name: /HookToolset/ })).toHaveAttribute('href', 'https://academy.test/airflow/hooks');
+    await row.getByRole('button', { name: /Envoyer « HookToolset » maintenant, dans AI Orchestration › Hooks/ }).click();
+    await expect(options.locator('#saved')).toContainText('« HookToolset » est dans Notion (AI Orchestration › Hooks)');
+    const page = [...notion.state.pages.values()].find((p) => p.parent?.database_id)!;
+    await expect(row.getByRole('link', { name: /^Dans Notion · AI Orchestration › Hooks/ })).toHaveAttribute('href', page.url);
+    // In its course's page, under its chapter.
+    const course = [...notion.state.pages.values()].find((p) => notion.titleOf(p.id) === 'AI Orchestration')!;
+    expect(notion.pageContent(course.id)!.map((b) => b.text)).toEqual(['1 leçon · 1 chapitre · 0 terminée · 0 % du cours', 'Hooks', '@HookToolset  À commencer']);
+    // Again: nothing made twice.
+    await expect(row.getByRole('button', { name: /Sync/ })).toHaveCount(0);
+    expect([...notion.state.pages.values()].filter((p) => p.parent?.database_id)).toHaveLength(1);
+  } finally {
+    await notion.close();
+  }
 });

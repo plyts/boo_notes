@@ -1,22 +1,33 @@
 # Notion : le coffre de toutes vos notes
 
-Quel que soit le support — vidéo YouTube / Udemy / Coursera, audio, page Notion, article web, PDF,
-texte, image (graphe, schéma), fiche de révision — chaque note rejoint **un seul tableau Notion**,
-intégré dans la page de votre choix :
+Quel que soit le support — vidéo YouTube / Udemy / Coursera, leçon d’un module de cours, audio,
+page Notion, article web, PDF, texte, image, fiche de révision — chaque note rejoint **un seul
+coffre** dans votre Notion, au nom que vous lui donnez (« Boo Notes » par défaut, « Coursera
+notes », « Sample notes »…) :
 
 ```
-📄 Mes cours                       ← votre page (le « hub »)
-   👻 Boo Notes — Mes notes        ← tableau intégré (base inline) : une ligne par note
-      🎬 React — Les hooks          React › Hooks · Vidéo · YouTube · En cours · 42 % · 21:00 / 50:00 · Liens : 🗂️ useEffect
-      🌐 La loi d’Ohm — Cours       Physique › Électricité · Page web · En cours · 62 % lu
-      📄 Probabilités — Chapitre 3  Maths › Probabilités · PDF + audio · p. 12 / 40
-      🗂️ useEffect                  React › Hooks · Fiche · Prochaine révision : 12 oct. · Liée depuis : 🎬 React — Les hooks
+👻 Boo Notes                        ← le coffre : un mot d’accueil, puis…
+   🗂️ Toutes les notes               ← la table : une ligne (une page) par note
+   📚 Mes cours
+   📘 AI Orchestration               ← une page par cours : ses leçons par chapitre,
+        🎯 3 leçons · 2 chapitres · 1 terminée · 30 % du cours
+        Les bases
+          ☑ 🎬 Introduction to Airflow      Terminé
+          ☐ 🎬 Les DAG                        En cours · 40 %
+        Hooks et outils
+          ☐ 🌐 HookToolset                    À commencer
+   📘 Databricks Agents
+   📥 Notes à ranger                 ← les notes rangées dans aucun cours
 ```
 
-Chaque ligne est une page : la source en tête (vidéo YouTube intégrée, signet, image), puis la note
-bloc par bloc, avec ses liens cliquables vers l’instant, la page ou le passage d’origine, et les
-`[[liens]]` vers les autres notes devenus des **mentions de pages**. Une note ouvre ainsi les
-autres, qui en ouvrent d’autres… comme des fiches de révision reliées.
+Chaque leçon de la page d’un cours est un **lien vers sa note** ; chaque note commence par **son
+cours et son chapitre** (lien vers la page du cours) et rouvre la vidéo ou la page d’origine à
+l’instant noté. Cours → note → leçon, et retour : tout se rejoint en un clic. Les `[[liens]]` vers
+les autres notes deviennent des **mentions de pages**.
+
+**Jamais de doublon** : un seul coffre (retrouvé à chaque connexion, même depuis un autre
+appareil), une seule table dedans, une seule page par cours et par note (retrouvées avant d’en
+créer une, par leur place et leur « Boo ID »).
 
 ## Qui écrit dans Notion ?
 
@@ -32,27 +43,30 @@ Extension (navigateur) ──ws://localhost──► Boo Notes Desktop ──HTT
   quelques secondes après chaque modification. Quand l’application revient, chacune apprend de
   l’autre quelle page Notion correspond à quelle note (identifiant « Boo ID ») : pas de doublon.
 
-## Connecter Notion : un seul bouton
+## Se connecter : un bouton
 
-Pas de secret, pas de lien à copier : **« Connecter Notion »**, en haut du **panneau de notes**
-(à côté du badge de l’app Desktop), ou dans les **options** › Notion.
+Pas de secret, pas de lien à copier : **« Se connecter à… »**, en haut du **panneau de notes** (ou
+**options › Notion › Se connecter à Notion**).
 
-1. La fenêtre de Notion s’ouvre, comme « Se connecter avec Google » : connectez-vous si besoin,
-   choisissez **« Utiliser le modèle fourni par Boo Notes »** (ou cochez une page), puis
-   **« Autoriser l’accès »**.
-2. C’est tout. Boo Notes choisit seul où ranger le tableau « Boo Notes — Mes notes » : le tableau
-   d’une connexion précédente s’il existe, sinon la page du modèle, sinon la page partagée qui
-   parle de cours ou de notes, sinon la première. Le tableau est créé, **toutes les notes déjà
-   prises y sont envoyées**, puis chaque note au fil de l’eau.
+1. Une petite fenêtre s’ouvre : choisissez **Notion**.
+2. La fenêtre de Notion s’ouvre, comme « Se connecter avec Google » : connectez-vous (ou créez votre
+   compte), choisissez **« Utiliser le modèle »** (ou cochez une page), puis **« Autoriser
+   l’accès »**.
+3. **Nommez votre coffre** — « Boo Notes » est proposé — ou, si vous en avez déjà un, gardez-le
+   (il est proposé en premier). **Valider**.
 
-Le bouton devient **« Notion »** (vert : les notes partent ; orange : un problème, expliqué au
-survol). Un clic dessus : **Ouvrir mon tableau Notion**, **Déconnecter Notion**.
+C’est tout : le coffre, sa table et les pages des cours sont créés (ou retrouvés), et toutes vos
+notes y partent. Le bouton affiche alors le nom du coffre (point vert : notes envoyées ; orange :
+un problème, expliqué). Un clic dessus : **Ouvrir le coffre dans Notion**, **Synchroniser
+maintenant**, **Déconnecter**.
 
-- **Déconnecter Notion** oublie la connexion *et* retire l’accès de Boo Notes dans Notion
-  (plus besoin d’aller dans Paramètres › Connexions). Les pages déjà créées restent.
+- **Déconnecter** oublie la connexion *et* retire l’accès de Boo Notes dans Notion. Les pages
+  déjà créées restent.
+- **Reconnecter** : même bouton ; le coffre existant est proposé, rien n’est créé en double (une
+  nouvelle copie du modèle faite par Notion part à la corbeille).
 - **Accès expiré** : renouvelé automatiquement, sans rien demander.
-- **Reconnecter** : même bouton, même fenêtre ; le tableau existant est retrouvé (pas de doublon).
-- Si l’app Desktop partage sa connexion Notion, le bouton l’indique (« Géré par l’app Desktop »).
+- L’app Boo Notes Desktop apparaît dans la même fenêtre (« Connectée » / « Non détectée », un
+  clic pour réessayer).
 
 ### Pour le développeur : activer le bouton (une fois)
 
@@ -75,13 +89,16 @@ ci-dessous reste disponible.
 
 ## Avec un secret d’intégration (avancé, 2 minutes)
 
+La page dont vous donnez le lien devient le coffre (sa table « Toutes les notes » y est créée, ou
+retrouvée).
+
 Pour l’application Desktop, ou dans les options de l’extension › Notion › « Méthode avancée : avec
 un secret d’intégration » (« Connecter avec ce secret ») :
 
 1. **Créez une intégration interne.** [notion.so › Paramètres › Intégrations](https://www.notion.so/profile/integrations),
    « Nouvelle intégration », type **Interne**. Capacités : *Lire*, *Mettre à jour* et *Insérer du
    contenu*. Copiez le **secret** (`ntn_…` ou `secret_…`).
-2. **Choisissez la page hub** (« Mes cours », par exemple) : menu **•••** › **Connexions** ›
+2. **Choisissez la page du coffre** (« Boo Notes », par exemple) : menu **•••** › **Connexions** ›
    ajoutez votre intégration, puis **Partager › Copier le lien**.
 3. **Connectez** :
    - dans **Boo Notes Desktop** › Réglages › Notion : collez le secret et le lien, **Connecter
@@ -90,43 +107,52 @@ un secret d’intégration » (« Connecter avec ce secret ») :
      l’application est fermée ;
    - **ou**, sans l’application, dans les **options de l’extension** › Notion : même secret, même lien.
 
-Le tableau **« Boo Notes — Mes notes »** est créé *dans* la page (base intégrée). Vous pouvez
-aussi coller le lien d’une **base existante** : Boo Notes l’adopte et y ajoute les colonnes
-manquantes. Ajoutez librement du texte, d’autres vues ou d’autres blocs autour du tableau.
+La table **« Toutes les notes »** est créée *dans* la page (ou retrouvée si elle y est déjà), puis
+une page par cours à côté. Vous pouvez aussi coller le lien d’une **table existante** (celle des
+premières versions, « Boo Notes — Mes notes ») : Boo Notes l’adopte, y ajoute les colonnes
+manquantes, et sa page devient le coffre. Ajoutez librement du texte ou d’autres vues.
 
 **Le secret** : chiffré par le système dans l’application (DPAPI sous Windows) ; dans le
 navigateur, conservé dans le stockage local de l’extension (inaccessible aux sites web). Il n’est
 envoyé qu’à `api.notion.com`. Désactivez « Partager la connexion Notion avec l’extension » pour
 qu’il ne quitte pas l’application.
 
-## Le tableau
+## La table « Toutes les notes »
+
+Ce qui se lit d’un coup d’œil, rien de plus :
 
 | Colonne | Contenu |
 | --- | --- |
-| Nom | Titre de la note (vidéo, page, document, fiche) |
+| Nom | Titre de la note (leçon, vidéo, page, document, fiche) |
+| Cours | Le cours de la note (sélection : une couleur par cours) — rangée depuis le panneau |
+| Chapitre | Le chapitre du cours |
+| Statut | À commencer · En cours · Terminé (déduit de la progression) |
+| Progression | Part du support parcourue (point le plus loin atteint) |
 | Type | Vidéo · Audio · PDF · Texte · Image · Page web · Fiche |
 | Plateforme | YouTube · Udemy · Coursera · Notion · Web · Fichier local |
-| Cours | Le cours de la note (sélection : une couleur par cours) — choisi dans l’app ou dans le panneau de l’extension |
-| Chapitre | Le chapitre du cours |
-| Supports | Tous les supports liés à la note, un par ligne (`PDF · Probabilités — Chapitre 3`, `Audio · Amphi 3`…) |
-| Statut | À commencer · En cours · Terminé (déduit de la progression, ou choisi dans l’app) |
-| Progression | Part du support parcourue (point le plus loin atteint) |
-| Position | `21:00 / 50:00`, `p. 12 / 40`, `§ 4 / 30`, `62 % lu`, `3 repères` |
-| Notes | Nombre de notes ancrées (instants, pages, paragraphes, repères, passages cités) |
-| Liens | Notes reliées par `[[Titre]]` (relation vers le même tableau) |
-| Liée depuis | L’inverse, tenu à jour par Notion : les notes qui pointent vers celle-ci |
-| Prochaine révision | Date de la prochaine révision espacée d’une fiche (app Desktop) |
-| Source | Lien de la vidéo, du cours ou de la page (vide pour un fichier local) |
+| Source | Lien de la leçon, de la vidéo ou de la page (vide pour un fichier local) |
 | Dernière activité | Date de la dernière note ou progression |
+| Liens / Liée depuis | Notes reliées par `[[Titre]]`, et l’inverse (tenu à jour par Notion) |
 | Boo ID | Identifiant de la note (utilisé par Boo Notes, ne pas modifier) |
 
-Idées de vues : **par cours** (groupé par *Cours*, puis trié par *Chapitre*), **« À réviser »** (filtre *Prochaine révision* ≤ aujourd’hui, trié par date),
-**« En cours »** (Statut), **tableau Kanban** par Statut, **calendrier** sur *Prochaine révision*,
-**galerie** groupée par Type.
+Les tables des premières versions gardent leurs autres colonnes (Position, Notes, Supports,
+Prochaine révision), toujours remplies. Idées de vues : **par cours** (groupé par *Cours*), **« En
+cours »** (Statut), **Kanban** par Statut, **galerie** par Type.
+
+## Les pages des cours
+
+Une page par cours dans le coffre (📘), tenue à jour par Boo Notes : un résumé (nombre de leçons,
+de chapitres, terminées, progression du cours), puis **chaque chapitre** et **ses leçons** dans
+l’ordre où vous les avez commencées — une case cochée quand la leçon est terminée, un lien vers la
+note, son état. Une leçon rangée ailleurs quitte la page de l’ancien cours ; les notes rangées
+nulle part sont dans **📥 Notes à ranger**. La progression y est arrondie à la dizaine : la page
+n’est pas réécrite à chaque minute regardée.
 
 ## La page de chaque note
 
-- En tête : la **vidéo YouTube intégrée**, un **signet** vers le cours ou l’article, l’**image**
+- Tout en haut, pour une note rangée : **📍 son cours › son chapitre** (le cours est un lien vers
+  sa page).
+- Puis la **vidéo YouTube intégrée**, un **signet** vers le cours ou l’article, l’**image**
   étudiée (téléversée), ou un encadré « Fichier local : cours.pdf » — et, pour une note appuyée sur
   **plusieurs supports**, un en-tête par support (PDF, enregistrement de l’amphi, vidéo…), chaque
   repère renvoyant au sien.
@@ -140,22 +166,32 @@ Idées de vues : **par cours** (groupé par *Cours*, puis trié par *Chapitre*),
   surlignages avec leur couleur.
 - Un **passage** d’une vidéo (`[02:05–06:07]`) devient une image légendée « Passage 02:05–06:07 ·
   titre » (l’extrait enregistré reste dans le dossier de notes).
-- La **transcription** (sous-titres collectés pendant la lecture) termine la page : une section
-  **Transcription**, une réplique par paragraphe — heure liée à l’instant de la vidéo, texte,
+- La **transcription** (sous-titres collectés pendant la lecture) termine la page, **repliée par
+  tranches de la vidéo** (« 00:00 – 12:30 · 100 répliques ») : la page reste courte, chaque tranche
+  s’ouvre d’un clic ; une réplique par paragraphe — heure liée à l’instant de la vidéo, texte,
   traduction en italique, 💬 votre commentaire. Voir [TRANSCRIPTION.md](TRANSCRIPTION.md).
+- Une **Question** garde sa réponse compacte de l’IA, avec la mention « Réponse générée par IA — à
+  vérifier » (voir [QUESTIONS.md](QUESTIONS.md)).
 
 ## Synchronisation
 
 - **Automatique** : quelques secondes après chaque modification ; un changement de progression ne
   met à jour que les colonnes.
-- **Manuelle** : bouton Notion d’une note et « Tout synchroniser » (application), **Exporter ›
-  Envoyer vers Notion** dans le panneau de l’extension, « Synchroniser » dans ses options.
+- **Manuelle** : « Se connecter à… › Synchroniser maintenant » dans le panneau, **Exporter ›
+  Envoyer vers Notion**, et dans **options › Données** : chaque note dit si elle est **dans
+  Notion** (un clic ouvre sa page) ; sinon un bouton **Sync** l’y écrit aussitôt, dans la page de
+  son cours ; **Tout synchroniser** fait de même pour toutes celles qui n’y sont pas.
+- **Idempotente** : avant d’écrire, Boo Notes vérifie que la table existe (sinon la retrouve dans
+  le coffre, sinon la recrée là), que la page de la note existe (sinon la retrouve par son Boo ID,
+  sinon la crée) ; les notes déjà à jour sont laissées telles quelles. Synchroniser deux fois ne
+  crée rien de plus.
 - **Incrémentale** : chaque bloc écrit a une empreinte ; une note qui s’allonge n’ajoute que ses
   nouvelles lignes, une ligne modifiée réécrit la page à partir de cette ligne.
 - **Sens unique** : Boo Notes → Notion. Ce que vous ajoutez dans la page Notion sous les blocs de
   Boo Notes, ou dans d’autres colonnes, est conservé mais pas rapatrié ; évitez de modifier les
   blocs écrits par Boo Notes (remplacés à la synchronisation suivante).
-- Page supprimée → recréée ; tableau supprimé → recréé dans la page hub.
+- Page supprimée → recréée ; table supprimée → retrouvée ou recréée dans le coffre ; page d’un
+  cours supprimée → recréée.
 - Une note liée qui n’a pas encore de page en reçoit une (vide, puis remplie) pour que la mention
   et la relation existent.
 
@@ -203,4 +239,4 @@ refusé, comme par Notion). Il sert aux tests de l’extension (`tests/unit/noti
 npm run mock:notion                                   # http://127.0.0.1:43118, secret « secret_test »
 ```
 
-Le lien de page hub du mock est `11111111-1111-4111-8111-111111111111`.
+Le lien de la page du coffre dans le mock est `11111111-1111-4111-8111-111111111111`.

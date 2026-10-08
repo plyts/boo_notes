@@ -121,35 +121,10 @@ button {
 }
 
 .toolbar {
-  container: toolbar / inline-size;
   display: flex;
   align-items: center;
   gap: 2px;
   min-height: 30px;
-}
-
-/* Sync badge: calm when offline (local-first is a normal state), green when synced. */
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 24px;
-  padding: 0 10px 0 9px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--warn-soft);
-  font-size: var(--text-s);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--dur) ease;
-}
-
-.status[data-state='connected'] {
-  background: var(--ok-soft);
-}
-
-.status[data-state='connecting'] {
-  background: var(--surface-2);
 }
 
 .status-dot {
@@ -159,23 +134,15 @@ button {
   background: var(--warn);
 }
 
-.status[data-state='connected'] .status-dot {
-  background: var(--ok);
-}
-
-.status[data-state='connecting'] .status-dot {
-  background: var(--faint);
-  animation: pulse 0.9s ease-in-out infinite alternate;
-}
-
-/* Notion: an invitation to connect, then a calm badge like the one of the app. */
-.notion-chip {
+/* « Se connecter à… »: an invitation, then the vault the notes go to (green: sent; orange: a problem). */
+.connect-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  margin-left: 4px;
-  padding: 0 10px 0 8px;
+  min-width: 0;
+  max-width: 190px;
+  height: 26px;
+  padding: 0 11px 0 9px;
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--accent-soft);
@@ -187,101 +154,192 @@ button {
   transition: background var(--dur) ease;
 }
 
-.notion-chip:hover {
+.connect-btn:hover {
   filter: brightness(0.97);
 }
 
-.notion-chip svg {
+.connect-btn svg,
+.connect-btn .status-dot {
   flex: none;
 }
 
-.notion-chip .status-dot,
-.notion-chip .notion-short {
-  display: none;
+.connect-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.notion-chip:not([data-state='off']) {
+.connect-btn[data-state='on'] {
+  background: var(--ok-soft);
   color: inherit;
 }
 
-.notion-chip:not([data-state='off']) svg {
-  display: none;
-}
-
-.notion-chip:not([data-state='off']) .status-dot {
-  display: block;
-}
-
-.notion-chip[data-state='on'] {
-  background: var(--ok-soft);
-}
-
-.notion-chip[data-state='on'] .status-dot {
+.connect-btn[data-state='on'] .status-dot {
   background: var(--ok);
 }
 
-.notion-chip[data-state='error'] {
+.connect-btn[data-state='error'] {
   background: var(--warn-soft);
+  color: inherit;
 }
 
-.notion-chip[data-state='connecting'] {
+.connect-btn[data-state='busy'] {
   background: var(--surface-2);
+  color: inherit;
 }
 
-.notion-chip[data-state='connecting'] .status-dot {
-  background: var(--faint);
-  animation: pulse 0.9s ease-in-out infinite alternate;
-}
-
-/* Narrow notes: the app's badge keeps its dot, Notion its short name. */
-@container toolbar (max-width: 380px) {
-  .status:not([data-state='connected']) .status-label {
-    display: none;
-  }
-
-  .status:not([data-state='connected']) {
-    padding: 0 8px;
-  }
-
-  .status[data-state='connected'] ~ .notion-chip .notion-long {
-    display: none;
-  }
-
-  .status[data-state='connected'] ~ .notion-chip .notion-short {
-    display: inline;
-  }
-}
-
-/* Recording: its REC badge takes the room of the long name. */
-.toolbar:has(.rec-pill:not([hidden])) .notion-chip .notion-long {
-  display: none;
-}
-
-.toolbar:has(.rec-pill:not([hidden])) .notion-chip .notion-short {
-  display: inline;
-}
-
-@container toolbar (max-width: 300px) {
-  .notion-chip .notion-long {
-    display: none;
-  }
-
-  .notion-chip .notion-short {
-    display: inline;
-  }
-}
-
-.notion-menu {
+.connect-pop {
   right: auto;
   left: 12px;
+  width: 300px;
   max-width: calc(100% - 24px);
   transform-origin: top left;
 }
 
-.notion-menu .notion-error {
-  margin: 0 10px 6px;
-  color: var(--warn);
+.connect-dest-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.connect-state {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--muted);
   font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.connect-state[data-state='connected'] {
+  background: var(--ok-soft);
+  color: var(--text);
+}
+
+.connect-wait,
+.connect-vault {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  font-size: 13px;
+}
+
+.connect-wait small,
+.connect-vault small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.connect-vault small.connect-error {
+  color: var(--warn);
+}
+
+.connect-vault-icon {
+  font-size: 22px;
+}
+
+.connect-spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.connect-help {
+  margin: 0 10px 8px;
+  color: var(--muted);
+  font-size: var(--text-s);
+  line-height: 1.45;
+}
+
+.connect-form {
+  display: grid;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+
+.connect-choice,
+.connect-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.connect-choice:has(input[type='radio']:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.connect-field {
+  flex-direction: column;
+  align-items: stretch;
+  cursor: default;
+}
+
+.connect-field span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.connect-form input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.connect-pop button.connect-submit {
+  justify-content: center;
+  min-height: 34px;
+  margin-top: 2px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+}
+
+.connect-pop button.connect-submit:hover,
+.connect-pop button.connect-submit:focus-visible {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.connect-pop button.connect-action {
+  min-height: 32px;
+}
+
+.connect-pop button.danger {
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-spinner {
+    animation: none;
+  }
 }
 
 @keyframes pulse {
@@ -932,10 +990,6 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status[data-state='connecting'] .status-dot {
-    animation: none;
-  }
-
   .icon-btn:active,
   .action:active {
     transform: none;

@@ -13,7 +13,11 @@ import { languagesLabel, type Transcript } from '../transcript';
 
 export type Color =
   | 'default'
+  | 'gray'
   | 'gray_background'
+  | 'brown_background'
+  | 'orange_background'
+  | 'purple_background'
   | 'yellow_background'
   | 'green_background'
   | 'blue_background'
@@ -24,6 +28,8 @@ export interface Annotations {
   italic?: boolean;
   strikethrough?: boolean;
   code?: boolean;
+  /** Text colour (`gray` for what comes second). */
+  color?: 'gray';
 }
 
 export type RichText =
@@ -58,7 +64,8 @@ type TextBlockType =
   | 'callout';
 
 export type BlockSpec =
-  | { type: TextBlockType; rich: RichText[]; checked?: boolean; color?: Color; emoji?: string; children?: BlockSpec[] }
+  /** `toggleable`: a heading folded over its children (a section to open). */
+  | { type: TextBlockType; rich: RichText[]; checked?: boolean; color?: Color; emoji?: string; toggleable?: boolean; children?: BlockSpec[] }
   | { type: 'code'; text: string; language: string }
   | { type: 'divider' }
   | { type: 'image'; asset: string; caption: RichText[]; missing?: boolean }
@@ -364,6 +371,7 @@ export async function toNotion(spec: BlockSpec, upload: Uploader): Promise<Json>
       if (spec.type === 'to_do') body.checked = Boolean(spec.checked);
       if (spec.color) body.color = spec.color;
       if (spec.type === 'callout') body.icon = { type: 'emoji', emoji: spec.emoji ?? '💡' };
+      if (spec.toggleable && spec.type.startsWith('heading_')) body.is_toggleable = true;
       if (spec.children?.length) body.children = await Promise.all(spec.children.map((c) => toNotion(c, upload)));
       return { object: 'block', type: spec.type, [spec.type]: body };
     }
@@ -405,25 +413,46 @@ export { text as plainRichText };
 
 /** Cues written to Notion at most (a long lecture stays readable and quick to sync). */
 const MAX_TRANSCRIPT_CUES = 3000;
+/** Lines of the transcript per folded part (the most a block may hold in one request). */
+const TRANSCRIPT_PART = 100;
 
 /**
  * The « Transcription » section at the end of a Notion page: one paragraph per
  * line said, its time (linked to the instant when `timeUrl` gives one), the
  * translation in italics and the user's comment.
  */
-export function transcriptBlocks(t: Transcript, timeUrl: (seconds: number) => string | null = () => null): BlockSpec[] {
+export function transcriptBlocks(t: Transcript, timeUrl: (seconds: number) => string | null = () => null, opts: { fold?: boolean } = {}): BlockSpec[] {
   if (!t.cues.length) return [];
   const n = t.cues.length;
-  const out: BlockSpec[] = [
-    { type: 'heading_2', rich: text('Transcription') },
-    { type: 'paragraph', rich: text(`${t.label} · ${languagesLabel(t)} · ${n} réplique${n > 1 ? 's' : ''}`, { italic: true }) },
-  ];
-  for (const c of t.cues.slice(0, MAX_TRANSCRIPT_CUES)) {
+  const cues = t.cues.slice(0, MAX_TRANSCRIPT_CUES);
+  const line = (c: Transcript['cues'][number]): BlockSpec => {
     const rich: RichText[] = [...text(formatTimecode(c.start), { code: true }, safeUrl(timeUrl(c.start))), ...text(` ${c.text}`)];
     if (c.tr?.trim()) rich.push(...text(`\n${c.tr.trim()}`, { italic: true }));
     if (c.note?.trim()) rich.push(...text(`\n💬 ${c.note.trim()}`));
-    out.push({ type: 'paragraph', rich });
+    return { type: 'paragraph', rich };
+  };
+  const about = text(`${t.label} · ${languagesLabel(t)} · ${n} réplique${n > 1 ? 's' : ''}`, { italic: true });
+  const more: BlockSpec[] = n > MAX_TRANSCRIPT_CUES ? [{ type: 'paragraph', rich: text(`… ${n - MAX_TRANSCRIPT_CUES} répliques de plus dans Boo Notes`, { italic: true }) }] : [];
+  if (!opts.fold) return [{ type: 'heading_2', rich: text('Transcription') }, { type: 'paragraph', rich: about }, ...cues.map(line), ...more];
+  // Notion: folded by stretches of the video — the page stays short, each part opens on its moments.
+  const out: BlockSpec[] = [
+    { type: 'heading_2', rich: text('🎙️ Transcription') },
+    { type: 'paragraph', rich: about, color: 'gray' },
+  ];
+  for (let i = 0; i < cues.length; i += TRANSCRIPT_PART) {
+    const part = cues.slice(i, i + TRANSCRIPT_PART);
+    const last = part[part.length - 1];
+    out.push({
+      type: 'heading_3',
+      toggleable: true,
+      rich: text(`${formatTimecode(part[0].start)} – ${formatTimecode(last.end ?? last.start)} · ${part.length} réplique${part.length > 1 ? 's' : ''}`),
+      children: part.map(line),
+    });
   }
-  if (n > MAX_TRANSCRIPT_CUES) out.push({ type: 'paragraph', rich: text(`… ${n - MAX_TRANSCRIPT_CUES} répliques de plus dans Boo Notes`, { italic: true }) });
-  return out;
+  return [...out, ...more];
+}
+
+/** Blocks a spec writes, its folded children included (Notion takes 1000 per request). */
+export function blockCount(spec: BlockSpec): number {
+  return 1 + ('children' in spec && spec.children ? spec.children.reduce((n, c) => n + blockCount(c), 0) : 0);
 }

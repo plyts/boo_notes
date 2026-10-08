@@ -1,9 +1,10 @@
 # « Connecter Notion » — mise en place (une fois)
 
-Le bouton **Connecter Notion** (panneau de notes, et options › Notion) ouvre la fenêtre de
-consentement de Notion : l’utilisateur se connecte, choisit « Utiliser le modèle » (ou coche une
-page) et clique sur « Autoriser l’accès ». Rien à copier, rien d’autre à choisir : l’extension
-crée le tableau et y envoie les notes. Pour cela, il faut une fois :
+Le bouton **Se connecter à… › Notion** (panneau de notes, et options › Notion) ouvre la fenêtre
+de consentement de Notion : l’utilisateur se connecte, choisit « Utiliser le modèle » (ou coche une
+page) et clique sur « Autoriser l’accès », puis nomme son coffre (« Boo Notes » par défaut) et
+valide. Rien à copier : l’extension crée (ou retrouve) le coffre, sa table et une page par cours,
+et y envoie les notes. Pour cela, il faut une fois :
 
 1. **une intégration publique Notion** (son identifiant client et son secret), avec son modèle ;
 2. **ce petit serveur d’échange** (`worker.mjs`), qui garde le secret. Il ne garde rien et n’est
@@ -21,8 +22,9 @@ crée le tableau et y envoie les notes. Pour cela, il faut une fois :
    s’affiche dans les options de l’extension (section Notion) tant que la connexion en un clic
    n’est pas configurée. L’identifiant change si l’extension est chargée depuis un autre dossier :
    déclarez chaque adresse utilisée.
-4. **Modèle (recommandé)** : créez une page « Boo Notes » (un mot d’accueil suffit ; le tableau
-   y sera créé par l’extension), publiez-la sur le web (Partager › Publier) et collez son adresse
+4. **Modèle (recommandé)** : créez une page « Boo Notes » vide (l’extension y écrit l’accueil, la
+   table et les pages des cours, et la renomme au nom choisi), publiez-la sur le web (Partager ›
+   Publier) et collez son adresse
    dans « Notion URL for optional template ». La fenêtre de Notion propose alors « Utiliser le
    modèle fourni par le développeur » : la page est copiée chez l’utilisateur et partagée avec
    Boo Notes d’office — l’utilisateur n’a rien à cocher.

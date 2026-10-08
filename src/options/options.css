@@ -375,6 +375,36 @@ a.btn[hidden],
 }
 
 /* Notion: the place of the notes table, then the advanced way (an integration secret). */
+.vault-choice {
+  margin: 0;
+  border: 0;
+}
+
+.vault-list {
+  display: grid;
+  gap: 6px;
+}
+
+.vault-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.vault-list label:has(input[type='radio']:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.vault-list input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+
 details.advanced {
   border-top: 1px solid var(--hairline);
 }
@@ -700,17 +730,32 @@ input[aria-invalid='true'] {
   font-weight: 600;
 }
 
-.note-list a {
+/* The lesson (a click reopens it) and where it is filed. */
+.note-what {
+  display: grid;
   flex: 1;
   min-width: 0;
+}
+
+.note-list .note-what a,
+.note-place {
+  min-width: 0;
   overflow: hidden;
-  color: var(--text);
-  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.note-list a:hover {
+.note-list .note-what a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.note-place {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.note-list .note-what a:hover {
   color: var(--accent);
 }
 
@@ -748,10 +793,24 @@ input[aria-invalid='true'] {
 }
 
 .data-sync {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
   padding: 0 16px 10px;
   color: var(--muted);
   font-size: var(--text-s);
+}
+
+.data-sync .btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--text-xs);
+}
+
+.data-sync[hidden],
+.data-actions[hidden] {
+  display: none;
 }
 
 .data-actions {
@@ -813,6 +872,28 @@ input[aria-invalid='true'] {
 
 .sync-pill[data-state='error']::before {
   background: var(--danger);
+}
+
+/* Not in Notion yet: written now, in its course's page. */
+.note-list .btn.sync-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-size: var(--text-xs);
+}
+
+.note-list .btn.sync-now[data-state='error'] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.note-list .btn.sync-now:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .note-list .delete {
@@ -938,26 +1019,3 @@ input[aria-invalid='true'] {
   display: none;
 }
 
-/* Course tracking progress in the notes list */
-.progress {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font: 600 var(--text-xs) var(--font-mono);
-}
-
-.progress-bar {
-  width: 48px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.progress-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent-strong);
-}

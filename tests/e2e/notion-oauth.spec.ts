@@ -4,10 +4,11 @@ import { startExchange, type Exchange } from '../../tools/notion-oauth/server.mj
 import { expect, openNotes, openWatch, panel, setVideo, storedNote, test } from './fixtures';
 
 /**
- * « Connecter Notion »: one button. Notion's consent window (OAuth), the code
- * exchanged by the small server holding the client secret, then everything
- * without asking: the page of the table, the table, the notes. « Déconnecter
- * Notion » withdraws the access in Notion too; an expired access is renewed.
+ * « Se connecter à… › Notion »: Notion's consent window (OAuth), the code
+ * exchanged by the small server holding the client secret, then the name of
+ * the vault (« Boo Notes » by default, or one already there) — and the rest
+ * by itself: the table, a page per course, the notes. « Déconnecter »
+ * withdraws the access in Notion too; an expired access is renewed.
  */
 
 let notion: MockNotion;
@@ -44,9 +45,9 @@ const storedConfig = (sw: Worker) => sw.evaluate(async () => (await chrome.stora
 const notePages = () =>
   [...notion.state.pages.values()].filter((p) => p.parent?.database_id).map((p) => ({ title: notion.titleOf(p.id), text: JSON.stringify(notion.pageContent(p.id)) }));
 
-test('options : « Connecter Notion », la fenêtre Notion, « Autoriser » — le reste se fait seul ; « Déconnecter Notion » retire l’accès', async ({ context, page, sw }) => {
+test('options : « Se connecter à Notion », la fenêtre Notion, le nom du coffre — fait seul, puis « Déconnecter Notion » retire l’accès', async ({ context, page, sw }) => {
   await openOptions(page, sw);
-  const connect = page.getByRole('button', { name: 'Connecter Notion', exact: true });
+  const connect = page.getByRole('button', { name: 'Se connecter à Notion', exact: true });
   await expect(connect).toBeEnabled();
   // The integration secret is only the advanced way now.
   await expect(page.locator('#notion-advanced')).not.toHaveAttribute('open', '');
@@ -58,18 +59,22 @@ test('options : « Connecter Notion », la fenêtre Notion, « Autoriser » — 
   await expect(page.locator('#saved')).toContainText('connexion annulée');
   await expect(page.locator('#notion-badge')).toHaveText('Non connecté');
 
-  // Allowed: no question asked — the page speaking of courses receives the table.
+  // Allowed: the vault to name, « Boo Notes » offered; made in the page speaking of courses.
   consent = context.waitForEvent('page', { predicate: (p) => p.url().includes('/v1/oauth/authorize') });
   await connect.click();
   const window = await consent;
   await expect(window.getByRole('heading')).toHaveText('Boo Notes souhaite accéder à votre espace Notion');
   await window.locator('#allow').click();
-  await expect(page.locator('#notion-badge')).toHaveText('Connecté avec votre compte Notion · Espace de test');
-  await expect(page.locator('#saved')).toContainText('page « Mes cours »');
+  const vault = page.getByRole('group', { name: 'Votre coffre Notion' });
+  await expect(vault.getByRole('textbox', { name: 'Nom du coffre' })).toHaveValue('Boo Notes');
+  await page.getByRole('button', { name: 'Valider' }).click();
+  await expect(page.locator('#notion-badge')).toHaveText('Connecté à Notion · coffre « Boo Notes »');
   await expect(connect).toBeHidden();
-  const db = [...notion.state.databases.values()][0];
-  expect(db.parent.page_id).toBe(PARENT_PAGE_ID);
-  expect(await storedConfig(sw)).toMatchObject({ token: 'secret_test', via: 'oauth', workspace: 'Espace de test', refreshToken: 'refresh-1' });
+  const made = [...notion.state.pages.values()].find((p) => notion.titleOf(p.id) === 'Boo Notes')!;
+  expect(made.parent.page_id).toBe(PARENT_PAGE_ID);
+  expect([...notion.state.databases.values()][0].parent.page_id).toBe(made.id);
+  await expect(page.locator('#notion-open')).toHaveAttribute('href', made.url);
+  expect(await storedConfig(sw)).toMatchObject({ token: 'secret_test', via: 'oauth', workspace: 'Espace de test', refreshToken: 'refresh-1', vaultName: 'Boo Notes' });
 
   // Disconnected: forgotten here, and the access withdrawn in Notion.
   await page.getByRole('button', { name: 'Déconnecter Notion' }).click();
@@ -77,31 +82,51 @@ test('options : « Connecter Notion », la fenêtre Notion, « Autoriser » — 
   expect(notion.state.revoked).toEqual(['secret_test']);
   expect(await storedConfig(sw)).toBeUndefined();
   await expect(connect).toBeVisible();
+
+  // Connected again: the vault found again, offered first — not a second one.
+  consent = context.waitForEvent('page', { predicate: (p) => p.url().includes('/v1/oauth/authorize') });
+  await connect.click();
+  await (await consent).locator('#allow').click();
+  await expect(vault.getByRole('radio', { name: '👻 Boo Notes' })).toBeChecked();
+  await page.getByRole('button', { name: 'Valider' }).click();
+  await expect(page.locator('#notion-badge')).toHaveText('Connecté à Notion · coffre « Boo Notes »');
+  expect(notion.state.databases.size).toBe(1);
 });
 
-test('panneau de notes : « Connecter Notion » en un clic (modèle Boo Notes), notes envoyées, accès renouvelé, puis « Déconnecter Notion »', async ({ context, page, sw }) => {
+test('panneau de notes : « Se connecter à… » › Notion › nom du coffre › Valider ; notes rangées par cours, accès renouvelé, puis « Déconnecter »', async ({ context, page, sw }) => {
   await openWatch(page);
   await setVideo(page, 4);
   await openNotes(sw, page);
   await page.keyboard.type('Idée à garder');
   const p = panel(page);
-  const chip = p.getByRole('button', { name: 'Connecter Notion', exact: true });
-  await expect(chip).toBeVisible();
-  await expect(chip).toHaveText('Connecter Notion', { useInnerText: true });
+  // No « Hors-ligne », no « Notion » badge: one button.
+  await expect(p.locator('.status')).toHaveCount(0);
+  const button = p.getByRole('button', { name: 'Se connecter à…' });
+  await expect(button).toHaveText('Se connecter à…');
+  await button.click();
+  const pop = p.getByRole('dialog', { name: 'Se connecter à' });
+  await expect(pop.getByRole('button', { name: /^Notion/ })).toBeVisible();
+  await expect(pop.getByRole('button', { name: /^Boo Notes Desktop/ })).toContainText('Non détectée');
 
-  // One click: Notion's window, « Utiliser le modèle », and that's all.
+  // Notion: its window, « Utiliser le modèle »; then the vault, named.
   const consent = context.waitForEvent('page', { predicate: (w) => w.url().includes('/v1/oauth/authorize') });
-  await chip.click();
+  await pop.getByRole('button', { name: /^Notion/ }).click();
   await (await consent).locator('#template').click();
-  await expect(p.locator('.notice')).toContainText('Notion connecté : vos notes vont dans « Boo Notes — Mes notes » (page « Boo Notes »)');
-  const connected = p.getByRole('button', { name: 'Notion connecté (Espace de test)' });
+  const name = pop.getByRole('textbox', { name: 'Nom du coffre' });
+  await expect(name).toHaveValue('Boo Notes');
+  await name.fill('Coursera notes');
+  await pop.getByRole('button', { name: 'Valider' }).click();
+  await expect(p.locator('.notice')).toContainText('Notion connecté : vos notes vont dans le coffre « Coursera notes »');
+  const connected = p.getByRole('button', { name: 'Connecté à Notion · coffre « Coursera notes »' });
   await expect(connected).toHaveAttribute('data-state', 'on');
-  // The table is in the page copied from Boo Notes' template.
-  const template = [...notion.state.pages.values()].find((pg) => notion.titleOf(pg.id) === 'Boo Notes')!;
-  expect([...notion.state.databases.values()][0].parent.page_id).toBe(template.id);
-  // The notes already taken go to Notion by themselves.
+  await expect(connected).toHaveText('Coursera notes');
+  // The vault is the page copied from Boo Notes' template, named; its table inside.
+  const vault = [...notion.state.pages.values()].find((pg) => notion.titleOf(pg.id) === 'Coursera notes')!;
+  expect([...notion.state.databases.values()][0].parent.page_id).toBe(vault.id);
+  // The notes already taken go to Notion by themselves (filed nowhere yet: « Notes à ranger »).
   await flush(sw);
   await expect.poll(() => notePages().map((n) => n.text).join()).toContain('Idée à garder');
+  expect(notion.pageContent(vault.id)!.filter((b) => b.type === 'child_page').map((b) => b.text)).toEqual(['Notes à ranger']);
 
   // Notion stops taking the access: renewed without the user, the sync goes on.
   notion.expireToken();
@@ -114,13 +139,13 @@ test('panneau de notes : « Connecter Notion » en un clic (modèle Boo Notes), 
   expect(await storedConfig(sw)).toMatchObject({ token: notion.token, refreshToken: 'refresh-2' });
   await expect(connected).toHaveAttribute('data-state', 'on');
 
-  // Its menu: the table, and « Déconnecter Notion ».
+  // Its window: the vault, open it, sync, disconnect.
   await connected.click();
-  const menu = p.getByRole('menu', { name: 'Notion' });
-  await expect(menu.getByRole('menuitem', { name: /Ouvrir mon tableau Notion/ })).toBeVisible();
-  await menu.getByRole('menuitem', { name: /Déconnecter Notion/ }).click();
+  await expect(pop).toContainText('Coursera notes');
+  await expect(pop.getByRole('button', { name: 'Ouvrir le coffre dans Notion' })).toBeVisible();
+  await pop.getByRole('button', { name: 'Déconnecter' }).click();
   await expect(p.locator('.notice')).toContainText('Notion déconnecté');
-  await expect(p.getByRole('button', { name: 'Connecter Notion', exact: true })).toBeVisible();
+  await expect(p.getByRole('button', { name: 'Se connecter à…' })).toBeVisible();
   expect(notion.state.revoked).toHaveLength(1);
   expect(await storedConfig(sw)).toBeUndefined();
 });

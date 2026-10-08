@@ -62,6 +62,7 @@ import { Timeline } from './timeline';
 import { TranscriptView } from './transcript-view';
 import { CueTranslator, type TranslateStatus } from './translator';
 import { answerQuestion } from './answers';
+import { ConnectPanel } from './connect';
 import type { AskRequest } from './blocks';
 
 /**
@@ -129,12 +130,8 @@ class PanelApp {
   private reading: { ratio: number; passage: string | null } = { ratio: 0, passage: null };
   private wikiTitles: string[] = [];
   private notionStatus: NotionStatus | null = null;
-  /** « Connecter Notion » in one click (the build knows Boo Notes' Notion integration). */
-  private notionOAuth: Promise<boolean> = Promise.resolve(false);
-  private notionOAuthReady = false;
-  private notionBusy = false;
-  private notionButton!: HTMLButtonElement;
-  private notionMenu!: HTMLDivElement;
+  /** « Se connecter à… »: where the notes go (Notion, the Desktop app). */
+  private connectUi!: ConnectPanel;
   private siteHint!: HTMLDivElement;
   private pinned = false;
   private pageTheme: PageTheme | null = null;
@@ -155,8 +152,6 @@ class PanelApp {
 
   // UI
   private readonly root = document.getElementById('app') as HTMLElement;
-  private statusButton!: HTMLButtonElement;
-  private statusLabel!: HTMLSpanElement;
   private titleEl!: HTMLHeadingElement;
   private platformEl!: HTMLSpanElement;
   /** A course module (SCORM, xAPI) in the page: its completion, progress, score. */
@@ -272,13 +267,8 @@ class PanelApp {
     void this.loadShortcuts();
     const session = await chrome.storage.session.get(['sync:status', 'notion:status']);
     this.renderStatus(session['sync:status'] as SyncStatus | undefined);
-    this.notionStatus = (session['notion:status'] as NotionStatus | undefined) ?? null;
-    this.renderNotion();
+    this.setNotionStatus((session['notion:status'] as NotionStatus | undefined) ?? null);
     callBackground({ type: 'notion:status' }).then((n) => this.setNotionStatus(n), () => undefined);
-    this.notionOAuth = callBackground({ type: 'notion:oauth-info' }).then(
-      (i) => (this.notionOAuthReady = i.available),
-      () => false,
-    );
     void this.loadWikiTitles();
     callBackground({ type: 'sync:status' }).then((s) => this.renderStatus(s), () => undefined);
     this.transcriptView.setTarget(this.settings.translateTo);
@@ -678,41 +668,8 @@ class PanelApp {
       return b;
     };
 
-    this.statusLabel = h('span', { class: 'status-label' }, 'Hors-ligne');
-    this.statusButton = h(
-      'button',
-      { type: 'button', class: 'status', 'data-state': 'offline' },
-      h('span', { class: 'status-dot', 'aria-hidden': 'true' }),
-      this.statusLabel,
-    );
-    this.statusButton.addEventListener('click', () => {
-      this.renderStatus({ state: 'connecting', pending: 0, at: Date.now() });
-      callBackground({ type: 'sync:retry' }).then((s) => this.renderStatus(s), () => undefined);
-    });
-
-    // Notion: « Connecter Notion » when it is not, its menu (open the table, disconnect) when it is.
-    this.notionButton = h(
-      'button',
-      { type: 'button', class: 'notion-chip', 'data-state': 'off' },
-      icon('notion', 14),
-      h('span', { class: 'status-dot', 'aria-hidden': 'true' }),
-      h('span', { class: 'notion-long' }, 'Connecter Notion'),
-      h('span', { class: 'notion-short' }, 'Notion'),
-    );
-    this.notionButton.addEventListener('click', () => void this.onNotionButton());
-    this.notionMenu = h('div', { class: 'menu notion-menu', role: 'menu', hidden: true, 'aria-label': 'Notion' });
-    this.notionMenu.addEventListener('keydown', (e) => {
-      const items = [...this.notionMenu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
-      const i = items.indexOf(document.activeElement as HTMLButtonElement);
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeNotionMenu(true);
-      }
-    });
+    // Where the notes go: one button, its small window (Notion, the Desktop app).
+    this.connectUi = new ConnectPanel({ notify: (text, kind) => this.notify(text, kind) });
 
     const actions: HTMLElement[] = [];
     if (MODE === 'embedded') {
@@ -816,7 +773,7 @@ class PanelApp {
       h(
         'header',
         { class: 'header' },
-        h('div', { class: 'toolbar' }, this.statusButton, this.notionButton, this.recPill, h('span', { class: 'spacer' }), ...actions),
+        h('div', { class: 'toolbar' }, this.connectUi.button, this.recPill, h('span', { class: 'spacer' }), ...actions),
         // Course › chapter of the library, as a breadcrumb above the title.
         this.placeButton,
         this.titleEl,
@@ -826,7 +783,7 @@ class PanelApp {
         this.playersHint,
         this.menu,
         this.placeMenu,
-        this.notionMenu,
+        this.connectUi.pop,
       ),
       this.banner,
       editorHost,
@@ -892,7 +849,7 @@ class PanelApp {
       this.closeMenu(false);
       return;
     }
-    const online = this.statusButton.dataset.state === 'connected';
+    const online = this.connectUi.desktopOnline;
     const direct = Boolean(this.notionStatus?.configured);
     for (const b of this.menu.querySelectorAll<HTMLButtonElement>('button')) {
       const target = b.dataset.target;
@@ -905,7 +862,7 @@ class PanelApp {
       } else if (target === 'notion') {
         // Through the app when it runs, else directly from the browser.
         enabled &&= online || direct;
-        hint = online ? 'Via l’app Desktop' : direct ? 'Directement (app Desktop fermée)' : 'Connectez d’abord Notion (bouton « Connecter Notion » en haut)';
+        hint = online ? 'Via l’app Desktop' : direct ? 'Directement (app Desktop fermée)' : 'Connectez d’abord Notion (« Se connecter à… » en haut)';
       }
       b.disabled = !enabled;
       if (small) small.textContent = hint;
@@ -1561,148 +1518,12 @@ class PanelApp {
 
   private setNotionStatus(status: NotionStatus | null): void {
     this.notionStatus = status;
-    this.renderNotion();
-    if (!this.notionMenu.hidden) this.fillNotionMenu();
+    this.connectUi.setNotion(status);
   }
 
-  /** The Notion chip: « Connecter Notion », then « Notion » (green: notes sent; orange: a problem). */
-  private renderNotion(): void {
-    const s = this.notionStatus;
-    const state = this.notionBusy ? 'connecting' : s?.configured ? (s.lastError ? 'error' : 'on') : 'off';
-    const b = this.notionButton;
-    b.dataset.state = state;
-    const long = b.querySelector('.notion-long') as HTMLElement;
-    const short = b.querySelector('.notion-short') as HTMLElement;
-    long.textContent = state === 'connecting' ? 'Connexion…' : state === 'off' ? 'Connecter Notion' : 'Notion';
-    short.textContent = state === 'connecting' ? '…' : 'Notion';
-    const where = s?.workspace ? ` (${s.workspace})` : '';
-    const pending = s?.pending ? ` ${s.pending} note(s) en attente.` : '';
-    const label =
-      state === 'connecting'
-        ? 'Connexion à Notion…'
-        : state === 'off'
-          ? 'Connecter Notion'
-          : state === 'error'
-            ? `Notion : ${s?.lastError ?? ''}`
-            : `Notion connecté${where}`;
-    b.setAttribute('aria-label', label);
-    b.title =
-      state === 'off'
-        ? 'Un clic : la fenêtre de Notion s’ouvre, « Autoriser l’accès », et vos notes y sont envoyées automatiquement.'
-        : state === 'on'
-          ? `Connecté à Notion${where} : vos notes y sont envoyées automatiquement.${pending}`
-          : label;
-    if (state === 'on' || state === 'error') b.setAttribute('aria-haspopup', 'menu');
-    else b.removeAttribute('aria-haspopup');
-    b.setAttribute('aria-expanded', String(!this.notionMenu.hidden));
-  }
-
-  private async onNotionButton(): Promise<void> {
-    if (this.notionBusy) return;
-    if (!this.notionStatus?.configured) {
-      await this.connectNotion();
-      return;
-    }
-    if (!this.notionMenu.hidden) {
-      this.closeNotionMenu(false);
-      return;
-    }
-    this.fillNotionMenu();
-    this.notionMenu.hidden = false;
-    this.renderNotion();
-    this.notionMenu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  }
-
-  /** « Connecter Notion »: Notion's window, then the service worker does everything. */
-  private async connectNotion(): Promise<void> {
-    this.closeNotionMenu(false);
-    if (!(await this.notionOAuth)) {
-      // This installation has no one-click connection: the options explain the other way.
-      this.notify('Connexion à Notion : ouvrez les options de Boo Notes › Notion', 'info');
-      void callBackground({ type: 'options:open' }).catch(() => undefined);
-      return;
-    }
-    this.notionBusy = true;
-    this.renderNotion();
-    try {
-      const res = await callBackground({ type: 'notion:oauth' });
-      this.notionBusy = false;
-      this.setNotionStatus(res);
-      this.notify(`Notion connecté : vos notes vont dans « Boo Notes — Mes notes » (page « ${res.place} »)`, 'success');
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      this.notify(`Notion : ${message}`, /annulée/.test(message) ? 'info' : 'error');
-    } finally {
-      this.notionBusy = false;
-      this.renderNotion();
-    }
-  }
-
-  private fillNotionMenu(): void {
-    const s = this.notionStatus;
-    const item = (iconName: IconName, label: string, hint: string, onClick: () => void, cls?: string) => {
-      const b = h('button', { type: 'button', role: 'menuitem', ...(cls ? { class: cls } : {}) }, icon(iconName, 18), h('span', {}, label, h('small', {}, hint)));
-      b.addEventListener('click', onClick);
-      return b;
-    };
-    const items: HTMLElement[] = [h('div', { class: 'menu-label', 'aria-hidden': 'true' }, `Notion${s?.workspace ? ` · ${s.workspace}` : ''}`)];
-    if (s?.lastError) items.push(h('p', { class: 'notion-error' }, s.lastError));
-    if (s?.databaseUrl) {
-      const url = s.databaseUrl;
-      items.push(
-        item('notion', 'Ouvrir mon tableau Notion', '« Boo Notes — Mes notes »', () => {
-          this.closeNotionMenu(true);
-          void chrome.tabs.create({ url });
-        }),
-      );
-    }
-    if (s?.lastError && s.origin !== 'desktop' && this.notionOAuthReady) {
-      items.push(item('replay', 'Reconnecter Notion', 'La fenêtre de Notion, « Autoriser l’accès »', () => void this.connectNotion()));
-    }
-    if (s?.origin === 'desktop') {
-      const managed = item('desktop', 'Géré par l’app Desktop', 'Déconnectez Notion dans l’application', () => undefined);
-      managed.disabled = true;
-      items.push(managed);
-    } else {
-      items.push(
-        item(
-          'close',
-          'Déconnecter Notion',
-          'Les pages déjà créées restent dans Notion',
-          () => {
-            this.closeNotionMenu(true);
-            callBackground({ type: 'notion:disconnect' }).then(
-              (res) => {
-                this.setNotionStatus(res);
-                this.notify('Notion déconnecté : Boo Notes n’y a plus accès', 'success');
-              },
-              (e: unknown) => this.notify(e instanceof Error ? e.message : String(e), 'error'),
-            );
-          },
-          'danger',
-        ),
-      );
-    }
-    this.notionMenu.replaceChildren(...items);
-  }
-
-  private closeNotionMenu(refocus: boolean): void {
-    if (this.notionMenu.hidden) return;
-    this.notionMenu.hidden = true;
-    this.renderNotion();
-    if (refocus) this.notionButton.focus();
-  }
-
+  /** The Desktop app's state: shown in « Se connecter à… ». */
   private renderStatus(status: SyncStatus | undefined): void {
-    const state = status?.state ?? 'offline';
-    this.statusButton.dataset.state = state;
-    this.statusLabel.textContent = state === 'connected' ? 'Connecté' : state === 'connecting' ? 'Connexion…' : 'Hors-ligne';
-    const pending = status?.pending ? ` ${status.pending} note(s) en attente de synchronisation.` : '';
-    this.statusButton.title =
-      state === 'connected'
-        ? `Synchronisé avec ${status?.app?.name ?? 'l’application Desktop'}.${pending}`
-        : `Mode hors-ligne : notes enregistrées dans le navigateur.${pending}${status?.error ? `\n${status.error}` : ''}\nCliquer pour réessayer.`;
-    this.statusButton.setAttribute('aria-label', `Synchronisation Desktop : ${this.statusLabel.textContent}`);
+    this.connectUi.setDesktop(status ?? null);
   }
 
   private renderPin(): void {
@@ -2052,7 +1873,7 @@ class PanelApp {
           e.preventDefault();
           return;
         }
-        if (e.key === 'Escape' && !e.defaultPrevented && this.menu.hidden && this.notionMenu.hidden) {
+        if (e.key === 'Escape' && !e.defaultPrevented && this.menu.hidden && !this.connectUi.isOpen) {
           e.preventDefault();
           this.post({ type: 'escape' });
         }
@@ -2062,7 +1883,7 @@ class PanelApp {
     document.addEventListener('pointerdown', (e) => {
       const target = e.target as Node;
       if (!this.placeMenu.hidden && !this.placeMenu.contains(target) && !this.placeButton.contains(target)) this.closePlaceMenu(false);
-      if (!this.notionMenu.hidden && !this.notionMenu.contains(target) && !this.notionButton.contains(target)) this.closeNotionMenu(false);
+      if (this.connectUi.isOpen && !this.connectUi.pop.contains(target) && !this.connectUi.button.contains(target)) this.connectUi.close(false);
       if (!this.menu.hidden && !this.menu.contains(e.target as Node) && e.target !== this.exportButton) {
         this.closeMenu(false);
       }

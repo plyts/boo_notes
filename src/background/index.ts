@@ -12,7 +12,7 @@ import {
   type TabMessage,
 } from '../shared/messages';
 import { readCourseText, type CourseText } from '../shared/course-text';
-import { authorizeUrl, BUILT_IN_NOTION_OAUTH, codeFrom, exchangeCode, refreshAccess, revokeAccess, type NotionOAuthConfig } from '../shared/notion-oauth';
+import { authorizeUrl, BUILT_IN_NOTION_OAUTH, codeFrom, exchangeCode, refreshAccess, revokeAccess, type NotionGrant, type NotionOAuthConfig } from '../shared/notion-oauth';
 import { findAssetRefs, normalizeTitle, toPortableMarkdown } from '../shared/markdown';
 import { noteSlug } from '../shared/platforms';
 import { loadSettings, normalizeSettings } from '../shared/settings';
@@ -42,6 +42,8 @@ const uploads = new Map<string, { parts: string[]; at: number }>();
 const MAX_MEDIA_BYTES = 400 * 1024 * 1024;
 const SYNC_ALARM = 'boo-notes-sync-retry';
 const NOTION_ALARM = 'boo-notes-notion';
+/** Notion's answer between its window and the choice of the vault (session storage: memory only). */
+const NOTION_GRANT = 'notion:grant';
 /** Titles of the desktop app's library (revision sheets…), for `[[` completion. */
 const DESKTOP_TITLES = 'desktop:titles';
 /** Courses of the desktop library (title, emoji, chapters), to file notes from the panel. */
@@ -791,7 +793,7 @@ const handlers: Handlers = {
 
   'notion:oauth-info': async () => ({ available: Boolean(notionOAuth), redirectUri: chrome.identity?.getRedirectURL('notion') ?? '' }),
 
-  // « Connecter Notion »: one click. Notion's window (consent), then everything else without asking.
+  // « Se connecter à › Notion », 1: Notion's window (consent); its answer kept while the vault is chosen.
   'notion:oauth': async () => {
     if (!notionOAuth) throw new Error('la connexion en un clic n’est pas configurée dans cette installation : utilisez le secret d’intégration (voir docs/NOTION.md)');
     const redirect = chrome.identity.getRedirectURL('notion');
@@ -805,7 +807,19 @@ const handlers: Handlers = {
       throw new Error(/approve|cancel|closed/i.test(message) ? 'connexion annulée' : `fenêtre de connexion Notion : ${message}`);
     }
     const grant = await exchangeCode(notionOAuth, codeFrom(responseUrl ?? '', state), redirect);
-    return notion.connectWithGrant(grant);
+    // In memory only (session storage), for the next step: never written to disk.
+    await chrome.storage.session.set({ [NOTION_GRANT]: { ...grant, at: Date.now() } });
+    const vaults = await notion.vaults(grant.token);
+    return { workspace: grant.workspace, template: Boolean(grant.templatePageId), vaults: vaults.map((v) => ({ id: v.pageId, name: v.name })) };
+  },
+
+  // 2: the vault chosen (or named): made or found again, then every note goes there.
+  'notion:vault': async (msg) => {
+    const grant = (await chrome.storage.session.get(NOTION_GRANT))[NOTION_GRANT] as (NotionGrant & { at: number }) | undefined;
+    if (!grant || Date.now() - grant.at > 15 * 60_000) throw new Error('la fenêtre Notion a expiré : recommencez (Se connecter à › Notion)');
+    const status = await notion.connectVault(grant, { vaultId: msg.vaultId ?? null, name: msg.name ?? null });
+    await chrome.storage.session.remove(NOTION_GRANT);
+    return status;
   },
 
   // « Déconnecter »: forgotten here, and the access withdrawn in Notion (Connected apps) too.
@@ -815,6 +829,8 @@ const handlers: Handlers = {
     if (access?.via === 'oauth' && access.origin === 'extension' && notionOAuth) await revokeAccess(notionOAuth, access.token);
     return status;
   },
+
+  'notion:sync-note': (msg) => notion.syncNow(msg.noteId),
 
   'notion:sync-all': () => {
     if (sync.appHandlesNotion) throw new Error('L’app Desktop synchronise déjà vos notes avec Notion');

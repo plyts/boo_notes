@@ -273,5 +273,16 @@ describe('transcript in Notion', () => {
     expect(first.map((r) => r.text.content).join('')).toBe('02:05 The circulation of F\nLa circulation de F\n💬 orientation !');
     expect(transcriptBlocks({ ...t, cues: [] })).toEqual([]);
   });
+
+  it('in Notion, folded by stretches of the video (100 lines each): the page stays short', () => {
+    const cues = Array.from({ length: 150 }, (_, i) => ({ id: `c${i}`, start: i * 4, end: i * 4 + 3, text: `line ${i}` }));
+    const t = emptyTranscript('youtube:abc', { lang: 'en', label: 'Sous-titres YouTube', cues });
+    const blocks = transcriptBlocks(t, () => null, { fold: true }) as Array<{ type: string; toggleable?: boolean; rich: Array<{ text: { content: string } }>; children?: unknown[] }>;
+    expect(blocks.map((b) => b.type)).toEqual(['heading_2', 'paragraph', 'heading_3', 'heading_3']);
+    expect(blocks[2]).toMatchObject({ toggleable: true });
+    expect(blocks[2].rich[0].text.content).toBe('00:00 – 06:39 · 100 répliques');
+    expect(blocks[2].children).toHaveLength(100);
+    expect(blocks[3].rich[0].text.content).toBe('06:40 – 09:59 · 50 répliques');
+  });
 });
 

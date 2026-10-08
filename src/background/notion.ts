@@ -1,7 +1,7 @@
 import { countNotes, linkedTitles, normalizeTitle } from '../shared/markdown';
 import type { NotionPlace, NotionStatus } from '../shared/messages';
 import { explainNotionError, NotionClient, NotionError, type NotionClientOptions } from '../shared/notion/client';
-import { DATABASE_TITLE, NotionEngine, type NotionLink, type NotionSource, type SyncItem } from '../shared/notion/engine';
+import { DATABASE_TITLE, DEFAULT_VAULT_NAME, NotionEngine, type CourseEntry, type CoursePageLink, type NotionLink, type NotionSource, type NotionVault, type SyncItem } from '../shared/notion/engine';
 import { positionLabel, progressRatio, studyStatus } from '../shared/study';
 import type { MediaProgress, Note, NoteStore, StorageAreaLike } from '../shared/store';
 import { TranscriptStore } from '../shared/transcript-store';
@@ -28,6 +28,9 @@ export interface NotionConfig {
   /** Page holding the database (inline table). */
   parentId: string | null;
   workspace: string | null;
+  /** The vault: its name (the page holding the table and the course pages) and address. */
+  vaultName?: string | null;
+  vaultUrl?: string | null;
   origin: 'desktop' | 'extension';
   apiBase?: string;
 }
@@ -58,6 +61,8 @@ const PENDING_KEY = 'notion:pending';
 const STATE_KEY = 'notion:state';
 const LINK_PREFIX = 'notion:link:';
 const linkKey = (id: string) => `${LINK_PREFIX}${id}`;
+const COURSE_PREFIX = 'notion:course:';
+const coursePageKey = (key: string) => `${COURSE_PREFIX}${key}`;
 
 let lastStamp = 0;
 /** Strictly increasing time stamp. */
@@ -126,23 +131,17 @@ export interface NotionGrantLike {
 const PLACE_HINT = /boo\s*notes|cours|notes|études|etudes|révision|revision/i;
 
 /**
- * Where the notes table goes, without asking: the table of a former
- * connection, else the page of Boo Notes' template, else the page shared
- * whose name speaks of notes or courses, else the first one shared (the top
- * of the workspace first).
+ * Where to make a new vault, without asking: in the page shared whose name
+ * speaks of courses or notes, else the first one shared (the top of the
+ * workspace first). Tables are not places for a page.
  */
-export function pickPlace(places: NotionPlace[], templatePageId?: string): NotionPlace | null {
-  const table = places.find((p) => p.kind === 'database');
-  if (table) return table;
-  if (templatePageId) {
-    const bare = templatePageId.replace(/-/g, '');
-    return places.find((p) => p.id.replace(/-/g, '') === bare) ?? { id: templatePageId, kind: 'page', title: 'Boo Notes' };
-  }
+export function pickVaultParent(places: NotionPlace[]): NotionPlace | null {
   const pages = places.filter((p) => p.kind === 'page');
   return pages.find((p) => PLACE_HINT.test(p.title)) ?? pages[0] ?? null;
 }
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sameId = (a: string, b: string) => a.replace(/-/g, '').toLowerCase() === b.replace(/-/g, '').toLowerCase();
 
 export class ExtensionNotion {
   readonly engine: NotionEngine;
@@ -216,7 +215,29 @@ export class ExtensionNotion {
         return asset ? dataUrlBytes(asset.dataUrl) : null;
       },
       clearLinks: () => this.clearLinks(),
+      courseEntries: (course) => this.courseEntries(course),
+      getCoursePage: async (key) => (await area.get(coursePageKey(key)))[coursePageKey(key)] as CoursePageLink | undefined,
+      setCoursePage: async (key, link) => {
+        if (link) await area.set({ [coursePageKey(key)]: link });
+        else await area.remove(coursePageKey(key));
+      },
     };
+  }
+
+  /** The lessons of a course (null: the notes filed in none), in the order they were begun. */
+  private async courseEntries(course: string | null): Promise<CourseEntry[]> {
+    const { store } = this.opts;
+    const want = course ? normalizeTitle(course) : null;
+    const index = await store.listNotes();
+    const out: Array<CourseEntry & { at: number }> = [];
+    for (const [id, summary] of Object.entries(index)) {
+      if ((summary.course ? normalizeTitle(summary.course) : null) !== want) continue;
+      const note = await store.getNote(id);
+      if (!note) continue;
+      const item = noteToSyncItem(note, await store.getProgress(id));
+      out.push({ id, title: item.title, kind: item.kind, chapter: note.chapter ?? null, status: item.status, ratio: item.ratio, at: note.createdAt });
+    }
+    return out.sort((a, b) => a.at - b.at).map(({ at: _at, ...e }) => e);
   }
 
   /** Note id of a `[[Titre]]` among the notes of the extension. */
@@ -234,7 +255,7 @@ export class ExtensionNotion {
 
   private async clearLinks(): Promise<void> {
     const all = await this.opts.area.get(null);
-    const keys = Object.keys(all).filter((k) => k.startsWith(LINK_PREFIX));
+    const keys = Object.keys(all).filter((k) => k.startsWith(LINK_PREFIX) || k.startsWith(COURSE_PREFIX));
     if (keys.length) await this.opts.area.remove(keys);
     this.engine.reset();
   }
@@ -253,6 +274,8 @@ export class ExtensionNotion {
       origin: this.config?.origin ?? null,
       via: this.config ? (this.config.via ?? 'secret') : null,
       workspace: this.config?.workspace ?? null,
+      vault: this.config ? (this.config.vaultName ?? null) : null,
+      vaultUrl: this.config?.vaultUrl ?? null,
       databaseUrl: this.config?.databaseUrl ?? null,
       pending: Object.keys((res[PENDING_KEY] as Pending | undefined) ?? {}).length,
       syncing: this.syncing,
@@ -304,8 +327,15 @@ export class ExtensionNotion {
     return out.sort((a, b) => a.rank - b.rank).map(({ rank: _r, ...p }) => p);
   }
 
-  /** Options page: an access (integration secret, or Notion's consent) and the page that will hold the notes table. */
-  async connect(token: string, target: string, access: { via?: 'oauth' | 'secret'; refreshToken?: string } = {}): Promise<NotionStatus> {
+  /**
+   * Takes a connection: the access, then `setup` (the vault and its table
+   * found or made). Nothing changes when it fails.
+   */
+  private async adopt(
+    token: string,
+    access: { via?: 'oauth' | 'secret'; refreshToken?: string },
+    setup: () => Promise<{ workspace?: string | null; databaseId: string; url: string | null; parentId: string | null; vaultName: string | null; vaultUrl: string | null }>,
+  ): Promise<NotionStatus> {
     await this.load();
     const previous = this.config;
     this.config = {
@@ -321,42 +351,68 @@ export class ExtensionNotion {
     };
     this.engine.reset();
     try {
-      const res = await this.engine.connect(token, target);
-      this.config = { ...this.config, databaseId: res.databaseId, databaseUrl: res.url, parentId: res.parentId, workspace: res.workspace };
+      const res = await setup();
+      const workspace = res.workspace !== undefined ? res.workspace : await this.engine.workspace(token);
+      this.config = { ...this.config, databaseId: res.databaseId, databaseUrl: res.url, parentId: res.parentId, workspace, vaultName: res.vaultName, vaultUrl: res.vaultUrl };
     } catch (e) {
       this.config = previous;
       this.engine.reset();
       throw e;
     }
-    if (previous?.databaseId !== this.config.databaseId) await this.clearLinks();
+    if (previous?.databaseId !== this.config.databaseId || previous?.parentId !== this.config.parentId) await this.clearLinks();
     await this.opts.area.set({ [CONFIG_KEY]: this.config });
     await this.setState({ lastError: null });
     await this.emit();
     return this.status();
   }
 
+  /** Options page (method with a secret): an access and the page that becomes the vault (or a table, adopted). */
+  connect(token: string, target: string, access: { via?: 'oauth' | 'secret'; refreshToken?: string } = {}): Promise<NotionStatus> {
+    return this.adopt(token, access, () => this.engine.connect(token, target));
+  }
+
+  /** The vaults this access reaches (the « Choisir le coffre » step after Notion's window). */
+  vaults(token: string): Promise<NotionVault[]> {
+    return this.engine.findVaults(token);
+  }
+
   /**
-   * « Connecter Notion », all in one: the page of the notes table chosen
-   * without asking (see pickPlace), the table created there, then every
-   * note of this browser written to it.
+   * « Connecter Notion », once Notion's window answered: the vault chosen
+   * (`vaultId`), or the one named `name` — found again if it exists (never a
+   * second « Boo Notes »), else made: in the page Notion copied from Boo
+   * Notes' template, else in a page shared. Then every note of this browser
+   * goes there.
    */
-  async connectWithGrant(grant: NotionGrantLike): Promise<NotionStatus & { place: string }> {
-    const places = await this.places(grant.token);
-    const place = pickPlace(places, grant.templatePageId);
-    if (!place) throw new Error('aucune page Notion n’a été partagée : recommencez et choisissez « Utiliser le modèle » ou cochez une page dans la fenêtre Notion');
+  async connectVault(grant: NotionGrantLike, choice: { vaultId?: string | null; name?: string | null }): Promise<NotionStatus> {
+    const name = choice.name?.trim().slice(0, 100) || DEFAULT_VAULT_NAME;
     const access = { via: 'oauth' as const, ...(grant.refreshToken ? { refreshToken: grant.refreshToken } : {}) };
-    let status: NotionStatus | null = null;
-    // Notion copies the template in the background: its page may take a moment to be reachable.
-    for (let attempt = 0; !status; attempt++) {
-      try {
-        status = await this.connect(grant.token, place.id, access);
-      } catch (e) {
-        if (place.kind !== 'page' || !grant.templatePageId || attempt >= 5 || !/introuvable|not.?found/i.test(e instanceof Error ? e.message : String(e))) throw e;
-        await pause(1000 * (attempt + 1));
+    const vaults = await this.engine.findVaults(grant.token);
+    const existing = choice.vaultId ? vaults.find((v) => sameId(v.pageId, choice.vaultId!)) : vaults.find((v) => normalizeTitle(v.name) === normalizeTitle(name));
+    const template = grant.templatePageId ?? null;
+    let status: NotionStatus;
+    if (existing) {
+      status = await this.adopt(grant.token, access, () => this.engine.setupVault(grant.token, existing.pageId));
+      // A copy of the template made by this consent: not a second vault.
+      if (template && !sameId(template, existing.pageId)) await this.engine.archive(grant.token, template).catch(() => undefined);
+    } else if (template) {
+      // Notion copies the template in the background: its page may take a moment to be reachable.
+      let done: NotionStatus | null = null;
+      for (let attempt = 0; !done; attempt++) {
+        try {
+          done = await this.adopt(grant.token, access, () => this.engine.setupVault(grant.token, template, { name, own: true }));
+        } catch (e) {
+          if (attempt >= 5 || !/introuvable|not.?found/i.test(e instanceof Error ? e.message : String(e))) throw e;
+          await pause(1000 * (attempt + 1));
+        }
       }
+      status = done;
+    } else {
+      const parent = pickVaultParent(await this.places(grant.token));
+      if (!parent) throw new Error('aucune page Notion n’a été partagée : recommencez et choisissez « Utiliser le modèle » (ou cochez une page) dans la fenêtre Notion');
+      status = await this.adopt(grant.token, access, () => this.engine.createVault(grant.token, parent.id, name));
     }
     await this.enqueueAll();
-    return { ...status, place: place.title };
+    return status;
   }
 
   /** The access in use, for « Déconnecter » to withdraw it in Notion too. */
@@ -582,6 +638,7 @@ export class ExtensionNotion {
           if (!(e instanceof NotionError)) break; // Offline.
         }
       }
+      await this.syncCourses();
     } finally {
       this.syncing = false;
       await this.emit();
@@ -610,6 +667,7 @@ export class ExtensionNotion {
       await this.done(noteId, started);
       await this.setState({ lastSyncAt: Date.now(), lastError: null });
       this.opts.onLinked?.(noteId);
+      await this.syncCourses();
       return { url: res.url };
     } catch (e) {
       const message = this.explain(e);
@@ -621,18 +679,41 @@ export class ExtensionNotion {
     }
   }
 
-  async syncAll(): Promise<{ ok: number; failed: number }> {
+  /** The pages of the courses whose lessons changed: written again (a failure waits for the next change). */
+  private async syncCourses(): Promise<void> {
+    try {
+      await this.withAccess(() => this.engine.syncCourses());
+    } catch (e) {
+      await this.setState({ lastError: this.explain(e) });
+    }
+  }
+
+  /**
+   * « Tout synchroniser », idempotent: the table checked first (found again,
+   * else made in the vault), then each note — those already in Notion as they
+   * are here are left alone, the others written (found again by their Boo ID
+   * before any page is made).
+   */
+  async syncAll(): Promise<{ ok: number; failed: number; unchanged: number }> {
     let ok = 0;
     let failed = 0;
-    for (const id of Object.keys(await this.opts.store.listNotes())) {
+    let unchanged = 0;
+    if (!(await this.isConfigured())) throw new Error('Notion n’est pas connecté');
+    await this.withAccess(() => this.engine.ensureDatabase());
+    for (const [id] of Object.entries(await this.opts.store.listNotes())) {
       try {
+        const [link, note] = await Promise.all([this.link(id), this.opts.store.getNote(id)]);
+        if (note && link?.pageId && !link.error && link.syncedRev === note.rev && (await this.withAccess(() => this.engine.pageAlive(link.pageId)))) {
+          unchanged++;
+          continue;
+        }
         await this.syncNow(id);
         ok++;
       } catch {
         failed++;
       }
     }
-    return { ok, failed };
+    return { ok, failed, unchanged };
   }
 
   /** Notion page of a note known only by its title (a revision sheet of the desktop app). */

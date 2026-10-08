@@ -115,8 +115,24 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     const { parentId, children, ...rest } = b;
     void parentId;
     void children;
+    // A sub-page / sub-table as its parent lists it: its current title.
+    if (b.type === 'child_page') {
+      const page = state.pages.get(compact(b.id));
+      return { ...rest, archived: Boolean(page?.archived || page?.in_trash || b.archived), child_page: { title: titleOf(b.id) } };
+    }
+    if (b.type === 'child_database') {
+      const db = state.databases.get(compact(b.id));
+      return { ...rest, archived: Boolean(db?.archived || b.archived), child_database: { title: (db?.title ?? []).map((r) => r.text?.content ?? '').join('') } };
+    }
     return rest;
   };
+
+  /** A page or a table made inside a page: listed among its blocks (same id, as Notion does). */
+  function addChild(parent, id, type) {
+    const block = { object: 'block', id, type, [type]: {}, parentId: parent.id, children: [], archived: false, has_children: type === 'child_page' };
+    state.blocks.set(compact(id), block);
+    parent.children.push(id);
+  }
 
   function checkProperties(db, properties) {
     for (const name of Object.keys(properties ?? {})) {
@@ -164,10 +180,35 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
         if (db && body.properties) checkProperties(db, body.properties);
         Object.assign(page.properties, body.properties ?? {});
         if (body.icon) page.icon = body.icon;
+        if (body.cover) page.cover = body.cover;
         if (typeof body.archived === 'boolean') page.archived = body.archived;
         if (typeof body.in_trash === 'boolean') page.in_trash = body.in_trash;
         return publicPage(page);
       }
+    }
+    // A page inside a page (the vault, a course): listed among the blocks of its parent.
+    if (method === 'POST' && path === '/v1/pages' && body.parent?.page_id) {
+      const parent = state.pages.get(compact(body.parent.page_id));
+      if (!parent || parent.archived || parent.in_trash) throw fail(404, 'object_not_found', `Could not find page with ID: ${body.parent.page_id}.`);
+      for (const name of Object.keys(body.properties ?? {})) if (name !== 'title') throw fail(400, 'validation_error', `${name} is not a property that exists.`);
+      checkRichText(body.properties?.title?.title, 'title');
+      const id = randomUUID();
+      const page = {
+        object: 'page',
+        id,
+        url: `https://www.notion.so/${compact(id)}`,
+        parent: { type: 'page_id', page_id: parent.id },
+        properties: structuredClone(body.properties ?? { title: { title: [] } }),
+        icon: body.icon,
+        cover: body.cover,
+        children: [],
+        archived: false,
+        in_trash: false,
+      };
+      state.pages.set(compact(id), page);
+      addChild(parent, id, 'child_page');
+      if (body.children) page.children = createBlocks(id, body.children).map((b) => b.id);
+      return publicPage(page);
     }
     if (method === 'POST' && path === '/v1/pages') {
       const dbId = body.parent?.database_id;
@@ -222,6 +263,7 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
         in_trash: false,
       };
       state.databases.set(compact(id), db);
+      addChild(parent, id, 'child_database');
       return db;
     }
     if ((m = /^\/v1\/databases\/([\w-]+)\/query$/.exec(path)) && method === 'POST') {
@@ -273,8 +315,8 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
         return { object: 'list', results: created.map(publicBlock), has_more: false, next_cursor: null };
       }
       if (method === 'GET') {
-        const all = parent.children.map((id) => state.blocks.get(compact(id))).filter((b) => b && !b.archived);
-        return { object: 'list', results: all.map(publicBlock), has_more: false, next_cursor: null };
+        const all = parent.children.map((id) => state.blocks.get(compact(id))).filter((b) => b && !b.archived).map(publicBlock).filter((b) => !b.archived);
+        return { object: 'list', results: all, has_more: false, next_cursor: null };
       }
     }
     if ((m = /^\/v1\/blocks\/([\w-]+)$/.exec(path)) && method === 'DELETE') {
@@ -282,6 +324,11 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
       if (!block) throw fail(404, 'object_not_found', `Could not find block with ID: ${m[1]}.`);
       if (block.archived) throw fail(400, 'validation_error', 'Can’t edit block that is archived.');
       block.archived = true;
+      // Deleting a sub-page block sends the page to the trash.
+      if (block.type === 'child_page') {
+        const page = state.pages.get(compact(block.id));
+        if (page) page.archived = true;
+      }
       return publicBlock(block);
     }
 
@@ -426,11 +473,17 @@ export function startMockNotion({ port = 0, token = 'secret_test', log = () => {
     const render = (id) => {
       const b = state.blocks.get(compact(id));
       if (!b || b.archived) return null;
+      if (b.type === 'child_page' || b.type === 'child_database') {
+        const pub = publicBlock(b);
+        return pub.archived ? null : { type: b.type, text: pub[b.type].title };
+      }
       const data = b[b.type];
       const text = (data.rich_text ?? data.caption ?? [])
         .map((r) => (r.type === 'mention' ? `@${titleOf(r.mention.page.id)}` : (r.text?.content ?? '')))
         .join('');
       const out = { type: b.type, text };
+      if (b.type === 'to_do') out.checked = Boolean(data.checked);
+      if (data.is_toggleable) out.toggleable = true;
       if (b.children.length) out.children = b.children.map(render).filter(Boolean);
       return out;
     };

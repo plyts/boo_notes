@@ -191,9 +191,11 @@ function renderNotion(status: NotionStatus | undefined): void {
     ? 'Non connecté'
     : status?.origin === 'desktop'
       ? `Connecté via l’app Desktop${status.workspace ? ` · ${status.workspace}` : ''}`
-      : status?.via === 'oauth'
-        ? `Connecté avec votre compte Notion${status.workspace ? ` · ${status.workspace}` : ''}`
-        : `Connecté${status?.workspace ? ` · ${status.workspace}` : ''}`;
+      : status?.vault
+        ? `Connecté à Notion · coffre « ${status.vault} »`
+        : status?.via === 'oauth'
+          ? `Connecté avec votre compte Notion${status.workspace ? ` · ${status.workspace}` : ''}`
+          : `Connecté${status?.workspace ? ` · ${status.workspace}` : ''}`;
   const parts: string[] = [];
   if (configured) {
     if (status?.syncing) parts.push('Synchronisation…');
@@ -206,21 +208,27 @@ function renderNotion(status: NotionStatus | undefined): void {
   }
   (document.getElementById('notion-detail') as HTMLElement).textContent = parts.join(' · ');
   const open = document.getElementById('notion-open') as HTMLAnchorElement;
-  open.hidden = !status?.databaseUrl;
-  if (status?.databaseUrl) open.href = status.databaseUrl;
+  const vaultUrl = status?.vaultUrl || status?.databaseUrl;
+  open.hidden = !vaultUrl;
+  if (vaultUrl) open.href = vaultUrl;
   for (const id of ['notion-oauth', 'notion-advanced']) (document.getElementById(id) as HTMLElement).hidden = configured;
+  if (configured) (document.getElementById('notion-vault') as HTMLElement).hidden = true;
   (document.getElementById('notion-actions') as HTMLElement).hidden = !configured;
   // A connection shared by the app is managed there.
   (document.getElementById('notion-disconnect-row') as HTMLElement).hidden = status?.origin === 'desktop';
 }
 
 /**
- * « Connecter Notion »: one button. Notion's consent window; the service
- * worker does the rest (the page of the table, the table, the notes).
+ * « Se connecter à Notion »: Notion's own window, then the vault — one
+ * already in this Notion, or a new one named here (« Boo Notes » by
+ * default). The service worker does the rest (the table, the course pages,
+ * the notes).
  */
 async function setUpNotionOAuth(): Promise<void> {
   const info = await callBackground({ type: 'notion:oauth-info' }).catch(() => ({ available: false, redirectUri: '' }));
   const button = document.getElementById('notion-oauth-btn') as HTMLButtonElement;
+  const form = document.getElementById('notion-vault') as HTMLFormElement;
+  const list = document.getElementById('notion-vault-list') as HTMLElement;
   if (!info.available) {
     button.disabled = true;
     (document.getElementById('notion-oauth-desc') as HTMLElement).textContent =
@@ -229,16 +237,56 @@ async function setUpNotionOAuth(): Promise<void> {
   }
   button.addEventListener('click', async () => {
     button.disabled = true;
-    button.textContent = 'Connexion…';
+    button.textContent = 'Fenêtre Notion ouverte…';
     try {
       const res = await callBackground({ type: 'notion:oauth' });
-      renderNotion(res);
-      flashSaved(`Notion connecté : vos notes vont dans le tableau « Boo Notes — Mes notes » (page « ${res.place} »)`);
+      const name = h('input', { type: 'text', name: 'notionVaultName', placeholder: 'Boo Notes, Coursera notes, Sample notes…', 'aria-label': 'Nom du coffre', maxlength: '100', autocomplete: 'off' });
+      const rows: HTMLElement[] = [];
+      if (res.vaults.length) {
+        const preferred = res.vaults.find((v) => v.name.trim().toLowerCase() === 'boo notes') ?? res.vaults[0];
+        for (const v of res.vaults) {
+          const radio = h('input', { type: 'radio', name: 'notionVault', value: v.id });
+          radio.checked = v === preferred;
+          rows.push(h('label', {}, radio, h('span', {}, `👻 ${v.name}`)));
+        }
+        const fresh = h('input', { type: 'radio', name: 'notionVault', value: '' });
+        name.addEventListener('focus', () => (fresh.checked = true));
+        rows.push(h('label', {}, fresh, h('span', {}, 'Nouveau coffre'), name));
+      } else {
+        name.value = 'Boo Notes';
+        rows.push(h('label', {}, h('span', {}, 'Nom du coffre'), name));
+      }
+      list.replaceChildren(...rows);
+      (document.getElementById('notion-vault-help') as HTMLElement).textContent = res.vaults.length
+        ? 'Toutes vos notes y sont rangées, une page par cours. Gardez celui-ci, ou créez-en un autre :'
+        : 'Toutes vos notes y seront rangées, une page par cours.';
+      form.hidden = false;
+      (list.querySelector('input:checked, input[type="text"]') as HTMLInputElement | null)?.focus();
     } catch (e) {
       flashSaved(e instanceof Error ? e.message : String(e), false);
     } finally {
       button.disabled = !info.available;
-      button.textContent = 'Connecter Notion';
+      button.textContent = 'Se connecter à Notion';
+    }
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picked = form.querySelector<HTMLInputElement>('input[name="notionVault"]:checked');
+    const typed = form.querySelector<HTMLInputElement>('input[name="notionVaultName"]')?.value.trim() ?? '';
+    if (!picked?.value && !typed) return;
+    const submit = document.getElementById('notion-vault-btn') as HTMLButtonElement;
+    submit.disabled = true;
+    submit.textContent = 'Préparation du coffre…';
+    try {
+      const status = await callBackground({ type: 'notion:vault', vaultId: picked?.value || null, name: typed || 'Boo Notes' });
+      form.hidden = true;
+      renderNotion(status);
+      flashSaved(`Notion connecté : vos notes vont dans le coffre « ${status.vault ?? typed} »`);
+    } catch (err) {
+      flashSaved(err instanceof Error ? err.message : String(err), false);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Valider';
     }
   });
 }
@@ -381,28 +429,65 @@ const picked = new Set<string>();
 
 type NoteSync = NotesSyncStatus['notes'][string];
 
-/** « Desktop » / « Notion » pills of a note: synced (green), waiting (orange), failed (red). */
-function syncPills(state: NoteSync | undefined, status: NotesSyncStatus | null): HTMLElement {
+/**
+ * Where a note is: in Notion (green, its page a click away), or not yet — a
+ * « Sync » button writes it now, in its course's page; the app's pill when
+ * the Desktop app is paired.
+ */
+function syncPills(id: string, title: string, place: string, state: NoteSync | undefined, status: NotesSyncStatus | null): HTMLElement {
   const pills: HTMLElement[] = [];
   if (!status || (!status.desktop.configured && !status.notion.configured)) {
-    pills.push(h('span', { class: 'sync-pill', 'data-state': 'local', title: 'Ni l’app Desktop ni Notion ne sont connectés : la note reste dans ce navigateur.' }, 'Ce navigateur'));
+    pills.push(h('span', { class: 'sync-pill', 'data-state': 'local', title: 'Notion n’est pas connecté : la note reste dans ce navigateur (options › Notion, ou « Se connecter à… » dans les notes).' }, 'Pas dans Notion'));
   }
   if (state?.desktop) {
     const synced = state.desktop === 'synced';
-    const title = synced ? 'App Desktop : synchronisée' : `App Desktop : en attente${status?.desktop.state === 'connected' ? '' : ' (l’app est hors-ligne)'}`;
-    pills.push(h('span', { class: 'sync-pill', 'data-state': state.desktop, title, 'aria-label': title }, 'Desktop'));
+    const label = synced ? 'App Desktop : synchronisée' : `App Desktop : en attente${status?.desktop.state === 'connected' ? '' : ' (l’app est hors-ligne)'}`;
+    pills.push(h('span', { class: 'sync-pill', 'data-state': state.desktop, title: label, 'aria-label': label }, 'Desktop'));
   }
   if (state?.notion) {
     const n = state.notion;
-    const title =
-      n.state === 'synced' ? 'Notion : synchronisée (ouvrir la page)'
-      : n.state === 'error' ? `Notion : erreur — ${n.error ?? 'échec de l’écriture'}`
-      : n.state === 'new' ? 'Notion : pas encore envoyée (Notion › Synchroniser)'
-      : 'Notion : en attente';
-    const attrs = { class: 'sync-pill', 'data-state': n.state === 'new' ? 'pending' : n.state, title, 'aria-label': title };
-    pills.push(n.url && n.state === 'synced' ? h('a', { ...attrs, href: n.url, target: '_blank', rel: 'noopener' }, 'Notion') : h('span', attrs, 'Notion'));
+    if (n.state === 'synced') {
+      const label = `Dans Notion${place ? ` · ${place}` : ''} (ouvrir la page)`;
+      const attrs = { class: 'sync-pill', 'data-state': 'synced', title: label, 'aria-label': label };
+      pills.push(n.url ? h('a', { ...attrs, href: n.url, target: '_blank', rel: 'noopener' }, 'Dans Notion') : h('span', attrs, 'Dans Notion'));
+    } else {
+      // Not in Notion yet (or it failed): written now, where it belongs.
+      const why = n.state === 'error' ? `Notion : erreur — ${n.error ?? 'échec de l’écriture'}. ` : n.state === 'pending' ? 'Notion : en attente. ' : 'Pas encore dans Notion. ';
+      const label = `${why}Envoyer « ${title} » maintenant${place ? `, dans ${place}` : ''}`;
+      const button = h('button', { type: 'button', class: 'btn sync-now', 'data-state': n.state === 'error' ? 'error' : 'pending', title: label, 'aria-label': label }, icon('refresh', 13), h('span', {}, 'Sync'));
+      button.addEventListener('click', () => void syncNote(id, title, place, button));
+      pills.push(button);
+    }
   }
   return h('span', { class: 'sync' }, ...pills);
+}
+
+/** « Tout synchroniser »: what is not in Notion yet, written; the rest left as it is. */
+async function syncAllNotes(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  button.textContent = 'Synchronisation…';
+  try {
+    const { ok, failed, unchanged } = await callBackground({ type: 'notion:sync-all' });
+    flashSaved(`Notion : ${ok} note${ok > 1 ? 's' : ''} écrite${ok > 1 ? 's' : ''}${unchanged ? `, ${unchanged} déjà à jour` : ''}${failed ? `, ${failed} en échec` : ''}`, failed === 0);
+  } catch (e) {
+    flashSaved(e instanceof Error ? e.message : String(e), false);
+  } finally {
+    await renderData();
+  }
+}
+
+/** « Sync »: the note written to Notion now (in its course's page), its row redrawn. */
+async function syncNote(id: string, title: string, place: string, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  (button.lastElementChild as HTMLElement).textContent = 'Envoi…';
+  try {
+    await callBackground({ type: 'notion:sync-note', noteId: id });
+    flashSaved(`« ${title} » est dans Notion${place ? ` (${place})` : ''}`);
+  } catch (e) {
+    flashSaved(e instanceof Error ? e.message : String(e), false);
+  } finally {
+    await renderData();
+  }
 }
 
 /** Summary of the sync: what waits, where. */
@@ -448,13 +533,22 @@ async function renderData(): Promise<void> {
       ? 'Aucune note pour l’instant.'
       : `${entries.length} note${entries.length > 1 ? 's' : ''} · ${size} utilisés (captures comprises)`;
   const sync = document.getElementById('data-sync') as HTMLElement;
-  sync.textContent = entries.length ? syncSummary(status, entries.map(([id]) => id)) : '';
+  const ids = entries.map(([id]) => id);
+  sync.replaceChildren(entries.length ? syncSummary(status, ids) : '');
+  // Notes not in Notion yet: all of them written now (those already there left alone).
+  const waiting = status?.notion.configured ? ids.filter((id) => status.notes[id]?.notion?.state !== 'synced').length : 0;
+  if (waiting) {
+    const all = h('button', { type: 'button', class: 'btn' }, 'Tout synchroniser');
+    all.addEventListener('click', () => void syncAllNotes(all));
+    sync.append(all);
+  }
   sync.hidden = !sync.textContent;
   const list = document.getElementById('note-list') as HTMLElement;
   const dateFmt = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
   list.replaceChildren(
     ...entries.map(([id, n]) => {
       const title = n.title || n.url;
+      const place = n.course ? `${n.course} › ${n.chapter || 'Chapitre 1'}` : '';
       const pick = h('input', { type: 'checkbox', 'aria-label': `Sélectionner « ${title} »` });
       pick.checked = picked.has(id);
       pick.addEventListener('change', () => {
@@ -469,20 +563,14 @@ async function renderData(): Promise<void> {
         { 'data-note': id },
         h('label', { class: 'pick' }, pick),
         h('span', { class: 'platform' }, PLATFORM_LABELS[n.platform] ?? n.platform),
-        h('a', { href: n.url, target: '_blank', rel: 'noopener', title }, title),
-        n.progress && n.progress.duration > 0
-          ? h(
-              'span',
-              { class: 'progress', title: 'Progression de la lecture' },
-              (() => {
-                const bar = h('span', { class: 'progress-bar' }, h('span'));
-                (bar.firstChild as HTMLElement).style.width = `${Math.round(Math.min(1, n.progress.position / n.progress.duration) * 100)}%`;
-                return bar;
-              })(),
-              `${Math.round(Math.min(1, n.progress.position / n.progress.duration) * 100)} %`,
-            )
-          : null,
-        syncPills(status?.notes[id], status),
+        h(
+          'span',
+          { class: 'note-what' },
+          // The lesson, a click away; where it is filed under it.
+          h('a', { href: n.url, target: '_blank', rel: 'noopener', title: `Rouvrir la leçon : ${title}` }, title),
+          h('small', { class: 'note-place', title: place || 'Rangée dans aucun cours' }, place || 'Non rangée'),
+        ),
+        syncPills(id, title, place, status?.notes[id], status),
         h('time', { datetime: new Date(n.updatedAt).toISOString() }, dateFmt.format(n.updatedAt)),
         remove,
       );
@@ -658,8 +746,8 @@ async function main(): Promise<void> {
     const button = e.currentTarget as HTMLButtonElement;
     button.disabled = true;
     try {
-      const { ok, failed } = await callBackground({ type: 'notion:sync-all' });
-      flashSaved(failed ? `${ok} note(s) synchronisée(s), ${failed} en échec` : `${ok} note(s) synchronisée(s)`, failed === 0);
+      const { ok, failed, unchanged } = await callBackground({ type: 'notion:sync-all' });
+      flashSaved(`${ok} note(s) écrite(s)${unchanged ? `, ${unchanged} déjà à jour` : ''}${failed ? `, ${failed} en échec` : ''}`, failed === 0);
     } catch (err) {
       flashSaved(err instanceof Error ? err.message : String(err), false);
     } finally {

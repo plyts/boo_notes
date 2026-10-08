@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ExtensionNotion, noteToSyncItem, pickPlace } from '../../src/background/notion';
+import { ExtensionNotion, noteToSyncItem, pickVaultParent } from '../../src/background/notion';
 import type { NotionPlace, NotionStatus } from '../../src/shared/messages';
 import { NoteStore } from '../../src/shared/store';
 import { TranscriptStore } from '../../src/shared/transcript-store';
@@ -60,12 +60,20 @@ describe('noteToSyncItem', () => {
 });
 
 describe('ExtensionNotion (direct sync, desktop app closed)', () => {
-  it('connects to a page: creates the inline notes table there', async () => {
+  it('connects to a page: it becomes the vault, its table « Toutes les notes » made there — once, whatever the reconnections', async () => {
     const status = await notion.connect('secret_test', `https://www.notion.so/Mes-cours-${PARENT_PAGE_ID.replace(/-/g, '')}`);
-    expect(status).toMatchObject({ configured: true, origin: 'extension' });
+    expect(status).toMatchObject({ configured: true, origin: 'extension', vault: 'Mes cours' });
     const [db] = [...mock.state.databases.values()];
-    expect(db.is_inline).toBe(true);
+    expect(db.is_inline).toBe(false);
+    expect(db.title[0].text.content).toBe('Toutes les notes');
     expect(db.parent).toMatchObject({ page_id: PARENT_PAGE_ID });
+    // The table lists what reads at a glance.
+    expect(Object.keys(db.properties)).toEqual(expect.arrayContaining(['Nom', 'Cours', 'Chapitre', 'Statut', 'Progression', 'Type', 'Plateforme', 'Source', 'Boo ID', 'Liens']));
+    expect(Object.keys(db.properties)).not.toContain('Position');
+    // Connected again (another time, another device): the same table, not a second one.
+    await notion.disconnect();
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    expect(mock.state.databases.size).toBe(1);
   });
 
   it('writes a note with its [[links]] as mentions and relations', async () => {
@@ -203,20 +211,110 @@ describe('ExtensionNotion (direct sync, desktop app closed)', () => {
   });
 });
 
-describe('« Connecter Notion » : la page du tableau, sans rien demander', () => {
-  const page = (id: string, title: string): NotionPlace => ({ id, kind: 'page', title });
+describe('Le coffre Notion : une page par cours, ses leçons par chapitre, rien en double', () => {
+  const lesson = (n: number) => ({ platform: 'web' as const, url: `https://academy.test/airflow/${n}`, title: `Leçon ${n}`, kind: 'video' as const });
+  const idOf = (n: number) => `web:academy.test/airflow/${n}`;
+  const childPages = (pageId: string) => mock.pageContent(pageId)!.filter((b) => b.type === 'child_page' || b.type === 'child_database').map((b) => b.text);
 
-  it('le tableau d’une connexion précédente d’abord, puis la page du modèle', () => {
-    const table: NotionPlace = { id: 'db', kind: 'database', title: 'Boo Notes — Mes notes' };
-    expect(pickPlace([page('a', 'Journal'), table], 'tpl')).toBe(table);
-    expect(pickPlace([page('a', 'Journal'), page('1234-5678', 'Boo Notes')], '12345678')?.id).toBe('1234-5678');
-    // The copy of the template not yet found by the search: its id is enough.
-    expect(pickPlace([page('a', 'Journal')], 'tpl')).toEqual({ id: 'tpl', kind: 'page', title: 'Boo Notes' });
+  it('range les leçons dans la page de leur cours, par chapitre, cochées une fois finies ; la note pointe vers son cours', async () => {
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    for (const n of [1, 2, 3]) await store.saveNote(idOf(n), lesson(n), `[00:0${n}] idée ${n}`);
+    await store.placeNote(idOf(1), lesson(1), { course: 'AI Orchestration', chapter: 'Les bases' });
+    await store.placeNote(idOf(2), lesson(2), { course: 'AI Orchestration', chapter: 'Hooks' });
+    await store.placeNote(idOf(3), lesson(3), { course: 'AI Orchestration', chapter: 'Les bases' });
+    await store.saveProgress(idOf(1), 100, 100);
+    for (const n of [1, 2, 3]) await notion.syncNow(idOf(n));
+
+    expect(childPages(PARENT_PAGE_ID)).toEqual(['Toutes les notes', 'AI Orchestration']);
+    const course = [...mock.state.pages.values()].find((p) => mock.titleOf(p.id) === 'AI Orchestration')!;
+    const content = mock.pageContent(course.id)!;
+    expect(content[0]).toMatchObject({ type: 'callout', text: '3 leçons · 2 chapitres · 1 terminée · 30 % du cours' });
+    expect(content.slice(1).map((b) => (b.type === 'heading_2' ? `# ${b.text}` : `${b.checked ? '☑' : '☐'} ${b.text}`))).toEqual([
+      '# Les bases',
+      '☑ @Leçon 1  Terminé',
+      '☐ @Leçon 3  En cours · 0 %',
+      '# Hooks',
+      '☐ @Leçon 2  En cours · 0 %',
+    ]);
+    // The note's page starts with where it is filed: its course's page, its chapter.
+    const note = (await notion.link(idOf(2)))!.pageId;
+    expect(mock.pageContent(note)![0]).toMatchObject({ type: 'callout', text: '@AI Orchestration  ›  Hooks' });
   });
 
-  it('sinon la page qui parle de cours ou de notes, sinon la première', () => {
-    expect(pickPlace([page('a', 'Journal'), page('b', 'Mes cours de maths')])?.id).toBe('b');
-    expect(pickPlace([page('a', 'Journal'), page('b', 'Recettes')])?.id).toBe('a');
-    expect(pickPlace([])).toBeNull();
+  it('une leçon qui change de cours quitte la page de l’ancien ; les notes rangées nulle part ont la leur', async () => {
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    await store.saveNote(idOf(1), lesson(1), 'a');
+    await store.saveNote(idOf(2), lesson(2), 'b');
+    await store.placeNote(idOf(1), lesson(1), { course: 'Cours A', chapter: 'Ch 1' });
+    await notion.syncNow(idOf(1));
+    await notion.syncNow(idOf(2));
+    expect(childPages(PARENT_PAGE_ID)).toEqual(['Toutes les notes', 'Cours A', 'Notes à ranger']);
+    const page = (title: string) => [...mock.state.pages.values()].find((p) => mock.titleOf(p.id) === title && !p.archived)!;
+    expect(JSON.stringify(mock.pageContent(page('Notes à ranger').id))).toContain('@Leçon 2');
+
+    await store.placeNote(idOf(1), lesson(1), { course: 'Cours B', chapter: 'Ch 1' });
+    await notion.syncNow(idOf(1));
+    expect(JSON.stringify(mock.pageContent(page('Cours A').id))).toContain('Aucune leçon rangée ici');
+    expect(JSON.stringify(mock.pageContent(page('Cours B').id))).toContain('@Leçon 1');
+    // Synced again: nothing rewritten, nothing made twice.
+    const writes = mock.state.requests.length;
+    await notion.syncNow(idOf(1));
+    expect(mock.state.requests.slice(writes).filter((r) => r.method === 'POST' && r.path === '/v1/pages')).toHaveLength(0);
+    expect(childPages(PARENT_PAGE_ID).filter((t) => t === 'Cours B')).toHaveLength(1);
+  });
+
+  it('« Tout synchroniser » : la table vérifiée d’abord, les notes déjà à jour laissées telles quelles, les autres écrites', async () => {
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    await store.saveNote(idOf(1), lesson(1), 'a');
+    await store.saveNote(idOf(2), lesson(2), 'b');
+    await notion.syncNow(idOf(1));
+    expect(await notion.syncAll()).toEqual({ ok: 1, failed: 0, unchanged: 1 });
+    expect(await notion.syncAll()).toEqual({ ok: 0, failed: 0, unchanged: 2 });
+    // Its page deleted in Notion: written again (found missing, made once).
+    const gone = (await notion.link(idOf(1)))!.pageId;
+    mock.state.pages.get(gone.replace(/-/g, ''))!.archived = true;
+    const other = new ExtensionNotion({ area, store, desktopHandlesNotion: () => false, debounceMs: 60_000, clientOptions: { minIntervalMs: 0, sleep: async () => undefined } });
+    other.apiBase = mock.url;
+    expect(await other.syncAll()).toEqual({ ok: 1, failed: 0, unchanged: 1 });
+    expect([...mock.state.pages.values()].filter((p) => p.parent?.database_id && !p.archived)).toHaveLength(2);
+  });
+
+  it('le coffre choisi ou nommé : retrouvé s’il existe (la copie du modèle mise à la corbeille), sinon fait — sans doublon', async () => {
+    // First connection: Notion copied the template; named « Coursera notes ».
+    mock.seedPage('33333333-3333-4333-8333-333333333333', 'Boo Notes');
+    await notion.connectVault({ token: 'secret_test', templatePageId: '33333333-3333-4333-8333-333333333333' }, { name: 'Coursera notes' });
+    const vault = mock.state.pages.get('33333333333343338333333333333333')!;
+    expect(mock.titleOf(vault.id)).toBe('Coursera notes');
+    expect(vault.icon).toEqual({ type: 'emoji', emoji: '👻' });
+    expect(mock.pageContent(vault.id)!.map((b) => b.type)).toEqual(['callout', 'child_database', 'heading_2']);
+    expect(await notion.vaults('secret_test')).toEqual([expect.objectContaining({ name: 'Coursera notes' })]);
+    expect((await notion.status()).vault).toBe('Coursera notes');
+
+    // Again, Notion copying its template again: the same vault, the copy to the trash.
+    await notion.disconnect();
+    mock.seedPage('44444444-4444-4444-8444-444444444444', 'Boo Notes');
+    await notion.connectVault({ token: 'secret_test', templatePageId: '44444444-4444-4444-8444-444444444444' }, { name: 'coursera notes' });
+    expect(mock.state.pages.get('44444444444444448444444444444444')!.archived).toBe(true);
+    expect(mock.state.databases.size).toBe(1);
+    expect((await notion.status()).vault).toBe('Coursera notes');
+
+    // A new name, no template: a new vault, made in a page shared (the one about courses).
+    await notion.disconnect();
+    await notion.connectVault({ token: 'secret_test' }, { name: 'Sample notes' });
+    const sample = [...mock.state.pages.values()].find((p) => mock.titleOf(p.id) === 'Sample notes')!;
+    expect(sample.parent).toMatchObject({ page_id: PARENT_PAGE_ID });
+    expect(mock.state.databases.size).toBe(2);
+    expect((await notion.vaults('secret_test')).map((v) => v.name).sort()).toEqual(['Coursera notes', 'Sample notes']);
+  });
+});
+
+describe('« Connecter Notion » : où faire le coffre, sans rien demander', () => {
+  const page = (id: string, title: string): NotionPlace => ({ id, kind: 'page', title });
+
+  it('la page partagée qui parle de cours ou de notes, sinon la première ; jamais un tableau', () => {
+    expect(pickVaultParent([page('a', 'Journal'), page('b', 'Mes cours de maths')])?.id).toBe('b');
+    expect(pickVaultParent([page('a', 'Journal'), page('b', 'Recettes')])?.id).toBe('a');
+    expect(pickVaultParent([{ id: 'db', kind: 'database', title: 'Boo Notes — Mes notes' }])).toBeNull();
+    expect(pickVaultParent([])).toBeNull();
   });
 });

@@ -4,6 +4,8 @@ export const OAUTH_CLIENT: { clientId: string; clientSecret: string };
 export interface MockBlockView {
   type: string;
   text: string;
+  checked?: boolean;
+  toggleable?: boolean;
   children?: MockBlockView[];
 }
 

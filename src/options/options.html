@@ -341,20 +341,31 @@
                 <span id="notion-badge" class="status-title">Non connecté</span>
                 <span id="notion-detail" class="row-desc" role="status"></span>
               </div>
-              <a id="notion-open" class="btn" href="#" target="_blank" rel="noopener" hidden>Ouvrir le tableau</a>
+              <a id="notion-open" class="btn" href="#" target="_blank" rel="noopener" hidden>Ouvrir le coffre</a>
             </div>
             <div class="rows inset" id="notion-oauth">
               <div class="row">
                 <span class="row-text">
-                  <span class="row-label">Connecter Notion</span>
+                  <span class="row-label">Se connecter à Notion</span>
                   <span class="row-desc" id="notion-oauth-desc">
-                    Un clic : la fenêtre de Notion s’ouvre, choisissez « Utiliser le modèle » (ou une page), puis « Autoriser
-                    l’accès ». Boo Notes fait le reste : le tableau de vos notes est créé et vos notes y sont envoyées.
+                    La fenêtre de Notion s’ouvre : connectez-vous, choisissez « Utiliser le modèle » (ou une page), puis
+                    « Autoriser l’accès ». Il ne reste qu’à nommer votre coffre — « Boo Notes » par défaut.
                   </span>
                 </span>
-                <button type="button" class="btn primary" id="notion-oauth-btn">Connecter Notion</button>
+                <button type="button" class="btn primary" id="notion-oauth-btn">Se connecter à Notion</button>
               </div>
             </div>
+            <form class="rows inset" id="notion-vault" hidden>
+              <fieldset class="row stacked vault-choice">
+                <legend class="row-label">Votre coffre Notion</legend>
+                <span class="row-desc" id="notion-vault-help">Toutes vos notes y seront rangées, une page par cours.</span>
+                <div id="notion-vault-list" class="vault-list"></div>
+              </fieldset>
+              <div class="row">
+                <span class="row-text"><span class="row-desc">Un seul coffre à la fois : vos notes ne sont jamais en double.</span></span>
+                <button type="submit" class="btn primary" id="notion-vault-btn">Valider</button>
+              </div>
+            </form>
             <details class="advanced" id="notion-advanced">
               <summary>Méthode avancée : avec un secret d’intégration</summary>
               <form class="rows inset" id="notion-form">

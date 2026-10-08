@@ -92,7 +92,10 @@ describe('one note per lesson', () => {
   it('a single-page course: each `#/route` is its own lesson (anchors and fragments are not)', () => {
     expect(hashRoute('#/lessons/abc')).toBe('/lessons/abc');
     expect(hashRoute('#!/module/2/')).toBe('/module/2');
+    expect(hashRoute('#/chapitres/3')).toBe('/chapitres/3');
     for (const h of ['', '#', '#/', '#section-2', '#t=42', '#:~:text=hello', '#player']) expect(hashRoute(h)).toBeNull();
+    // Not a lesson: a slide of a Storyline player, a page of an app — the page stays one note.
+    for (const h of ['#/6WI0Yb7Vrl5/5yDEz1ghPkU', '#/home', '#/search?q=x']) expect(hashRoute(h)).toBeNull();
     const a = detectVideoContext('https://learn.example.test/course/42#/lessons/intro');
     const b = detectVideoContext('https://learn.example.test/course/42#/lessons/hooks?x=1');
     expect(a?.noteId).toBe('web:learn.example.test/course/42#/lessons/intro');

@@ -8,7 +8,7 @@ le produit. Les valeurs sont celles du code : `src/tokens.css` (panneau, réglag
 
 | Principe | Traduction dans l’interface |
 | --- | --- |
-| **Calme par défaut** | Rien n’est visible pendant le visionnage passif. « Hors-ligne » est un état normal (local-first) : pastille teintée douce, pas d’alerte. Une seule couleur d’accent, réservée au temps et aux actions. |
+| **Calme par défaut** | Rien n’est visible pendant le visionnage passif. Être connecté nulle part est un état normal (local-first) : un seul bouton doux, « Se connecter à… », pas d’alerte. Une seule couleur d’accent, réservée au temps et aux actions. |
 | **Le retour là où l’on agit** | Copier un lien → « ✓ Copié » sur la pilule elle-même ; capturer → flash sur l’image + toast avec la vignette ; exporter → message au-dessus du pied du panneau. |
 | **Apprendre en faisant** | Note vide = mode d’emploi (raccourcis en touches) ; infobulles rapides avec touches ; `Ctrl/⌘ + /` ouvre la feuille des raccourcis ; chaque bouton indique son raccourci. |
 | **Le temps comme structure** | Notes en mise en page « transcription » (texte aligné après l’horodatage), chronologie des notes dans le pied du panneau, ligne « en cours » surlignée, marqueur sur la barre native. |
@@ -42,7 +42,7 @@ grandit (`--tracking-*`, de +0,01 em à −0,024 em), chiffres tabulaires pour l
 
 ```
 ┌────────────────────────────────────────┐  ← sous l’en-tête fixe du site (YouTube : 56 px)
-│ (● Hors-ligne)            ⧉   ⇪   📌   ✕ │  pastille de synchro + actions (30×30)
+│ (🔗 Se connecter à…)      ⧉   ⇪   📌   ✕ │  connexion (Notion, Desktop) + actions (30×30)
 │ Titre de la vidéo ou du cours           │  16 px / 650, 2 lignes max
 │ [YouTube]  3 notes · 1 capture  ✓ Enregistré │  plateforme, statistiques, état d’enregistrement
 ├────────────────────────────────────────┤
@@ -120,7 +120,7 @@ Vérifiés automatiquement par `tests/unit/contrast.test.ts` (texte ≥ 4,5:1, c
 | `--on-accent` sur `--accent-strong` | `#fff` / `#6d5ef0` | `#fff` / `#4c3dc4` | 4,7 / 7,6 |
 | `--danger` | `#f87171` | `#b91c1c` | 6,6 / 6,5 |
 | `--ok` (Connecté, Enregistré) | `#22c55e` | `#15803d` | 8,1 / 5,0 |
-| `--warn` (Hors-ligne) | `#f59e0b` | `#b45309` | 8,6 / 5,0 |
+| `--warn` (problème de synchro) | `#f59e0b` | `#b45309` | 8,6 / 5,0 |
 | `--focus` (anneau de focus) | `#a5b4fc` | `#4f46e5` | 9,2 / 6,3 |
 | `--now-border` | `#facc15` | `#a16207` | 12,0 / 4,9 |
 

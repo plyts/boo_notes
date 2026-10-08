@@ -35,9 +35,14 @@ test.describe('Synchronisation Desktop', () => {
     await openWatch(page);
     await setVideo(page, 6);
     await openNotes(sw, page);
-    const badge = panel(page).locator('.status');
+    // The app's state, in « Se connecter à… ».
+    await panel(page).getByRole('button', { name: 'Se connecter à…' }).click();
+    const badge = panel(page).locator('.connect-desktop');
     await expect(badge).toHaveAttribute('data-state', 'offline');
-    await expect(badge).toContainText('Hors-ligne');
+    await expect(badge).toContainText('Non détectée');
+    // A click in the note closes it; the writing goes on there.
+    await panel(page).locator('.cm-content').click();
+    await expect(panel(page).getByRole('dialog', { name: 'Se connecter à' })).toBeHidden();
     await page.keyboard.type('Notes hors-ligne');
     await runCommand(sw, page, 'capture-screenshot');
     await expect.poll(async () => (await storedNote(sw))?.markdown ?? '').toContain('![Capture 00:06]');
@@ -49,9 +54,12 @@ test.describe('Synchronisation Desktop', () => {
     const desktop = startMockDesktop({ port, token: 'jeton-secret', dataDir }) as Mock;
     await desktop.ready;
     try {
+      await panel(page).getByRole('button', { name: 'Se connecter à…' }).click();
       await badge.click(); // "retry now"
       await expect(badge).toHaveAttribute('data-state', 'connected');
-      await expect(badge).toContainText('Connecté');
+      await expect(badge).toContainText('Connectée');
+      // Connected to the app (no Notion): the button says so.
+      await expect(panel(page).getByRole('button', { name: 'Connecté à Boo Notes Desktop' })).toHaveText('Boo Notes Desktop');
       await expect.poll(() => desktop.received.notes.get('youtube:e2eTest0001')?.markdown ?? '').toContain('[00:06] Notes hors-ligne');
       expect(desktop.received.assets.size).toBe(1);
 
@@ -85,7 +93,8 @@ test.describe('Synchronisation Desktop', () => {
       await pointExtensionAt(sw, `ws://127.0.0.1:${desktop.port}`, 'mauvais-jeton');
       await openWatch(page);
       await openNotes(sw, page);
-      const badge = panel(page).locator('.status');
+      await panel(page).getByRole('button', { name: 'Se connecter à…' }).click();
+      const badge = panel(page).locator('.connect-desktop');
       await badge.click();
       await expect(badge).toHaveAttribute('data-state', 'offline');
       await expect(badge).toHaveAttribute('title', /Jeton de connexion refusé/);

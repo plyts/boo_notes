@@ -62,10 +62,12 @@ tableau de votre page.
   **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
   note avec ses captures et extraits ; copier une partie d’une note emporte ses **images** ; **Copier
   l’image** d’une carte.
-- **Notion** ([docs/NOTION.md](docs/NOTION.md)) : le tableau « Boo Notes — Mes notes » intégré à la
-  page de votre choix, une page par note avec ses colonnes **Cours**, **Chapitre**, **Supports**, les
-  `[[liens]]` en mentions et en relations — écrit directement par l’extension (ou par Boo Notes
-  Desktop quand elle tourne).
+- **Notion** ([docs/NOTION.md](docs/NOTION.md)) : un **coffre** au nom de votre choix (« Boo Notes »
+  par défaut) — la table « Toutes les notes », **une page par cours** qui range ses leçons par
+  chapitre (cochées une fois terminées), une page par note qui renvoie à son cours et à la leçon ;
+  les `[[liens]]` en mentions et en relations ; jamais de doublon — écrit directement par
+  l’extension (ou par Boo Notes Desktop quand elle tourne). **Options › Données** : chaque note
+  dit si elle est dans Notion, un bouton **Sync** l’y envoie sinon.
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
 
@@ -176,7 +178,7 @@ Les raccourcis globaux sont modifiables dans `chrome://extensions/shortcuts` (bo
 | **Non-intrusivité** | Le lecteur n’est jamais modifié : HUD, toasts, flash et marqueur sont dessinés dans un calque séparé (Shadow DOM) positionné d’après la géométrie de la vidéo. En mode « côte à côte », la page est décalée de la largeur du panneau et le panneau commence sous l’en-tête fixe de YouTube. |
 | **Flow 1** | `Alt+Shift+N` → panneau + focus ; la première lettre tapée sur une ligne vide ajoute `[MM:SS]` (après `- `, `1. `, `## `, `> ` si présents) ; `Échap` ferme ou panneau laissé ouvert. |
 | **Flow 2** | `Alt+Shift+S` → extraction `<canvas>` en résolution native, flash blanc 100 ms, toast `04:15 - Capture sauvegardée`, ligne `[04:15] ![Capture 04:15](assets/…)` rendue en vignette. |
-| **Drawer** | À droite, 300–960 px selon la place laissée par la fenêtre (360 par défaut ; poignée visible au bord, à glisser, ou flèches ← → au clavier ; double-clic : largeur par défaut) ; un cours › chapitre trop long est coupé par « … » (en entier au survol), le panneau ne s’élargit jamais tout seul ; badge de synchronisation (vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion — via l’app ou directement —, `.md` + captures, **PDF**, presse-papier). |
+| **Drawer** | À droite, 300–960 px selon la place laissée par la fenêtre (360 par défaut ; poignée visible au bord, à glisser, ou flèches ← → au clavier ; double-clic : largeur par défaut) ; un cours › chapitre trop long est coupé par « … » (en entier au survol), le panneau ne s’élargit jamais tout seul ; bouton **« Se connecter à… »** (Notion, app Desktop — puis le nom du coffre, point vert / orange), titre de la vidéo ou du cours, pop-out, export (Desktop, Notion — via l’app ou directement —, `.md` + captures, **PDF**, presse-papier). |
 | **Éditeur** | CodeMirror 6 : Markdown rendu sur les lignes inactives (titres, gras, code, citations), horodatages cliquables, vignettes, listes continuées. |
 | **HUD** | `[ 04:15 ]` copie `[04:15](URL#t=255)` ; 📸 capture ; 📌 épingle le panneau ; ⚙️ paramètres. |
 | **Auto-pause (option)** | Pause après 1,5 s de frappe continue, reprise 1 s après la dernière touche — uniquement si c’est l’extension qui a mis en pause. |
@@ -226,15 +228,15 @@ l’ouverture sur les trois plateformes (Udemy et Coursera ne gèrent pas ce fra
 
 ## Notion et Boo Notes Desktop (application séparée)
 
-L’extension fonctionne entièrement hors-ligne. Connectée à Notion (bouton **« Connecter Notion »**
-en haut du panneau de notes ou dans les options : la fenêtre de Notion, « Autoriser », c’est tout ;
-« Déconnecter Notion » au même endroit), elle écrit
-elle-même chaque note dans le tableau de votre page. Si l’application **Boo Notes Desktop** (projet
-séparé) tourne sur la machine, les notes, captures et positions de lecture lui sont envoyées sur
-`ws://localhost:43117` (badge vert) : elles rejoignent sa bibliothèque, et c’est elle qui écrit
-alors dans Notion.
+L’extension fonctionne entièrement hors-ligne. Connectée à Notion (bouton **« Se connecter à… »**
+en haut du panneau de notes › Notion : la fenêtre de Notion, « Autoriser », le nom du coffre —
+« Boo Notes » par défaut —, Valider ; « Déconnecter » au même endroit), elle écrit
+elle-même chaque note dans le coffre. Si l’application **Boo Notes Desktop** (projet séparé)
+tourne sur la machine, les notes, captures et positions de lecture lui sont envoyées sur
+`ws://localhost:43117` (« Se connecter à… » › Boo Notes Desktop : Connectée) : elles rejoignent sa
+bibliothèque, et c’est elle qui écrit alors dans Notion.
 
-- Connexion à Notion en un clic (ou avec un secret d’intégration) : [docs/NOTION.md](docs/NOTION.md)
+- Le coffre Notion (une table, une page par cours, rien en double) et la connexion : [docs/NOTION.md](docs/NOTION.md)
 - Protocole extension ↔ application : [docs/PROTOCOL.md](docs/PROTOCOL.md)
 
 Pour développer sans l’application ni Notion, deux **mocks** : l’un implémente le protocole de

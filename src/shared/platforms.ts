@@ -140,15 +140,19 @@ export function detectVideoContext(href: string): VideoContext | null {
   return { platform: 'web', videoId, noteId: `web:${videoId}`, canonicalUrl, requiresMedia: true };
 }
 
+/** A route naming a lesson (Articulate Rise `#/lessons/…`, `#/module/2`, `#/chapitres/3`…). */
+const LESSON_ROUTE = /\/(?:lessons?|le[cç]ons?|modules?|chapters?|chapitres?|units?|unites?|unités?|topics?|sections?|lectures?|cours|courses?)(?:\/|$)/i;
+
 /**
- * The route of a single-page course in the address's `#` (`#/lessons/abc`,
- * `#!/module/2`): one lesson each. Anchors (`#section`), media fragments
- * (`#t=…`) and text fragments are not routes.
+ * The lesson of a single-page course in the address's `#` (`#/lessons/abc`,
+ * `#!/module/2`): one note each. Other routes (a slide of a Storyline
+ * player, `#/home`), anchors (`#section`), media fragments (`#t=…`) and text
+ * fragments leave the page one note.
  */
 export function hashRoute(hash: string): string | null {
   const m = /^#!?(\/[^#]*)$/.exec(hash);
   const route = m?.[1].replace(/\/+$/, '');
-  return route && route.length > 1 ? route : null;
+  return route && route.length > 1 && LESSON_ROUTE.test(route) ? route : null;
 }
 
 /** The lesson shown in a course module (a frame of the page): its own note. */

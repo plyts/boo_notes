@@ -213,8 +213,9 @@ macOS Option).
 | `progress:<noteId>` | dernière position de lecture `{ position, duration, updatedAt }` |
 | `sync:progress` | positions pas encore envoyées à l’application Desktop |
 | `sites:enabled` | origines où Boo Notes s’active à chaque visite |
-| `notion:config` | connexion Notion (jeton — secret ou accès OAuth `via: 'oauth'` —, tableau, page hub, origine : `desktop` ou `extension`) |
-| `notion:link:<noteId>` | page Notion de la note et empreintes de ses blocs (synchro incrémentale) |
+| `notion:config` | connexion Notion (jeton — secret ou accès OAuth `via: 'oauth'` —, table, coffre : page, nom, adresse ; origine : `desktop` ou `extension`) |
+| `notion:link:<noteId>` | page Notion de la note, empreintes de ses blocs (synchro incrémentale), cours où elle est listée |
+| `notion:course:<clé>` | page d’un cours dans le coffre (`course:<titre normalisé>`, `unfiled` : notes à ranger) et blocs écrits |
 | `notion:pending` | notes à écrire dans Notion (application fermée) |
 | `qa:config` | réponses aux questions : Claude (clé API, modèle) ou passages sans IA ; jamais synchronisé |
 | `desktop:titles` | titres de la bibliothèque Desktop (complétion `[[`) |
@@ -231,8 +232,17 @@ dans IndexedDB (`boo-notes-media`, origine de l’extension, partagée par le SW
 Les écritures passent toutes par le SW et sont sérialisées ; `rev` croît à chaque sauvegarde, ce
 qui permet à un second éditeur (pop-out) d’ignorer ses propres échos et d’appliquer les autres.
 
-`chrome.storage.session` : état de routage (lecteurs, onglet actif, pop-outs) et statut de
-synchronisation lu par le badge. `chrome.storage.sync` : réglages.
+`chrome.storage.session` : état de routage (lecteurs, onglet actif, pop-outs), statut de
+synchronisation lu par « Se connecter à… », et `notion:grant` — la réponse de la fenêtre de Notion
+le temps de choisir le coffre (15 min au plus, en mémoire, jamais écrite sur disque).
+`chrome.storage.sync` : réglages.
+
+**Une note par leçon.** L’identité d’une note est celle de ce qui est étudié : vidéo, leçon
+Udemy / Coursera, page (paramètres de suivi retirés), et pour les cours d’une seule page la route
+de l’adresse quand elle nomme une leçon (`#/lessons/…`, `#/module/2` — pas une diapositive ni `#/home`). Un module de cours affiché dans un cadre (Articulate Rise…) change
+de leçon dans le cadre sans changer l’adresse de la page : son agent de cadre annonce la route et
+le titre de la leçon (`{ kind: 'route' }`), et la note devient `<note de la page>#lesson/<route>` —
+deux leçons du même module ne partagent jamais une note (ni son classement cours › chapitre).
 
 ## Robustesse
 

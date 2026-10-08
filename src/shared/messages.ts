@@ -55,6 +55,9 @@ export interface NotionStatus {
   /** Connected by Notion's consent (« Connecter Notion »), or with an integration secret. */
   via?: 'oauth' | 'secret' | null;
   workspace: string | null;
+  /** The vault: the page holding the notes table and one page per course (its name, its address). */
+  vault?: string | null;
+  vaultUrl?: string | null;
   databaseUrl: string | null;
   /** Notes waiting to be written to Notion by the extension. */
   pending: number;
@@ -248,8 +251,12 @@ export type BackgroundRequest =
   | { type: 'notion:connect'; token: string; target: string; via?: 'oauth' | 'secret'; refreshToken?: string }
   /** Whether « Connecter Notion » is set up in this build, and the address Notion sends back to. */
   | { type: 'notion:oauth-info' }
-  /** « Connecter Notion »: Notion's consent window, then everything else (the page of the table, the table, the notes). */
+  /** « Se connecter à › Notion »: Notion's consent window; the vaults found are offered next. */
   | { type: 'notion:oauth' }
+  /** The vault chosen (`vaultId`) or named (`name`, « Boo Notes » by default): made or found again, notes sent. */
+  | { type: 'notion:vault'; vaultId?: string | null; name?: string | null }
+  /** One note written to Notion now, in its course's page (Options › Données). */
+  | { type: 'notion:sync-note'; noteId: string }
   | { type: 'notion:disconnect' }
   | { type: 'notion:sync-all' }
   /**
@@ -334,10 +341,11 @@ export interface BackgroundResponses {
   'notion:status': NotionStatus;
   'notion:connect': NotionStatus;
   'notion:oauth-info': { available: boolean; redirectUri: string };
-  /** Connected: the status, and the Notion page that holds the notes table. */
-  'notion:oauth': NotionStatus & { place: string };
+  'notion:oauth': { workspace: string | null; template: boolean; vaults: Array<{ id: string; name: string }> };
+  'notion:vault': NotionStatus;
+  'notion:sync-note': { url: string | null };
   'notion:disconnect': NotionStatus;
-  'notion:sync-all': { ok: number; failed: number };
+  'notion:sync-all': { ok: number; failed: number; unchanged: number };
   'transcript:put': { stored: boolean };
   'transcript:get': Transcript | null;
   'transcript:annotate': Transcript | null;
