@@ -493,14 +493,19 @@
           <div class="card rows">
             <div class="row">
               <span class="row-text">
-                <span class="row-label">Télécharger toutes les notes en PDF</span>
-                <span class="row-desc">
-                  Un seul PDF, rangé par cours › chapitre, avec un sommaire cliquable : captures et images comprises,
-                  chaque horodatage et chaque passage (clip) liés à l’instant de la vidéo, extraits et sources en
-                  références.
+                <span class="row-label">Télécharger en PDF</span>
+                <span class="row-desc" id="pdf-desc">
+                  Un cours : toutes ses leçons dans un seul PDF, par chapitre — notes, captures et images, passages
+                  vidéo, lien vers chaque vidéo et transcriptions complètes, chaque instant cliquable. Ou toutes les
+                  notes, rangées par cours › chapitre.
                 </span>
               </span>
-              <button type="button" id="all-pdf" class="btn">Télécharger le PDF</button>
+              <span class="pdf-pick">
+                <select id="pdf-scope" class="select" aria-label="Que mettre dans le PDF">
+                  <option value="">Toutes les notes</option>
+                </select>
+                <button type="button" id="all-pdf" class="btn">Télécharger le PDF</button>
+              </span>
             </div>
           </div>
           <div class="card danger-zone">

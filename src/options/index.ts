@@ -578,6 +578,21 @@ async function renderData(): Promise<void> {
   );
   (document.querySelector('.select-all') as HTMLElement).hidden = entries.length === 0;
   renderSelection(entries.length);
+  renderPdfScope(entries.map(([, n]) => n.course).filter((c): c is string => Boolean(c)));
+}
+
+/** « Télécharger en PDF »: every note, or one course (each with how many lessons). */
+function renderPdfScope(courses: string[]): void {
+  const select = document.getElementById('pdf-scope') as HTMLSelectElement;
+  const counts = new Map<string, number>();
+  for (const c of courses) counts.set(c, (counts.get(c) ?? 0) + 1);
+  const kept = select.value;
+  const sorted = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr', { numeric: true }));
+  select.replaceChildren(
+    h('option', { value: '' }, 'Toutes les notes'),
+    ...sorted.map(([c, n]) => h('option', { value: c }, `Cours : ${c} (${n} leçon${n > 1 ? 's' : ''})`)),
+  );
+  select.value = counts.has(kept) ? kept : '';
 }
 
 /** « 3 notes sélectionnées — Supprimer la sélection ». */
@@ -774,10 +789,11 @@ async function main(): Promise<void> {
   callBackground({ type: 'notion:status' }).then(renderNotion, () => undefined);
   const allPdf = document.getElementById('all-pdf') as HTMLButtonElement;
   allPdf.addEventListener('click', async () => {
+    const course = (document.getElementById('pdf-scope') as HTMLSelectElement).value;
     allPdf.disabled = true;
     allPdf.textContent = 'Préparation du PDF…';
     try {
-      const { message } = await callBackground({ type: 'notes:pdf' });
+      const { message } = await callBackground(course ? { type: 'course:pdf', course } : { type: 'notes:pdf' });
       flashSaved(message);
     } catch (e) {
       flashSaved(e instanceof Error ? e.message : String(e), false);

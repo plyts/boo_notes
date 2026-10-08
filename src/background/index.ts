@@ -748,6 +748,8 @@ const handlers: Handlers = {
 
   'notes:pdf': async () => ({ message: await downloadPdf(store, null) }),
 
+  'course:pdf': async (msg) => ({ message: await downloadPdf(store, null, new Date(), { course: msg.course }) }),
+
   'diagnostic:run': (msg) => diagnose(msg.tabId),
 
   'course:text': async ({ tabId }) => {

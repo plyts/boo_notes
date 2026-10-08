@@ -1019,3 +1019,15 @@ input[aria-invalid='true'] {
   display: none;
 }
 
+/* « Télécharger en PDF »: what goes in it, then the button. */
+.pdf-pick {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.pdf-pick select {
+  max-width: 260px;
+}

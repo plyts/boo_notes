@@ -4,13 +4,15 @@ import { formatTimecode, parseTimecode } from './time';
 import { PASSAGE_LINE, TRANSCRIPT_LINE } from './transcript';
 
 /**
- * Notes as a PDF — one note or the whole library: a cover with a clickable
- * table of contents (course › chapter › note), then each note with its
- * headings, lists, quotes, code, highlights; its pictures embedded; every
- * timestamp linked to the moment of its video; each passage (clip) with its
- * card, a link replaying it at the source and a reference to its recorded
- * extract; and, at the end of each note, its references (source, passages,
- * extracts, transcript). Pure layout: pictures and links come from the caller.
+ * Notes as a PDF — one note, one course, or the whole library: a cover with
+ * a clickable table of contents (course › chapter › note; a course's PDF:
+ * chapter › lesson), then each note with its headings, lists, quotes, code,
+ * highlights; its pictures embedded; every timestamp linked to the moment of
+ * its video; each passage (clip) with its card, a link replaying it at the
+ * source and a reference to its recorded extract; its transcript written out,
+ * each line linked to its moment (when given); and, at the end of each note,
+ * its references (source, passages, extracts). Pure layout: pictures and
+ * links come from the caller.
  */
 export interface PdfNote {
   id: string;
@@ -23,6 +25,17 @@ export interface PdfNote {
   place: string | null;
   updatedAt: number;
   markdown: string;
+  /** Its chapter alone (a course's PDF: its contents go by chapter). */
+  chapter?: string | null;
+  /** Its transcript, written out at its end (one note, one course). */
+  transcript?: PdfTranscript | null;
+}
+
+/** What was said in the media, line by line. */
+export interface PdfTranscript {
+  /** « Sous-titres YouTube · anglais → français ». */
+  label: string;
+  cues: Array<{ start: number; text: string; tr?: string; note?: string }>;
 }
 
 export interface PdfPicture {
@@ -38,9 +51,11 @@ export interface PdfSources {
 }
 
 export interface PdfOptions {
-  /** Cover title: « Toutes les notes », or the note's title. */
+  /** Cover title: « Toutes les notes », the course's name, or the note's title. */
   title: string;
   date: Date;
+  /** The PDF of one course: its lessons, contents by chapter. */
+  course?: boolean;
 }
 
 // --- Page geometry and style ----------------------------------------------------------------
@@ -91,6 +106,7 @@ const SUBSTITUTES: Record<string, string> = {
   '🎵': '',
   '🔊': '',
   '💬': '»',
+  '✦': '•',
   '✓': 'v',
   '✔': 'v',
   '•': '•',
@@ -348,10 +364,11 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
   const meta = [note.source, note.place ?? '', `modifiée le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(note.updatedAt)}`].filter(Boolean).join(' · ');
   l.paragraph([{ text: meta, color: MUTED }], { size: 9.5 });
   if (/^https?:\/\//.test(note.url)) {
-    l.paragraph([{ text: note.url, color: LINK, link: note.url }], { size: 9 });
+    l.paragraph([{ text: '› Revoir la leçon : ', bold: true, color: LINK, link: note.url }, { text: note.url, color: LINK, link: note.url }], { size: 9 });
     refs.push([{ text: 'Source : ', bold: true }, { text: note.url, color: LINK, link: note.url }]);
   }
   l.rule();
+  const spoken = note.transcript?.cues.length ? note.transcript : null;
 
   const lines = note.markdown.replace(/\r\n?/g, '\n').split('\n');
   // Questions and free notes: a titled block, a coloured bar along it.
@@ -430,9 +447,13 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
       continue;
     }
 
-    // The transcript pinned to the note: a reference.
+    // The transcript pinned to the note: written out at the end, else a reference.
     if (TRANSCRIPT_LINE.test(line)) {
       const label = /\[([^\]]+)\]/.exec(line)?.[1] ?? 'Transcription';
+      if (spoken) {
+        l.paragraph([{ text: `${label} — en entier à la fin de la leçon`, italic: true, color: MUTED }], { size: 9.5 });
+        continue;
+      }
       l.paragraph([{ text: label, italic: true, color: MUTED }], { size: 9.5 });
       refs.push([{ text: `${label} : `, bold: true }, { text: line.replace(/^.*\]\(([^)]+)\).*$/, '$1'), italic: true, color: MUTED }]);
       continue;
@@ -491,6 +512,24 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
     }
   }
 
+  // The transcript: every line, its moment a click away.
+  if (spoken) {
+    l.gap(10);
+    l.need(70);
+    l.rule();
+    l.paragraph([{ text: 'Transcription', bold: true }], { size: 12.5, lead: 18 });
+    const n = spoken.cues.length;
+    l.paragraph([{ text: `${spoken.label} · ${n} réplique${n > 1 ? 's' : ''}`, italic: true, color: MUTED }], { size: 9 });
+    l.gap(4);
+    for (const c of spoken.cues) {
+      const url = src.timeUrl(note, c.start);
+      const stamp = formatTimecode(c.start);
+      l.paragraph([{ text: stamp, mono: true, color: url ? LINK : MUTED, ...(url ? { link: url } : {}) }, { text: `  ${c.text.replace(/\s+/g, ' ').trim()}` }], { size: 9.5, lead: 13.5 });
+      if (c.tr?.trim()) l.paragraph([{ text: c.tr.replace(/\s+/g, ' ').trim(), italic: true, color: MUTED }], { size: 9, lead: 12.5, indent: 40 });
+      if (c.note?.trim()) l.paragraph([{ text: `» ${c.note.replace(/\s+/g, ' ').trim()}`, color: ACCENT }], { size: 9, lead: 12.5, indent: 40 });
+    }
+  }
+
   // References: everything the note points to, clickable.
   if (refs.length) {
     l.gap(8);
@@ -540,8 +579,23 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
   const count = notes.length;
   const passages = notes.reduce((n, x) => n + x.markdown.split('\n').filter((line) => PASSAGE_LINE.test(line)).length, 0);
   const captures = notes.reduce((n, x) => n + (x.markdown.match(/!\[[^\]\n]*\]\(assets\//g)?.length ?? 0), 0);
+  const spoken = notes.filter((x) => x.transcript?.cues.length).length;
+  const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
+  if (opts.course) l.paragraph([{ text: 'Cours — toutes les leçons', color: MUTED }], { size: 11 });
   l.paragraph(
-    [{ text: `${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(opts.date)} · ${count} note${count > 1 ? 's' : ''} · ${captures} image${captures > 1 ? 's' : ''} · ${passages} passage${passages > 1 ? 's' : ''}`, color: MUTED }],
+    [
+      {
+        text: [
+          new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(opts.date),
+          plural(count, opts.course ? 'leçon' : 'note'),
+          ...(opts.course ? [plural(new Set(notes.map((x) => x.chapter ?? '')).size, 'chapitre')] : []),
+          plural(captures, 'image'),
+          plural(passages, 'passage'),
+          ...(spoken ? [plural(spoken, 'transcription')] : []),
+        ].join(' · '),
+        color: MUTED,
+      },
+    ],
     { size: 11 },
   );
   l.gap(24);
@@ -550,8 +604,10 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
   const toc: Array<{ index: number; y: number; page: PDFPage; target: PDFPage; label: string }> = [];
   let place: string | null | undefined;
   for (const [i, s] of starts.entries()) {
-    if (s.note.place !== place) {
-      place = s.note.place;
+    // A course: by chapter; the library: by course › chapter.
+    const group = opts.course ? (s.note.chapter ?? 'Sans chapitre') : s.note.place;
+    if (group !== place) {
+      place = group;
       l.gap(6);
       l.paragraph([{ text: place ?? 'Sans cours', bold: true, color: ACCENT }], { size: 10.5 });
     }

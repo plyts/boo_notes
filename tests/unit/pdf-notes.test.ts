@@ -100,7 +100,8 @@ describe('notes as a PDF', () => {
     expect(uris.filter((u) => u === `${URL1}#t=125`).length).toBe(2);
     // Plain links and the sources.
     expect(uris).toContain('https://fr.wikipedia.org/wiki/Stokes');
-    expect(uris.filter((u) => u === URL1).length).toBe(2);
+    // The lesson's video: « Revoir la leçon », its address, and in the references.
+    expect(uris.filter((u) => u === URL1).length).toBe(3);
     expect(uris).toContain('https://blog.example.com/article');
     // Two pictures (the capture, the passage card), the same PNG embedded once per path.
     let images = 0;
@@ -109,5 +110,59 @@ describe('notes as a PDF', () => {
       images += xobjects?.keys().length ?? 0;
     }
     expect(images).toBe(2);
+  });
+});
+
+describe('the PDF of one course', () => {
+  const lesson = (n: number, chapter: string, extra: Partial<PdfNote> = {}): PdfNote => ({
+    id: `youtube:lesson${n}xxxx`,
+    title: `Leçon ${n}`,
+    url: `https://www.youtube.com/watch?v=lesson${n}xxxx`,
+    source: 'YouTube',
+    place: `AI Orchestration › ${chapter}`,
+    chapter,
+    updatedAt: Date.UTC(2026, 9, n),
+    markdown: `[00:0${n}] idée ${n}\n[00:1${n}] ![Capture](assets/l${n}.png)\n📄 [Transcription — anglais · 2 répliques](transcripts/l${n}.md)`,
+    ...extra,
+  });
+
+  async function course(): Promise<PDFDocument> {
+    const bytes = await buildNotesPdf(
+      [
+        lesson(1, 'Les bases', {
+          transcript: {
+            label: 'Sous-titres YouTube · anglais → français',
+            cues: [
+              { start: 61, text: 'Airflow orchestrates tasks.', tr: 'Airflow orchestre des tâches.' },
+              { start: 3725, text: 'A DAG is a graph.', note: 'à revoir' },
+            ],
+          },
+        }),
+        lesson(2, 'Les bases'),
+        lesson(3, 'Hooks et outils', { transcript: { label: 'Sous-titres', cues: [{ start: 42, text: 'A hook wraps a connection.' }] } }),
+      ],
+      { picture: async () => ({ bytes: PNG, type: 'png' }), timeUrl: (note, sec) => timestampUrl(note.url, sec) },
+      { title: 'AI Orchestration', date: new Date(Date.UTC(2026, 9, 8)), course: true },
+    );
+    return PDFDocument.load(bytes);
+  }
+
+  it('gathers every lesson: its note, its pictures, its video, its whole transcript — each moment clickable', async () => {
+    const doc = await course();
+    expect(doc.getTitle()).toBe('Boo Notes — AI Orchestration');
+    const { uris, internal } = linksOf(doc);
+    // The contents: one entry per lesson.
+    expect(internal).toBe(3);
+    // Every line of the transcripts, linked to its moment (only there: no note line at those moments).
+    expect(uris).toContain('https://www.youtube.com/watch?v=lesson1xxxx#t=61');
+    expect(uris).toContain('https://www.youtube.com/watch?v=lesson1xxxx#t=3725');
+    expect(uris).toContain('https://www.youtube.com/watch?v=lesson3xxxx#t=42');
+    // The notes' own moments and each lesson's video.
+    expect(uris).toContain('https://www.youtube.com/watch?v=lesson2xxxx#t=2');
+    for (const n of [1, 2, 3]) expect(uris).toContain(`https://www.youtube.com/watch?v=lesson${n}xxxx`);
+    // The captures of the three lessons.
+    let images = 0;
+    for (const page of doc.getPages()) images += page.node.Resources()?.lookupMaybe(PDFName.of('XObject'), PDFDict)?.keys().length ?? 0;
+    expect(images).toBe(3);
   });
 });

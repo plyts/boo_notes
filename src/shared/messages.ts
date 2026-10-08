@@ -226,6 +226,8 @@ export type BackgroundRequest =
   | { type: 'notes:list' }
   /** Every note as one PDF, downloaded. */
   | { type: 'notes:pdf' }
+  /** Every lesson of a course in one PDF: notes, pictures, passages, transcripts. */
+  | { type: 'course:pdf'; course: string }
   /** « Diagnostic de cette page »: probes the tab and opens the report. */
   | { type: 'diagnostic:run'; tabId: number }
   /** The text of the course in the tab (its page, its frames): sources of the answers to questions. */
@@ -326,6 +328,7 @@ export interface BackgroundResponses {
   'sync:retry': SyncStatus;
   'notes:list': Record<string, NoteSummary>;
   'notes:pdf': { message: string };
+  'course:pdf': { message: string };
   'diagnostic:run': void;
   'course:text': CourseText[];
   'notes:clear': void;

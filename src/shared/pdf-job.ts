@@ -16,6 +16,8 @@ export interface PdfJob {
   pictures: Record<string, string>;
   title: string;
   date: number;
+  /** The PDF of one course (its contents by chapter). */
+  course?: boolean;
 }
 
 export type PdfJobReply = { ok: true; base64: string } | { ok: false; error: string };

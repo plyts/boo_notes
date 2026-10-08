@@ -803,7 +803,7 @@ class PanelApp {
   }
 
   private buildMenu(): HTMLDivElement {
-    const item = (target: ExportTarget | 'copy', iconName: IconName, label: string, hint: string) => {
+    const item = (target: ExportTarget | 'copy' | 'course', iconName: IconName, label: string, hint: string) => {
       const b = h(
         'button',
         { type: 'button', role: 'menuitem', 'data-target': target, 'data-hint': hint },
@@ -812,7 +812,7 @@ class PanelApp {
       );
       b.addEventListener('click', () => {
         this.closeMenu(true);
-        void (target === 'copy' ? this.copyNote() : this.exportTo(target));
+        void (target === 'copy' ? this.copyNote() : target === 'course' ? this.exportCourse() : this.exportTo(target));
       });
       return b;
     };
@@ -825,7 +825,8 @@ class PanelApp {
       h('div', { class: 'menu-sep', role: 'separator' }),
       h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Sur cet appareil'),
       item('download', 'download', 'Télécharger', '.md + captures, extraits et transcription'),
-      item('pdf', 'file', 'Télécharger en PDF', 'Images comprises, instants et passages cliquables'),
+      item('pdf', 'file', 'Télécharger en PDF', 'Images, transcription, instants et passages cliquables'),
+      item('course', 'course', 'Télécharger le cours en PDF', 'Toutes ses leçons : notes, images, transcriptions'),
       item('copy', 'copy', 'Copier la note', 'Images comprises : Obsidian, Notion, Docs…'),
     );
     menu.addEventListener('keydown', (e) => {
@@ -859,6 +860,11 @@ class PanelApp {
       if (target === 'desktop') {
         enabled &&= online;
         if (!online) hint = 'Application Desktop hors-ligne';
+      } else if (target === 'course') {
+        // The whole course the note is filed in: every lesson, in one PDF.
+        const course = this.note?.course;
+        enabled &&= Boolean(course);
+        hint = course ? `« ${course} » : toutes ses leçons, transcriptions comprises` : 'Rangez d’abord la note dans un cours';
       } else if (target === 'notion') {
         // Through the app when it runs, else directly from the browser.
         enabled &&= online || direct;
@@ -1614,6 +1620,20 @@ class PanelApp {
       this.notify(message, 'success');
     } catch (e) {
       this.notify(`Export impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+
+  /** The course of this note in one PDF: every lesson, its notes, pictures, passages and transcripts. */
+  private async exportCourse(): Promise<void> {
+    const course = this.note?.course;
+    if (!course) return;
+    await this.flush();
+    this.notify(`PDF du cours « ${course} » en préparation…`);
+    try {
+      const { message } = await callBackground({ type: 'course:pdf', course });
+      this.notify(message, 'success');
+    } catch (e) {
+      this.notify(`PDF impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }
 

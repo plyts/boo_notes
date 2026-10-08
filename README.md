@@ -47,11 +47,17 @@ tableau de votre page.
 - **Copier la note « tout compris »** : captures, images et cartes des passages **intégrées**,
   horodatages liés à l’instant, transcription — à coller dans **Obsidian**, **Notion**, Google Docs,
   Word… (Markdown et HTML à la fois) ; **Télécharger** ajoute les extraits vidéo et la transcription.
-- **Télécharger en PDF** : la note en cours (menu **Exporter** du panneau), ou **toutes les notes**
-  en un seul PDF (Réglages → Données) avec page de garde et **sommaire cliquable** rangé par
-  cours › chapitre. Captures et images **intégrées** ; chaque horodatage, capture (« › Revoir à
-  04:12 ») et **passage / extrait vidéo** est un **lien cliquable** vers cet instant de la vidéo ;
-  une section **Références** en fin de note reprend la source, les passages et les liens.
+- **Télécharger en PDF** :
+  - **un cours** — menu **Exporter › Télécharger le cours en PDF** (une note rangée dans ce cours),
+    ou options › Données › « Cours : … » : **toutes ses leçons, et elles seules**, chapitre après
+    chapitre dans l’ordre où vous les avez suivies ; pour chacune, la note, ses captures et images,
+    ses passages vidéo, le lien « › Revoir la leçon » et sa **transcription complète** (traduction
+    et commentaires compris), chaque réplique liée à son instant ;
+  - **la note en cours** (menu **Exporter**), transcription comprise ;
+  - **toutes les notes** (options › Données), rangées par cours › chapitre.
+  Page de garde (leçons, chapitres, images, passages, transcriptions) et **sommaire cliquable** ;
+  chaque horodatage, capture (« › Revoir à 04:12 ») et **passage / extrait vidéo** est un **lien
+  cliquable** vers cet instant ; une section **Références** reprend la source et les passages.
 - **La vidéo n’est jamais cachée par les notes** : côte à côte, un lecteur qui garde sa largeur
   (YouTube, lecteurs en `100vw`) est réduit pour finir où commencent les notes ; en **plein écran**,
   les notes **restent affichées** à côté de la vidéo (écran partagé) — tout le lecteur, commandes
@@ -265,7 +271,7 @@ Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Sh
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
 lien, épinglage, plein écran (notes à côté de la vidéo, lecteur réduit, plein écran natif d’une vidéo
 seule repris par son lecteur, bouton « Plein écran avec les notes »), lecteur large réduit côte à
-côte, **export PDF** (note et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
+côte, **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu, **mise à jour de
