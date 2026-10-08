@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   detectVideoContext,
+  hashRoute,
   isDeclaredPlatformHost,
   noteSlug,
+  pageNoteId,
   readStartTime,
   timestampUrl,
+  withLesson,
 } from '../../src/shared/platforms';
 
 describe('detectVideoContext', () => {
@@ -82,6 +85,31 @@ describe('detectVideoContext', () => {
     expect(detectVideoContext('https://radio.example.test/live?utm_medium=a')?.canonicalUrl).toBe(
       'https://radio.example.test/live',
     );
+  });
+});
+
+describe('one note per lesson', () => {
+  it('a single-page course: each `#/route` is its own lesson (anchors and fragments are not)', () => {
+    expect(hashRoute('#/lessons/abc')).toBe('/lessons/abc');
+    expect(hashRoute('#!/module/2/')).toBe('/module/2');
+    for (const h of ['', '#', '#/', '#section-2', '#t=42', '#:~:text=hello', '#player']) expect(hashRoute(h)).toBeNull();
+    const a = detectVideoContext('https://learn.example.test/course/42#/lessons/intro');
+    const b = detectVideoContext('https://learn.example.test/course/42#/lessons/hooks?x=1');
+    expect(a?.noteId).toBe('web:learn.example.test/course/42#/lessons/intro');
+    expect(a?.canonicalUrl).toBe('https://learn.example.test/course/42#/lessons/intro');
+    expect(b?.noteId).not.toBe(a?.noteId);
+    // An anchor in the page: still the page's note.
+    expect(detectVideoContext('https://learn.example.test/course/42#quiz')?.noteId).toBe('web:learn.example.test/course/42');
+  });
+
+  it('a lesson of the course module in the page: the page’s note narrowed to it, the page found back from it', () => {
+    const page = detectVideoContext('https://academy.example.test/learn/courses/77/module')!;
+    const lesson = withLesson(page, { route: '/lessons/hooks', title: 'HookToolset' });
+    expect(lesson.noteId).toBe('web:academy.example.test/learn/courses/77/module#lesson/lessons/hooks');
+    expect(lesson.canonicalUrl).toBe(page.canonicalUrl);
+    expect(withLesson(page, { route: '/lessons/intro', title: 'Intro' }).noteId).not.toBe(lesson.noteId);
+    expect(pageNoteId(lesson.noteId)).toBe(page.noteId);
+    expect(pageNoteId('youtube:abc')).toBe('youtube:abc');
   });
 });
 

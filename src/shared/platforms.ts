@@ -128,13 +128,47 @@ export function detectVideoContext(href: string): VideoContext | null {
 
   if (KNOWN_PLATFORM_DOMAINS.some((d) => isHost(url.hostname, d))) return null;
 
-  // Any other site the user activated Boo Notes on: one note per page (tracking params dropped).
+  // Any other site the user activated Boo Notes on: one note per page (tracking params dropped),
+  // and per lesson of a single-page course (its `#/route`).
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
   const params = [...url.searchParams].filter(([k]) => !TRACKING_PARAMS.test(k));
   const search = params.length ? `?${new URLSearchParams(params).toString()}` : '';
-  const canonicalUrl = `${url.origin}${url.pathname}${search}`;
-  const videoId = `${url.host}${url.pathname}${search}`;
+  const route = hashRoute(url.hash);
+  const hash = route ? `#${url.hash.startsWith('#!') ? '!' : ''}${route}` : '';
+  const canonicalUrl = `${url.origin}${url.pathname}${search}${hash}`;
+  const videoId = `${url.host}${url.pathname}${search}${hash}`;
   return { platform: 'web', videoId, noteId: `web:${videoId}`, canonicalUrl, requiresMedia: true };
+}
+
+/**
+ * The route of a single-page course in the address's `#` (`#/lessons/abc`,
+ * `#!/module/2`): one lesson each. Anchors (`#section`), media fragments
+ * (`#t=…`) and text fragments are not routes.
+ */
+export function hashRoute(hash: string): string | null {
+  const m = /^#!?(\/[^#]*)$/.exec(hash);
+  const route = m?.[1].replace(/\/+$/, '');
+  return route && route.length > 1 ? route : null;
+}
+
+/** The lesson shown in a course module (a frame of the page): its own note. */
+export interface Lesson {
+  /** Its route in the module (`/lessons/abc`). */
+  route: string;
+  title: string;
+}
+
+const LESSON_MARK = '#lesson';
+
+/** The note of a lesson of the module in the page: the page's note, narrowed to the lesson. */
+export function withLesson(ctx: VideoContext, lesson: Lesson): VideoContext {
+  return { ...ctx, videoId: `${ctx.videoId}${LESSON_MARK}${lesson.route}`, noteId: `${ctx.noteId}${LESSON_MARK}${lesson.route}` };
+}
+
+/** The note of the page a lesson's note belongs to (itself for any other note). */
+export function pageNoteId(noteId: string): string {
+  const i = noteId.indexOf(`${LESSON_MARK}/`);
+  return i === -1 ? noteId : noteId.slice(0, i);
 }
 
 /** True for the hosts where the content script is declared in the manifest. */

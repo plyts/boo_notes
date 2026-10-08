@@ -47,6 +47,15 @@ export interface CourseOption {
   title: string;
   emoji?: string;
   chapters: string[];
+  /** The notes of this browser filed in it: each one its own lesson, found again from here. */
+  notes?: CourseNote[];
+}
+
+export interface CourseNote {
+  id: string;
+  title: string;
+  chapter: string;
+  url: string;
 }
 
 export interface NoteMeta {

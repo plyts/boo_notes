@@ -21,7 +21,7 @@ import {
   type ScormState,
   type SyncStatus,
 } from '../shared/messages';
-import { detectVideoContext, PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
+import { detectVideoContext, pageNoteId, PLATFORM_LABELS, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
 import { buildRichCopy, renderRichCopy, type RichCopyInput } from '../shared/rich-copy';
 import { scormLabel } from '../shared/scorm';
 import { loadSettings, normalizeSettings, saveSettings, type Settings } from '../shared/settings';
@@ -239,7 +239,7 @@ class PanelApp {
       onTimestampHover: (seconds) => this.post({ type: 'mark', seconds }),
       onTimestampClick: (seconds, _res, end, url) => {
         // A moment of another media (pasted from another note): opened there.
-        if (url && detectVideoContext(url)?.noteId !== this.ctx?.noteId) {
+        if (url && detectVideoContext(url)?.noteId !== pageNoteId(this.ctx?.noteId ?? '')) {
           window.open(url, '_blank', 'noopener');
           return;
         }
@@ -1302,10 +1302,27 @@ class PanelApp {
     if (!courses.length) {
       children.push(h('p', { class: 'place-empty' }, 'Aucun cours pour l’instant : créez-en un ci-dessous (ou dans l’app Desktop).'));
     }
+    const noteId = this.ctx?.noteId ?? this.note?.id ?? null;
     for (const c of courses) {
       children.push(h('div', { class: 'place-course', 'aria-hidden': 'true', title: c.title }, `${c.emoji ? `${c.emoji} ` : ''}${c.title}`));
       const chapters = c.chapters.length ? c.chapters : ['Chapitre 1'];
-      for (const ch of chapters) children.push(item(ch, { course: c.title, chapter: ch }, { class: 'place-chapter' }));
+      for (const ch of chapters) {
+        children.push(item(ch, { course: c.title, chapter: ch }, { class: 'place-chapter' }));
+        // The lessons already filed here: each its own note, opened again from here.
+        for (const n of (c.notes ?? []).filter((x) => same(x.chapter, ch))) {
+          const self = n.id === noteId;
+          const b = h(
+            'button',
+            { type: 'button', role: 'menuitem', class: 'place-note', 'data-note': n.id, title: self ? `${n.title} (cette note)` : `Rouvrir « ${n.title} »` },
+            icon(self ? 'pin' : 'link', 12),
+            h('span', { class: 'menu-text' }, n.title),
+            ...(self ? [h('small', { class: 'place-self' }, 'ici')] : []),
+          );
+          if (self) b.disabled = true;
+          else b.addEventListener('click', () => void this.goToNote(n.id, n.title));
+          children.push(b);
+        }
+      }
     }
     children.push(h('div', { class: 'menu-sep', role: 'separator' }));
     // New course or chapter: free text, created in the library by the app.
@@ -1349,6 +1366,17 @@ class PanelApp {
       if (!note.course) delete this.note.course;
       this.renderPlace();
       this.notify(note.course ? `Rangée dans ${note.course} › ${note.chapter}` : 'Note retirée du cours', 'success');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+
+  /** A lesson filed in a course: its page opened again (a new tab), its notes with it. */
+  private async goToNote(id: string, title: string): Promise<void> {
+    this.closePlaceMenu(true);
+    try {
+      await callBackground({ type: 'note:go', noteId: id });
+      this.notify(`« ${title} » rouverte dans un nouvel onglet`, 'success');
     } catch (e) {
       this.notify(e instanceof Error ? e.message : String(e), 'error');
     }

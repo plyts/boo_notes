@@ -23,7 +23,7 @@ import {
 } from '../shared/messages';
 import type { NoteMeta } from '../shared/store';
 import { passageLine, passageMediaPath, rangeLabel, traceMediaPath, type Cue } from '../shared/transcript';
-import { detectVideoContext, readStartTime, timestampUrl, type MediaKind, type VideoContext } from '../shared/platforms';
+import { detectVideoContext, readStartTime, timestampUrl, withLesson, type Lesson, type MediaKind, type VideoContext } from '../shared/platforms';
 import type { Note } from '../shared/store';
 import { loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from '../shared/settings';
 import { findBinding, inPageBindings, type InPageBinding } from '../shared/shortcuts';
@@ -115,6 +115,8 @@ class ContentApp {
   private intervals: Array<ReturnType<typeof setInterval>> = [];
   private titleWatch: ReturnType<typeof setInterval> | null = null;
   private lastHref = location.href;
+  /** The lesson a course module of the page shows (a frame's `#/route`): its own note. */
+  private lesson: (Lesson & { frameId: number }) | null = null;
   private lastInteraction = 0;
   private capturing = false;
   /** Set by Smart Pause until playback resumes, so the shortcut can toggle. */
@@ -483,6 +485,24 @@ class ContentApp {
       case 'scorm':
         this.setScorm(event.state);
         return;
+      case 'route': {
+        // Another lesson of the module: another note (the same lesson renamed: its title follows).
+        const before = this.lesson;
+        if (event.route) this.lesson = { frameId, route: event.route, title: event.title };
+        else if (before?.frameId === frameId) this.lesson = null;
+        else return;
+        if (before?.route === this.lesson?.route) {
+          if (this.lesson?.title && this.lesson.title !== this.title && this.ctx) {
+            this.title = this.lesson.title;
+            this.postPanels({ type: 'context', ctx: this.ctx, title: this.title });
+            this.registeredNoteId = null;
+            void this.ensureRegistered();
+          }
+          return;
+        }
+        void this.syncContext();
+        return;
+      }
       case 'command':
         void this.onCommand(event.command);
     }
@@ -960,12 +980,29 @@ class ContentApp {
 
   private checkUrl(): void {
     if (location.href === this.lastHref) return;
+    // Another page: its modules will say their lesson again.
+    if (location.href.split('#')[0] !== this.lastHref.split('#')[0]) this.lesson = null;
     this.lastHref = location.href;
     void this.syncContext();
   }
 
-  private async syncContext(force = false): Promise<void> {
+  /**
+   * The note of what is studied here: the page's (one per video, lecture,
+   * page, `#/route` of a single-page course), narrowed to the lesson its course
+   * module shows when it has lessons — each lesson its own note.
+   */
+  private currentContext(): VideoContext | null {
     const ctx = detectVideoContext(location.href);
+    return ctx && ctx.platform === 'web' && this.lesson ? withLesson(ctx, this.lesson) : ctx;
+  }
+
+  /** The title of the note: the lesson's, else the page's. */
+  private contextTitle(): string {
+    return (this.ctx?.noteId.includes('#lesson/') && this.lesson?.title) || this.adapter.title();
+  }
+
+  private async syncContext(force = false): Promise<void> {
+    const ctx = this.currentContext();
     const prev = this.ctx;
     const changed = force || ctx?.noteId !== prev?.noteId;
     this.ctx = ctx;
@@ -990,7 +1027,7 @@ class ContentApp {
     this.overlay.hideQuoteButton();
     this.reader.reset();
     this.lastPassage = null;
-    this.title = ctx ? this.adapter.title() : '';
+    this.title = ctx ? this.contextTitle() : '';
     this.postPanels({ type: 'context', ctx, title: this.title });
     this.registeredNoteId = null;
     if (ctx) {
@@ -1009,7 +1046,7 @@ class ContentApp {
     if (this.titleWatch) clearInterval(this.titleWatch);
     let ticks = 0;
     this.titleWatch = setInterval(() => {
-      const title = this.adapter.title();
+      const title = this.contextTitle();
       if (this.ctx && title && title !== this.title) {
         this.title = title;
         this.postPanels({ type: 'context', ctx: this.ctx, title });

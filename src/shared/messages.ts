@@ -148,7 +148,9 @@ export type FrameEvent =
   /** A page shortcut pressed inside the frame (focus is there, not in the page). */
   | { kind: 'command'; command: CommandId }
   /** A frame agent started: it wants to know whether notes are open. */
-  | { kind: 'hello' };
+  | { kind: 'hello' }
+  /** The lesson this frame shows (a single-page course module, `#/lessons/…`); '' when none. */
+  | { kind: 'route'; route: string; title: string };
 
 export type FrameToBackground =
   | { type: 'media'; media: FrameMedia }
@@ -240,6 +242,8 @@ export type BackgroundRequest =
   | { type: 'wiki:titles' }
   /** Opens the note titled `title`: in the desktop app, else its page, else in Notion. */
   | { type: 'wiki:open'; title: string }
+  /** A note filed in a course: its page opened again. */
+  | { type: 'note:go'; noteId: string }
   | { type: 'notion:status' }
   | { type: 'notion:connect'; token: string; target: string; via?: 'oauth' | 'secret'; refreshToken?: string }
   /** Whether « Connecter Notion » is set up in this build, and the address Notion sends back to. */
@@ -326,6 +330,7 @@ export interface BackgroundResponses {
   'sites:all': boolean;
   'wiki:titles': string[];
   'wiki:open': { message: string };
+  'note:go': { title: string };
   'notion:status': NotionStatus;
   'notion:connect': NotionStatus;
   'notion:oauth-info': { available: boolean; redirectUri: string };

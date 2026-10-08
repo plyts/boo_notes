@@ -425,15 +425,25 @@ const handlers: Handlers = {
     const [index, stored] = await Promise.all([store.listNotes(), chrome.storage.local.get(DESKTOP_COURSES)]);
     const courses = new Map<string, CourseOption>();
     for (const c of (stored[DESKTOP_COURSES] as CourseOption[] | undefined) ?? []) courses.set(normalizeTitle(c.title), { ...c, chapters: [...c.chapters] });
-    // Courses typed in the panel while the app was closed are offered too.
-    for (const n of Object.values(index)) {
+    // Courses typed in the panel while the app was closed are offered too, with the notes filed in them.
+    for (const [id, n] of Object.entries(index).sort((a, b) => a[1].title.localeCompare(b[1].title, 'fr', { numeric: true }))) {
       if (!n.course) continue;
       const key = normalizeTitle(n.course);
       const c = courses.get(key) ?? { title: n.course, chapters: [] };
-      if (n.chapter && !c.chapters.some((t) => normalizeTitle(t) === normalizeTitle(n.chapter!))) c.chapters.push(n.chapter);
+      const chapter = n.chapter || 'Chapitre 1';
+      if (!c.chapters.some((t) => normalizeTitle(t) === normalizeTitle(chapter))) c.chapters.push(chapter);
+      c.notes = [...(c.notes ?? []), { id, title: n.title || 'Sans titre', chapter, url: n.url }];
       courses.set(key, c);
     }
     return [...courses.values()];
+  },
+
+  // A lesson filed in a course, found again: its page opened.
+  'note:go': async (msg) => {
+    const note = await store.getNote(msg.noteId);
+    if (!note || !/^https?:\/\//.test(note.url)) throw new Error('Cette leçon n’a pas d’adresse à rouvrir');
+    await chrome.tabs.create({ url: note.url });
+    return { title: note.title };
   },
 
   'asset:save': async (msg) => {

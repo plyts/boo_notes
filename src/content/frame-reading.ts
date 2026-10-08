@@ -1,5 +1,6 @@
 import type { FrameEvent, FrameNotice, ScormState } from '../shared/messages';
 import { applyScorm, readScormValue, SCORM_EVENT, SCORM_REQUEST_EVENT } from '../shared/scorm';
+import { hashRoute } from '../shared/platforms';
 import { findBinding, formatShortcut, type InPageBinding } from '../shared/shortcuts';
 import { frameSite, looksLikePlayer } from './media-scan';
 import { PageReader } from './reader';
@@ -27,6 +28,8 @@ export class FrameReading {
   private lastReading = '';
   private lastFrames = '';
   private scorm: ScormState | null = null;
+  /** The lesson last said to the page (route and title). */
+  private lastRoute = '\n';
   private selectionTimer: ReturnType<typeof setTimeout> | null = null;
   /** Windows of child frames that run their own agent. */
   private readonly agents = new WeakSet<object>();
@@ -92,6 +95,8 @@ export class FrameReading {
       { signal },
     );
     document.dispatchEvent(new CustomEvent(SCORM_REQUEST_EVENT));
+    // A single-page course module: each lesson (its `#/route`) is a note of its own.
+    window.addEventListener('hashchange', () => setTimeout(() => this.reportRoute(), 300), { signal });
     const frames = setInterval(() => this.checkFrames(), 3000);
     signal.addEventListener('abort', () => {
       clearInterval(frames);
@@ -253,8 +258,20 @@ export class FrameReading {
 
   // --- Frames inside this one ---------------------------------------------------------------------
 
+  /** The lesson shown here, said to the page when it changes (its heading may come a moment later). */
+  private reportRoute(): void {
+    if (!this.large()) return;
+    const route = hashRoute(location.hash) ?? '';
+    const title = route ? lessonTitle() : '';
+    const key = `${route}\n${title}`;
+    if (key === this.lastRoute) return;
+    this.lastRoute = key;
+    this.send({ kind: 'route', route, title });
+  }
+
   private checkFrames(): void {
     if (!this.large()) return;
+    this.reportRoute();
     // The parent's agent may start after this one: said again at each round.
     try {
       window.parent.postMessage({ booNotesAgent: this.token }, '*');
@@ -279,4 +296,11 @@ export class FrameReading {
     this.lastFrames = key;
     this.send({ kind: 'frames', hosts: [...hosts] });
   }
+}
+
+/** The title of the lesson shown (Articulate Rise, most course players), else the frame's title. */
+function lessonTitle(): string {
+  const heading = document.querySelector<HTMLElement>('.lesson-header__title, [class*="lesson-header"] h1, main h1, h1');
+  const text = (heading?.innerText ?? heading?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return (text || document.title || '').slice(0, 200);
 }
