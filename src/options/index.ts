@@ -244,9 +244,9 @@ async function setUpNotionOAuth(): Promise<void> {
 }
 
 const PROVIDER_DESC: Record<QaConfig['provider'], string> = {
-  chrome: 'Sur cet ordinateur, gratuitement : rien n’est envoyé. Sans elle, les passages du cours les plus proches.',
+  chrome: 'Sur cet ordinateur, gratuitement : rien n’est envoyé. Sa réponse s’écrit sous la question, compacte, à vérifier.',
   claude: 'Claude (Anthropic), avec votre clé : la question et les extraits du cours lui sont envoyés.',
-  none: 'Les passages du cours les plus proches de la question, sans réponse rédigée.',
+  none: 'Pas de réponse aux questions : elles restent des questions.',
 };
 
 /** Options › Questions: who writes the answers — Chrome's built-in AI, Claude (the user's key), or no AI. */
@@ -271,8 +271,8 @@ function renderQa(qa: QaConfig, shown: QaConfig['provider'], models: ClaudeModel
 }
 
 const CHROME_AI_TEXT: Record<ChromeAiState['state'], string> = {
-  unsupported: 'Absente de ce navigateur : il faut Chrome 138 ou plus récent, sur ordinateur. Les réponses sont faites des passages les plus proches.',
-  unavailable: 'Indisponible sur cet ordinateur (il faut une machine assez puissante et de l’espace disque libre). Les réponses sont faites des passages les plus proches.',
+  unsupported: 'Absente de ce navigateur : il faut Chrome 138 ou plus récent, sur ordinateur. Sans elle, choisissez Claude.',
+  unavailable: 'Indisponible sur cet ordinateur (il faut une machine assez puissante et de l’espace disque libre). Sans elle, choisissez Claude.',
   downloadable: 'Le modèle n’est pas encore sur cet ordinateur : téléchargez-le une fois (quelques Go, en arrière-plan).',
   downloading: 'Téléchargement du modèle en cours…',
   available: 'Prête : vos questions reçoivent une réponse rédigée sur cet ordinateur.',

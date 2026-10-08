@@ -1,22 +1,22 @@
-import type { Answer } from '../shared/callouts';
+import type { Answer, AnswerSource } from '../shared/callouts';
 import { ClaudeError, sendMessage } from '../shared/claude';
 import { findCallouts } from '../shared/callouts';
 import type { CourseText } from '../shared/course-text';
 import { callBackground } from '../shared/messages';
 import { askChromeAi, chromeAiState, toFrench } from '../shared/chrome-ai';
-import { buildPrompt, extracts, forPrompt, notePassages, pagePassages, parseAnswer, rank, sourceOf, transcriptPassages, type NoteSource, type Passage, type Ranked } from '../shared/qa';
+import { buildPrompt, extracts, forPrompt, notePassages, pagePassages, parseAnswer, rank, sourceOf, transcriptPassages, type NoteSource, type ParsedAnswer, type Passage, type Ranked } from '../shared/qa';
 import { loadQa, type QaConfig } from '../shared/qa-config';
 import type { Note, NoteSummary } from '../shared/store';
 import type { Transcript } from '../shared/transcript';
 
 /**
- * Answers a question of the note from the course: the transcript of the
- * video first, then the text of the course (its page, a module in its
- * frames), then the notes already taken (this one and the others of the
- * course). Chrome's built-in AI writes the answer on this computer (the
- * default), or Claude with a key set in the options; without either, the
- * closest passages are given. Nothing here touches the video: it plays on
- * while the answer is looked for.
+ * Answers a question of the note: the question and the course — the
+ * transcript of the video first, then the text of the course (its page, a
+ * module in its frames), then the notes already taken — go to the AI, and
+ * only its answer comes back, compact, said to be written by an AI, with the
+ * moments it comes from. Chrome's built-in AI writes it on this computer (the
+ * default), or Claude with a key set in the options; without an AI, one line
+ * says why. Nothing here touches the video: it plays on meanwhile.
  */
 
 export interface AnswerContext {
@@ -100,46 +100,50 @@ export async function gatherPassages(ctx: AnswerContext): Promise<Passage[]> {
   return [...transcript, ...page, ...notes];
 }
 
+/** The moments / passages of the course an answer comes from (the notes are the student's own: left out). */
+function refsOf(sources: readonly AnswerSource[]): string[] {
+  return [...new Set(sources.filter((src) => src.kind !== 'note').map((src) => src.ref))].slice(0, 3);
+}
+
+const NO_COURSE = 'aucun contenu du cours n’est encore disponible (transcription, texte de la page) : réessayez quand la vidéo aura joué un peu (+ › Chercher à nouveau)';
+
 export async function answerQuestion(ctx: AnswerContext, config?: QaConfig): Promise<Answer> {
   const qa = config ?? (await loadQa());
+  if (qa.provider === 'none') return { method: 'none', text: '', refs: [], note: 'les réponses par IA sont désactivées : choisissez l’IA de Chrome ou Claude (options › Questions)' };
   const passages = await gatherPassages(ctx);
   const extra = ctx.transcript?.lang ? await translated(ctx.question, ctx.transcript.lang) : '';
   const ranked = rank(ctx.question, passages, { stamp: ctx.stamp, extra });
   const query = `${ctx.question} ${extra}`;
-  const closest = (note?: string): Answer => ({ method: 'extracts', text: '', sources: extracts(ranked).map((p) => sourceOf(p, null, query)), ...(note ? { note } : {}) });
-  if (qa.provider === 'none') return closest();
-  if (qa.provider === 'chrome') return answerOnDevice(ctx, passages, ranked, query, closest);
-  if (!passages.length) return { method: 'ai', text: 'Aucune source du cours n’est encore disponible (transcription, texte de la page, notes) : impossible de chercher la réponse.', sources: [] };
+  // Nothing cited: the passages closest to the question stand for where it comes from.
+  const refs = (parsed: ParsedAnswer) => refsOf(parsed.sources.length || !parsed.found ? parsed.sources : extracts(ranked, 2).map((p) => sourceOf(p, null, query)));
+  if (qa.provider === 'chrome') return answerOnDevice(ctx, passages, ranked, refs);
+  if (!passages.length) return { method: 'none', text: '', refs: [], note: NO_COURSE };
   const { system, user } = buildPrompt(ctx.question, forPrompt(passages, ranked), { title: ctx.title, stamp: ctx.stamp });
   try {
     const reply = await sendMessage({ key: qa.key, model: qa.model, system, user, base: qa.base, maxTokens: 900 });
     const parsed = parseAnswer(reply, passages);
-    // Nothing cited: the passages closest to the question stand for the sources.
-    const sources = parsed.sources.length || !parsed.found ? parsed.sources : extracts(ranked, 2).map((p) => sourceOf(p, null, query));
-    return { method: 'ai', text: parsed.answer, sources };
+    return { method: 'ai', text: parsed.found ? parsed.answer : '', refs: refs(parsed) };
   } catch (e) {
-    // No answer from Claude: the closest passages, and why.
-    return closest(`Claude n’a pas pu répondre : ${e instanceof ClaudeError || e instanceof Error ? e.message : String(e)}.`);
+    return { method: 'none', text: '', refs: [], note: `Claude n’a pas pu répondre (${e instanceof ClaudeError || e instanceof Error ? e.message : String(e)})` };
   }
 }
 
 /**
  * Chrome's built-in AI (on this computer): the answer written from the
- * passages it can read. Not there (yet): the closest passages, and how to
- * get it when it can be had.
+ * course it can read. Not there (yet): one line says how to get it.
  */
-async function answerOnDevice(ctx: AnswerContext, passages: Passage[], ranked: Ranked[], query: string, closest: (note?: string) => Answer): Promise<Answer> {
+async function answerOnDevice(ctx: AnswerContext, passages: Passage[], ranked: Ranked[], refs: (parsed: ParsedAnswer) => string[]): Promise<Answer> {
   const ai = await chromeAiState();
   if (ai.state !== 'available' || !ai.lang) {
-    const why =
+    const note =
       ai.state === 'downloadable'
-        ? 'Pour une réponse rédigée, activez l’IA intégrée de Chrome (options › Questions).'
+        ? 'activez l’IA intégrée de Chrome, une fois (options › Questions › Télécharger)'
         : ai.state === 'downloading'
-          ? 'L’IA intégrée de Chrome se télécharge : les prochaines réponses seront rédigées.'
-          : undefined;
-    return closest(why);
+          ? 'l’IA intégrée de Chrome se télécharge : réessayez dans un moment (+ › Chercher à nouveau)'
+          : 'l’IA intégrée de Chrome n’est pas disponible sur cet ordinateur : choisissez Claude (options › Questions)';
+    return { method: 'none', text: '', refs: [], note };
   }
-  if (!passages.length) return { method: 'ai', text: 'Aucune source du cours n’est encore disponible (transcription, texte de la page, notes) : impossible de chercher la réponse.', sources: [] };
+  if (!passages.length) return { method: 'none', text: '', refs: [], note: NO_COURSE };
   const lang = ai.lang;
   try {
     // A model writing English: asked in English (the question translated when Chrome can), answer translated back.
@@ -150,16 +154,15 @@ async function answerOnDevice(ctx: AnswerContext, passages: Passage[], ranked: R
       user: (budget) => buildPrompt(question, forPrompt(passages, ranked, budget), base).user,
     });
     const parsed = parseAnswer(reply, passages);
-    let text = parsed.answer;
+    let text = parsed.found ? parsed.answer : '';
     let note: string | undefined;
     if (lang === 'en' && text) {
       const fr = await toFrench(text);
       if (fr) text = fr;
-      else note = 'Réponse en anglais : l’IA intégrée de Chrome n’écrit pas encore le français, et son traducteur n’est pas prêt.';
+      else note = 'en anglais : le traducteur de Chrome n’est pas prêt';
     }
-    const sources = parsed.sources.length || !parsed.found ? parsed.sources : extracts(ranked, 2).map((p) => sourceOf(p, null, query));
-    return { method: 'ai', text, sources, ...(note ? { note } : {}) };
+    return { method: 'ai', text, refs: refs(parsed), ...(note ? { note } : {}) };
   } catch (e) {
-    return closest(`L’IA intégrée de Chrome n’a pas pu répondre : ${e instanceof Error ? e.message : String(e)}.`);
+    return { method: 'none', text: '', refs: [], note: `l’IA intégrée de Chrome n’a pas pu répondre (${e instanceof Error ? e.message : String(e)})` };
   }
 }

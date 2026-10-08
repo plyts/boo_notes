@@ -353,7 +353,7 @@ export function buildPrompt(question: string, passages: readonly Passage[], ctx:
       ? [
           'You are the study assistant of Boo Notes. A student follows a course and asks a question in their notes.',
           'Answer only from the course excerpts given: the video transcript (T…), the text of the course page (P…), the student’s notes (N…). Prefer the transcript, then the course text, then the notes.',
-          'Answer in English, clearly and briefly (2 to 6 sentences).',
+          'Answer in English, clearly and briefly (2 to 4 sentences): only the answer, no preamble.',
           'If the excerpts do not answer the question, say so in one sentence and set "found" to false: never invent.',
           'Reply with one JSON object only: {"answer": "…", "found": true, "sources": [{"id": "T12", "quote": "sentence copied word for word from the excerpt"}]}.',
           'Cite 1 to 3 sources, the most useful, each with a short quote (under 40 words) copied exactly from the excerpt.',
@@ -361,7 +361,7 @@ export function buildPrompt(question: string, passages: readonly Passage[], ctx:
       : [
           'Tu es l’assistant d’étude de Boo Notes. Un étudiant suit un cours et pose une question dans ses notes.',
           'Réponds uniquement à partir des extraits du cours fournis : la transcription de la vidéo (T…), le texte de la page du cours (P…), les notes de l’étudiant (N…). Privilégie la transcription, puis le texte du cours, puis les notes.',
-          'Réponds dans la langue de la question, clairement et brièvement (2 à 6 phrases), sans formule de politesse.',
+          'Réponds dans la langue de la question, clairement et brièvement (2 à 4 phrases) : la réponse seule, sans préambule ni formule de politesse.',
           'Si les extraits ne permettent pas de répondre, dis-le en une phrase et mets "found" à false : n’invente rien.',
           'Réponds par un seul objet JSON, sans texte autour : {"answer": "…", "found": true, "sources": [{"id": "T12", "quote": "phrase recopiée mot pour mot de l’extrait"}]}.',
           'Cite 1 à 3 sources, les plus utiles, avec une citation courte (moins de 40 mots) recopiée exactement de l’extrait.',

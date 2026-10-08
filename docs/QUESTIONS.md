@@ -37,25 +37,26 @@ La réponse est cherchée, en priorité, dans :
 3. les **notes** déjà prises : celle-ci (sans les autres questions et leurs réponses) et les
    autres notes du même cours ;
 
-puis écrite sous la question, avec ses sources :
+tout cela part à l’IA avec la question, et **seule sa réponse** s’écrit sous la question —
+compacte, marquée comme générée par IA, avec les instants du cours d’où elle vient :
 
 ```
 > [!question] Question 1 · [15:32]
 > Pourquoi cette méthode fonctionne-t-elle dans ce cas ?
 >
 > **Réponse :** La méthode fonctionne parce que…
->
-> **Source du cours — [23:41]**
-> « Passage pertinent du transcript… »
->
-> **Source du cours — [↗ Titre de la section](https://…#:~:text=…)**
-> « Passage de la page… »
+> *✦ Réponse générée par IA — à vérifier : [23:41] · [↗ Titre de la section](https://…#:~:text=…)*
 ```
 
-L’horodatage d’une source est celui du **sous-titre cité** : un clic y ramène la vidéo. Le lien d’un
-passage de la page le surligne dans la page. Pendant la recherche, « Recherche de la réponse dans le
-cours… » s’affiche sous la question ; **la vidéo continue**, et l’on peut écrire ailleurs dans la
-note.
+Pas de liste de sources ni de passages recopiés : la réponse, puis une ligne. Un clic sur
+l’instant ramène la vidéo au moment qui la justifie (le **sous-titre cité**) ; le lien d’une section
+la surligne dans la page — de quoi **vérifier** la réponse, comme la ligne y invite. Pendant la
+recherche, « Recherche de la réponse dans le cours… » s’affiche sous la question ; **la vidéo
+continue**, et l’on peut écrire ailleurs dans la note.
+
+Sans IA prête, une seule ligne dit pourquoi et comment l’avoir :
+`> **Réponse :** indisponible — activez l’IA intégrée de Chrome, une fois (options › Questions › Télécharger)`.
+« + › Chercher à nouveau » relance la question une fois l’IA prête.
 
 ### Qui écrit la réponse
 
@@ -66,22 +67,18 @@ Options › Questions › **Qui rédige les réponses** :
   modèle* : quelques Go, en arrière-plan), sur les ordinateurs assez puissants, avec Chrome 138 ou
   plus récent. Elle n’écrit pas encore le français (Chrome 141 : anglais, espagnol, japonais) :
   la question lui est posée en anglais et sa réponse est traduite en français par le **traducteur
-  de Chrome**, téléchargé avec elle (lui aussi sur l’appareil). Tant qu’elle n’est pas là, la
-  réponse est faite des passages les plus proches, et une ligne dit comment l’activer.
+  de Chrome**, téléchargé avec elle (lui aussi sur l’appareil). Tant qu’elle n’est pas là, une
+  ligne dit comment l’activer.
 - **Claude** (Anthropic), avec **votre clé API** : *Vérifier et activer* essaie la clé, puis
   propose les modèles qu’elle permet, le plus récent choisi. La clé reste dans le stockage local
   du navigateur (non synchronisé) ; pour chaque question, la question et les extraits du cours
   (transcription, texte de la page, notes) partent **directement** à l’API Claude, à aucun autre
   serveur. Payant à l’usage, sur votre compte Anthropic.
-- **Sans IA** : la réponse est faite des **passages du cours les plus proches** de la question
-  (« Réponse — passages du cours les plus proches (sans IA) »), classés par les mots de la
-  question ; une question en français sur un cours en anglais les trouve par la traduction des
-  sous-titres, ou par le traducteur de Chrome quand il est prêt.
+- **Sans IA** : les questions ne reçoivent pas de réponse (une ligne le rappelle).
 
-Dans tous les cas, l’IA ne répond qu’à partir des extraits du cours et cite ceux qu’elle utilise ;
-les horodatages viennent toujours de la transcription elle-même. Si elle ne répond pas (clé
-refusée, réseau, modèle indisponible), les passages les plus proches sont donnés, et la raison est
-écrite sous la réponse.
+Dans tous les cas, l’IA ne répond qu’à partir des extraits du cours, en 2 à 4 phrases ; les
+instants indiqués viennent toujours de la transcription elle-même. Si elle ne répond pas (clé
+refusée, réseau, modèle indisponible), la ligne « Réponse : indisponible » en donne la raison.
 
 ## Note libre
 

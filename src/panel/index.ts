@@ -476,7 +476,8 @@ class PanelApp {
       });
       // Another note opened meanwhile: the question is not in this one.
       if (this.note?.id !== note?.id) return;
-      if (this.editor.answer(req.id, answer) && answer.note) this.notify(answer.note, 'error');
+      // No AI answered: said here too, how to get one.
+      if (this.editor.answer(req.id, answer) && answer.method === 'none' && answer.note) this.notify(`Pas de réponse : ${answer.note}`, 'error');
     } catch (e) {
       this.editor.answerFailed(req.id);
       this.notify(`Réponse impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');

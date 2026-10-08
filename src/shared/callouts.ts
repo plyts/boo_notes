@@ -8,9 +8,7 @@ import { parseTimecode } from './time';
  *   > Pourquoi cette méthode fonctionne-t-elle dans ce cas ?
  *   >
  *   > **Réponse :** La méthode fonctionne parce que…
- *   >
- *   > **Source du cours — [23:41]**
- *   > « Passage du transcript… »
+ *   > *✦ Réponse générée par IA — à vérifier : [23:41]*
  *
  *   > [!note] Note libre
  *   > Cette partie me fait penser à un concept vu précédemment.
@@ -18,7 +16,8 @@ import { parseTimecode } from './time';
  *   > ![Capture](assets/…)
  *
  * A question is numbered in the order of the note (Question 1, 2, 3…) and
- * answered from the course; its header keeps the moment it was asked. A free
+ * answered by the AI from the course (its transcript first), compactly; its
+ * header keeps the moment it was asked. A free
  * note is personal: no answer, no automatic timestamp in it.
  */
 
@@ -202,47 +201,48 @@ export interface AnswerSource {
 }
 
 export interface Answer {
-  /** The answer (may span several paragraphs), empty when nothing was found. */
+  /** The AI's answer (may span several paragraphs); empty: the course does not say. */
   text: string;
-  /** `ai`: written from the sources; `extracts`: the closest passages, no AI. */
-  method: 'ai' | 'extracts';
-  sources: AnswerSource[];
-  /** A line said after the answer (why no AI answered, for instance). */
+  /** `ai`: written by the AI from the course; `none`: no AI could answer (why: `note`). */
+  method: 'ai' | 'none';
+  /** The moments / passages of the course it comes from (`[23:41]`, `[↗ Section](…)`): to check it. */
+  refs: string[];
+  /** Why no AI answered, or what to know about its answer (said in the panel too). */
   note?: string;
 }
-
-const SOURCE_LABELS: Record<AnswerSource['kind'], string> = {
-  transcript: 'Source du cours',
-  page: 'Source du cours',
-  note: 'Vos notes',
-};
 
 /** One line of text that cannot break the block (no header, no line breaks). */
 function flat(text: string): string {
   return text.replace(/\s+/g, ' ').replace(/\[!/g, '[ !').trim();
 }
 
-/** The lines of an answer, inside the question block (each starting with `>`). */
+/** Under every AI answer: where it comes from, and that it is to be checked. */
+export const AI_NOTICE = 'Réponse générée par IA — à vérifier';
+
+/**
+ * The lines of an answer, inside the question block (each starting with
+ * `>`): the AI's answer, compact, then one line saying it was written by an
+ * AI, to be checked, with the moments of the course it comes from.
+ */
 export function answerLines(a: Answer): string[] {
   const out: string[] = ['>'];
-  const label = a.method === 'ai' ? '**Réponse :**' : '**Réponse — passages du cours les plus proches (sans IA) :**';
+  const label = '**Réponse :**';
+  if (a.method === 'none') {
+    out.push(`> ${label} indisponible${a.note ? ` — ${flat(a.note)}` : '.'}`);
+    return out;
+  }
   const paragraphs = a.text
     .replace(/\r\n/g, '\n')
     .split(/\n{2,}/)
     .map((p) => p.split('\n').map((l) => l.replace(/\[!/g, '[ !').trimEnd()).filter((l) => l.trim()))
     .filter((p) => p.length);
-  if (!paragraphs.length && a.method === 'ai') out.push(`> ${label} je n’ai pas trouvé la réponse dans le cours.`);
-  else if (!paragraphs.length) out.push(`> ${label}`);
+  if (!paragraphs.length) out.push(`> ${label} le cours ne répond pas à cette question.`);
   paragraphs.forEach((p, i) => {
     if (i > 0) out.push('>');
     p.forEach((l, j) => out.push(`> ${i === 0 && j === 0 ? `${label} ${l.trim()}` : l}`));
   });
-  if (a.method === 'extracts' && !a.sources.length) out[out.length - 1] += ' aucun passage du cours ne s’en approche.';
-  for (const s of a.sources) {
-    out.push('>', `> **${SOURCE_LABELS[s.kind]} — ${s.ref}**`);
-    if (s.quote.trim()) out.push(`> « ${flat(s.quote)} »`);
-  }
-  if (a.note) out.push('>', `> *${flat(a.note)}*`);
+  const refs = a.refs.length ? ` : ${a.refs.join(' · ')}` : '';
+  out.push(`> *✦ ${AI_NOTICE}${a.note ? ` (${flat(a.note)})` : ''}${refs}*`);
   return out;
 }
 

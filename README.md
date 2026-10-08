@@ -22,13 +22,13 @@ tableau de votre page.
   **+** apparaît à côté d’elle (et seulement là) ; un clic, puis **Question** ou **Note libre** —
   sans syntaxe à retenir (au clavier : `Ctrl + .`).
   - **Question** : la ligne devient « Question 1, 2, 3… » (dans l’ordre de la note, avec l’instant
-    où elle a été posée) et sa **réponse est cherchée dans le cours** — la **transcription** de la
-    vidéo d’abord, puis le **texte du cours** (la page, un module dans ses cadres) et les **notes**
-    déjà prises (celle-ci et les autres du cours). La réponse s’écrit sous la question avec ses
-    **sources** : le passage de la transcription et son **horodatage cliquable** (« Source du cours
-    — 23:41 »), le passage de la page (lien surligné), la note. Rédigée par l’**IA intégrée de
-    Chrome** (Gemini Nano, sur l’appareil, gratuite — par défaut) ou par **Claude** avec votre clé
-    API (options › Questions), sinon faite des passages du cours les plus proches.
+    où elle a été posée) ; la question et le cours — la **transcription** de la vidéo d’abord, puis
+    le **texte du cours** (la page, un module dans ses cadres) et les **notes** déjà prises — partent
+    à l’IA, et **seule sa réponse** s’écrit sous la question, compacte, suivie d’une ligne « ✦
+    Réponse générée par IA — à vérifier » avec l’**instant cliquable** d’où elle vient. Rédigée par
+    l’**IA intégrée de Chrome** (Gemini Nano, sur l’appareil, gratuite — par défaut) ou par
+    **Claude** avec votre clé API (options › Questions) ; sans IA prête, une ligne dit comment
+    l’activer.
   - **Note libre** : une note personnelle, **pas associée à l’horodatage** de la vidéo ; tout y
     reste possible — texte, **citations** du cours, **captures**, images, liens, réflexions.
   - **Vidéo, notes et cours ne se bloquent pas** : la vidéo continue pendant qu’on écrit, qu’on
@@ -282,8 +282,8 @@ vers Notion** sans l’application (connexion dans les options, API Notion simul
 domaine : horodatage, saut, capture ; lecteur non autorisé proposé à l’autorisation ; chronomètre),
 le **classement cours › chapitre** depuis le panneau, et les **questions et notes libres** (le **+**
 au survol seulement, son menu à la souris et au clavier ; question numérotée et renumérotée dans
-l’ordre de la note, réponse tirée de la transcription avec son horodatage cliquable, sans IA puis
-avec l’API Claude simulée — clé, modèle, transcription et texte de la page envoyés ; note libre
+l’ordre de la note, réponse compacte de l’IA avec son instant cliquable — IA de Chrome simulée,
+sans IA prête (une ligne), puis l’API Claude simulée — clé, modèle, transcription et texte de la page envoyés ; note libre
 sans horodatage où vont une capture et une citation de la page ; sortie d’un bloc par `Entrée` ; la
 vidéo qui continue de jouer ; section Questions des options).
 
@@ -343,10 +343,8 @@ docs/         architecture, protocole, design, transcription, questions, Notion
   puissant et le téléchargement de son modèle ; elle écrit en anglais (sa réponse est traduite en
   français par le traducteur de Chrome). Claude demande une clé API Anthropic (la clé reste dans le
   stockage local ; la question et les extraits du cours partent directement à l’API Claude). Sans
-  l’une ni l’autre, la réponse est faite des passages les plus proches, trouvés
-  par les mots de la question : une question en français sur un cours en anglais les trouve par la
-  traduction des sous-titres (onglet Transcription) ou le traducteur de Chrome s’il est déjà prêt.
-  Sans transcription (vidéo sans sous-titres), la réponse s’appuie sur le texte de la page et vos notes.
+  l’une ni l’autre, la question reste sans réponse (une ligne dit comment activer l’IA). Sans
+  transcription (vidéo sans sous-titres), la réponse s’appuie sur le texte de la page et vos notes.
 - **Lecteurs intégrés** (iframes) : pris en charge dès que l’extension peut lire l’hôte du lecteur
   (YouTube, et tout hôte autorisé en un clic depuis le panneau). Une iframe dans une iframe est
   pilotée, mais le HUD ne peut pas s’y superposer. Les lecteurs `new Audio()` sont vus dès leur
