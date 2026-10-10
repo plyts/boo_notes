@@ -26,12 +26,35 @@ export interface Cited {
   at: number[];
 }
 
+/** A point of a part: the one to keep above all (one per part), a term defined, a concrete case, a trap — or plain. */
+export type PointKind = 'key' | 'definition' | 'example' | 'warning' | 'point';
+
+/**
+ * The plan: its parts (each with a sentence on what it brings), and in each
+ * part its most important points (3 to 5, the most important first), each
+ * explained in a sentence or two.
+ */
 export interface PlanNode {
   title: string;
   /** Where it begins in the video (s), null when unknown. */
   at: number | null;
   children: PlanNode[];
+  /** A part: what it brings, in one sentence. */
+  intro?: string;
+  /** A point: what to know about it, in 1 or 2 sentences. */
+  detail?: string;
+  kind?: PointKind;
+  /** A point: a command, a formula said in the course. */
+  code?: string;
 }
+
+/** How a point's kind is said (labels, and their mark in Markdown and Notion). */
+export const POINT_LABELS: Readonly<Record<Exclude<PointKind, 'point'>, { label: string; mark: string }>> = {
+  key: { label: 'Essentiel', mark: '★' },
+  definition: { label: 'Définition', mark: '📘' },
+  example: { label: 'Exemple', mark: '💡' },
+  warning: { label: 'Attention', mark: '⚠️' },
+};
 
 /** What a summary was made from: told when the transcript has changed since. */
 export interface Basis {
@@ -220,12 +243,13 @@ const RULES = [
   'Problématique : 1 à 3 phrases, le problème que la leçon traite, terminées par la question centrale à laquelle elle répond.',
   'Objectifs : 2 à 5, ce que l’étudiant saura faire ou comprendre, chacun commençant par un verbe à l’infinitif.',
   'Solution : 2 à 4 phrases, la réponse ou la méthode que la leçon apporte au problème.',
-  'Plan : le cours hiérarchisé dans l’ordre de la vidéo — 2 à 7 parties, chacune avec 1 à 4 points, un point pouvant avoir 1 à 3 détails ; titres courts (10 mots au plus), chacun avec la réplique où il commence.',
+  'Plan : le cours hiérarchisé dans l’ordre de la vidéo — 2 à 7 parties. Pour chaque partie : un titre court (10 mots au plus), la réplique où elle commence, une phrase "intro" qui dit ce qu’elle apporte, puis ses 3 à 5 points les plus importants, du plus important au moins important.',
+  'Chaque point : un titre court, une explication "detail" de 1 à 2 phrases (ce qu’il faut en savoir, concrètement), la réplique où il est dit, et son type "kind" : "essentiel" (exactement un par partie : celui à retenir s’il n’en fallait qu’un), "definition" (un terme du cours défini), "exemple" (un cas concret ; une commande ou une formule dite dans le cours va, recopiée, dans "code"), "attention" (un piège, une erreur fréquente) ou "point".',
   'Écris en français même si la transcription est dans une autre langue ; garde les termes techniques d’origine.',
 ];
 
 const LESSON_JSON =
-  '{"problem":{"text":"…","refs":["c3"]},"goals":[{"text":"…","refs":["c10"]}],"solution":{"text":"…","refs":["c20","c31"]},"plan":[{"title":"…","ref":"c0","children":[{"title":"…","ref":"c4","children":[{"title":"…","ref":"c6"}]}]}]}';
+  '{"problem":{"text":"…","refs":["c3"]},"goals":[{"text":"…","refs":["c10"]}],"solution":{"text":"…","refs":["c20","c31"]},"plan":[{"title":"…","ref":"c0","intro":"…","points":[{"title":"…","detail":"…","kind":"essentiel","ref":"c4"},{"title":"…","detail":"…","kind":"exemple","ref":"c6","code":"…"}]}]}';
 
 function head(ctx: LessonContext): string[] {
   return [
@@ -252,10 +276,10 @@ export function lessonPrompt(ctx: LessonContext, lines: readonly Line[]): Prompt
 export function partPrompt(ctx: LessonContext, part: readonly Line[], k: number, n: number): Prompt {
   const system = [
     'Tu aides à résumer une longue leçon, lue par parties. Uniquement d’après l’extrait donné, en français :',
-    '- "sections" : les parties du cours dans cet extrait, dans l’ordre (titre court, réplique où elle commence), avec leurs points (1 à 4 : titre court, réplique) ;',
+    '- "sections" : les parties du cours dans cet extrait, dans l’ordre (titre court, réplique où elle commence, une phrase "intro" qui dit ce qu’elle apporte), avec leurs points les plus importants (2 à 5, du plus important au moins important : titre court, explication "detail" de 1 à 2 phrases, type "kind" — "essentiel", "definition", "exemple", "attention" ou "point" —, commande ou formule dite recopiée dans "code", réplique) ;',
     '- "ideas" : les phrases clés où l’orateur pose le problème (kind "problem"), annonce un objectif ("goal") ou donne la solution ou la méthode ("solution") — une phrase chacune, en français, avec sa réplique.',
     'Cite les répliques par leur identifiant (c12…) recopié tel quel. N’invente rien.',
-    'Réponds par un seul objet JSON, sans texte autour : {"sections":[{"title":"…","ref":"c0","points":[{"title":"…","ref":"c2"}]}],"ideas":[{"kind":"problem","text":"…","ref":"c1"}]}',
+    'Réponds par un seul objet JSON, sans texte autour : {"sections":[{"title":"…","ref":"c0","intro":"…","points":[{"title":"…","detail":"…","kind":"essentiel","ref":"c2"}]}],"ideas":[{"kind":"problem","text":"…","ref":"c1"}]}',
   ].join('\n');
   const from = formatTimecode(part[0]?.at ?? 0);
   const to = formatTimecode(part.at(-1)?.at ?? 0);
@@ -263,8 +287,16 @@ export function partPrompt(ctx: LessonContext, part: readonly Line[], k: number,
   return { system, user };
 }
 
+export interface DigestPoint {
+  title: string;
+  ref: string;
+  detail?: string;
+  kind?: PointKind;
+  code?: string;
+}
+
 export interface PartDigest {
-  sections: Array<{ title: string; ref: string; points: Array<{ title: string; ref: string }> }>;
+  sections: Array<{ title: string; ref: string; intro?: string; points: DigestPoint[] }>;
   ideas: Array<{ kind: 'problem' | 'goal' | 'solution'; text: string; ref: string }>;
 }
 
@@ -284,8 +316,8 @@ export function mergePrompt(ctx: LessonContext, digests: readonly PartDigest[], 
   digests.forEach((d, i) => {
     body.push('', `Partie ${i + 1} :`);
     for (const s of d.sections) {
-      body.push(`- ${stamp(s.ref)} ${s.title}`);
-      for (const p of s.points) body.push(`  - ${stamp(p.ref)} ${p.title}`);
+      body.push(`- ${stamp(s.ref)} ${s.title}${s.intro ? ` — ${s.intro}` : ''}`);
+      for (const p of s.points) body.push(`  - ${stamp(p.ref)} (${KIND_WORDS[p.kind ?? 'point']}) ${p.title}${p.detail ? ` : ${p.detail}` : ''}${p.code ? ` [code : ${p.code}]` : ''}`);
     }
     for (const idea of d.ideas) body.push(`- Phrase clé (${idea.kind === 'problem' ? 'problème' : idea.kind === 'goal' ? 'objectif' : 'solution'}) ${stamp(idea.ref)} : ${idea.text}`);
   });
@@ -350,6 +382,22 @@ export function coursePrompt(course: string, chapters: readonly string[], lesson
 
 // --- Replies ---------------------------------------------------------------------------------
 
+/** A point's kind as the AI writes it (French, English, accents or not). */
+const KIND_WORDS: Record<PointKind, string> = { key: 'essentiel', definition: 'definition', example: 'exemple', warning: 'attention', point: 'point' };
+
+export function pointKind(v: unknown): PointKind {
+  const w = String(v ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim();
+  if (/^(essentiel|key|cle|important|main|essential)/.test(w)) return 'key';
+  if (/^(definition|def|terme|term)/.test(w)) return 'definition';
+  if (/^(exemple|example|cas|case)/.test(w)) return 'example';
+  if (/^(attention|warning|piege|pitfall|caution|erreur)/.test(w)) return 'warning';
+  return 'point';
+}
+
 export class SummaryError extends Error {}
 
 /** The JSON object of a reply (text around it, a fence, trailing commas forgiven). */
@@ -385,17 +433,33 @@ function planOf(v: unknown, at: ReadonlyMap<string, number>, depth = 0): PlanNod
   if (depth > 2) return [];
   const out: PlanNode[] = [];
   for (const item of listOf(v)) {
-    const o = (item && typeof item === 'object' ? item : { title: item }) as { title?: unknown; ref?: unknown; children?: unknown; points?: unknown };
+    const o = (item && typeof item === 'object' ? item : { title: item }) as { title?: unknown; ref?: unknown; children?: unknown; points?: unknown; intro?: unknown; detail?: unknown; kind?: unknown; code?: unknown };
     const title = textOf(o.title);
     if (!title) continue;
-    const children = planOf(o.children ?? o.points, at, depth + 1);
+    const children = planOf(o.points ?? o.children, at, depth + 1);
     const ref = refId(o.ref);
     let when = ref && at.has(ref) ? at.get(ref)! : null;
     // Its first child's moment, when it has none of its own.
     if (when === null) when = children.find((c) => c.at !== null)?.at ?? null;
-    out.push({ title, at: when, children });
+    const node: PlanNode = { title, at: when, children };
+    const intro = textOf(o.intro);
+    const detail = textOf(o.detail);
+    const code = typeof o.code === 'string' ? o.code.trim().slice(0, 300) : '';
+    if (depth === 0 && intro) node.intro = intro;
+    if (depth > 0) {
+      if (detail) node.detail = detail;
+      if (o.kind !== undefined || detail) node.kind = pointKind(o.kind);
+      if (code) node.code = code;
+    }
+    out.push(node);
   }
-  // In the order of the video (the parts the model put out of order).
+  if (depth === 1 && out.some((n) => n.detail)) {
+    // One essential point per part: the first one marked, else the first point (the most important).
+    const keys = out.filter((n) => n.kind === 'key');
+    if (!keys.length) out[0].kind = 'key';
+    for (const extra of keys.slice(1)) extra.kind = 'point';
+  }
+  // In the order of the video (the parts the model put out of order); points stay most important first.
   if (depth === 0 && out.every((n) => n.at !== null)) out.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
   return out;
 }
@@ -423,14 +487,22 @@ export function parsePart(reply: string, lines: readonly Line[]): PartDigest {
   const ok = (r: string | null): r is string => r !== null && ids.has(r);
   const sections: PartDigest['sections'] = [];
   for (const s of listOf(data.sections)) {
-    const o = (s ?? {}) as { title?: unknown; ref?: unknown; points?: unknown };
+    const o = (s ?? {}) as { title?: unknown; ref?: unknown; points?: unknown; intro?: unknown };
     const title = textOf(o.title);
     const ref = refId(o.ref);
-    const points = listOf(o.points)
-      .map((p) => ({ title: textOf((p as { title?: unknown })?.title ?? p), ref: refId((p as { ref?: unknown })?.ref) }))
-      .filter((p): p is { title: string; ref: string } => Boolean(p.title) && ok(p.ref));
-    if (title && ok(ref)) sections.push({ title, ref, points });
-    else if (points.length) sections.push({ title: title || points[0].title, ref: points[0].ref, points });
+    const intro = textOf(o.intro);
+    const points: DigestPoint[] = [];
+    for (const raw of listOf(o.points)) {
+      const p = (raw && typeof raw === 'object' ? raw : { title: raw }) as { title?: unknown; ref?: unknown; detail?: unknown; kind?: unknown; code?: unknown };
+      const pTitle = textOf(p.title);
+      const pRef = refId(p.ref);
+      if (!pTitle || !ok(pRef)) continue;
+      const detail = textOf(p.detail);
+      const code = typeof p.code === 'string' ? p.code.trim().slice(0, 300) : '';
+      points.push({ title: pTitle, ref: pRef, ...(detail ? { detail } : {}), kind: pointKind(p.kind), ...(code ? { code } : {}) });
+    }
+    if (title && ok(ref)) sections.push({ title, ref, ...(intro ? { intro } : {}), points });
+    else if (points.length) sections.push({ title: title || points[0].title, ref: points[0].ref, ...(intro ? { intro } : {}), points });
   }
   const ideas: PartDigest['ideas'] = [];
   for (const i of listOf(data.ideas)) {
@@ -483,19 +555,33 @@ export function parseCourse(reply: string, chapterCount: number): CourseDraft {
 
 const refsSchema = { type: 'array', items: { type: 'string' } };
 const cited = { type: 'object', properties: { text: { type: 'string' }, refs: refsSchema }, required: ['text', 'refs'] };
-const leaf = { type: 'object', properties: { title: { type: 'string' }, ref: { type: 'string' } }, required: ['title', 'ref'] };
-const node = (children: object) => ({ type: 'object', properties: { title: { type: 'string' }, ref: { type: 'string' }, children: { type: 'array', items: children } }, required: ['title', 'ref'] });
+const point = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    detail: { type: 'string' },
+    kind: { type: 'string', enum: ['essentiel', 'definition', 'exemple', 'attention', 'point'] },
+    ref: { type: 'string' },
+    code: { type: 'string' },
+  },
+  required: ['title', 'detail', 'kind', 'ref'],
+};
+const part = {
+  type: 'object',
+  properties: { title: { type: 'string' }, ref: { type: 'string' }, intro: { type: 'string' }, points: { type: 'array', items: point } },
+  required: ['title', 'ref', 'intro', 'points'],
+};
 
 export const LESSON_SCHEMA = {
   type: 'object',
-  properties: { problem: cited, goals: { type: 'array', items: cited }, solution: cited, plan: { type: 'array', items: node(node(leaf)) } },
+  properties: { problem: cited, goals: { type: 'array', items: cited }, solution: cited, plan: { type: 'array', items: part } },
   required: ['problem', 'goals', 'solution', 'plan'],
 };
 
 export const PART_SCHEMA = {
   type: 'object',
   properties: {
-    sections: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, ref: { type: 'string' }, points: { type: 'array', items: leaf } }, required: ['title', 'ref', 'points'] } },
+    sections: { type: 'array', items: part },
     ideas: {
       type: 'array',
       items: { type: 'object', properties: { kind: { type: 'string', enum: ['problem', 'goal', 'solution'] }, text: { type: 'string' }, ref: { type: 'string' } }, required: ['kind', 'text', 'ref'] },
@@ -540,17 +626,44 @@ export function lessonMarkdown(s: Pick<LessonSummary, 'problem' | 'goals' | 'sol
   if (s.solution.text) out.push(`> **Solution —** ${s.solution.text}${stamps(s.solution.at.slice(0, 1))}`, '>');
   if (s.plan.length) {
     out.push('> **Plan**');
-    const walk = (nodes: readonly PlanNode[], depth: number) => {
-      nodes.forEach((n, i) => {
-        const marker = depth === 2 ? '-' : `${i + 1}.`;
-        out.push(`> ${'   '.repeat(depth)}${marker} ${n.title}${n.at !== null ? ` ${timestampToken(n.at)}` : ''}`);
-        walk(n.children, depth + 1);
-      });
-    };
-    walk(s.plan, 0);
+    for (const line of planMarkdown(s.plan, (at) => timestampToken(at))) out.push(`> ${line}`);
   }
   while (out.at(-1) === '>') out.pop();
   return out.join('\n');
+}
+
+/** A point as one line: its mark and label (★ **Essentiel — titre :**), its explanation, its moment. */
+export function pointLine(n: PlanNode, stamp: (at: number) => string): string {
+  const when = n.at !== null ? ` ${stamp(n.at)}` : '';
+  if (!n.detail) return `${n.title}${when}`;
+  const kind = n.kind && n.kind !== 'point' ? POINT_LABELS[n.kind] : null;
+  const head = kind ? `${kind.mark} **${kind.label} — ${n.title} :**` : `**${n.title} :**`;
+  return `${head} ${n.detail}${when}`;
+}
+
+/**
+ * The plan as Markdown lines (no quote marks): « 1. Part [00:00] », its
+ * sentence in italics, then its points (each a bullet; an example's command
+ * in code under it). An older plan (titles only) is written as it was.
+ */
+export function planMarkdown(plan: readonly PlanNode[], stamp: (at: number) => string): string[] {
+  const out: string[] = [];
+  const walk = (nodes: readonly PlanNode[], depth: number) => {
+    nodes.forEach((n, i) => {
+      const pad = '   '.repeat(depth);
+      if (depth === 0 || !n.detail) {
+        const marker = depth === 2 ? '-' : depth === 1 && n.kind !== undefined ? '-' : `${i + 1}.`;
+        out.push(`${pad}${marker} ${n.title}${n.at !== null ? ` ${stamp(n.at)}` : ''}`);
+        if (depth === 0 && n.intro) out.push(`${pad}   *${n.intro}*`);
+      } else {
+        out.push(`${pad}- ${pointLine(n, stamp)}`);
+        if (n.code) out.push(`${pad}  \`${n.code.replace(/`/g, "'")}\``);
+      }
+      walk(n.children, depth + 1);
+    });
+  };
+  walk(plan, 0);
+  return out;
 }
 
 /** The note with the summary block at its top (an older one replaced). */
@@ -599,7 +712,7 @@ export function courseMarkdown(s: CourseSummary, plans: ReadonlyMap<string, Less
     c.lessons.forEach((l, j) => {
       const title = l.url ? `[${l.title}](${l.url})` : l.title;
       out.push(`${j + 1}. **${title}**${l.synthesis ? ` — ${l.synthesis}` : l.state === 'none' ? ' — *pas de transcription*' : ''}`);
-      for (const p of plans.get(l.noteId)?.plan ?? []) out.push(`   - ${p.title}${p.at !== null ? ` ${lessonStamp(l.url, p.at)}` : ''}`);
+      for (const line of planMarkdown(plans.get(l.noteId)?.plan ?? [], (at) => lessonStamp(l.url, at))) out.push(`   ${line}`);
     });
     out.push('');
   });

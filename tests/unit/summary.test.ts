@@ -126,6 +126,81 @@ describe('résumé : la transcription lue', () => {
   });
 });
 
+describe('résumé : le plan détaillé (les points importants de chaque partie)', () => {
+  const lines: Line[] = [
+    { id: 'c0', at: 0, text: 'a' },
+    { id: 'c1', at: 48, text: 'b' },
+    { id: 'c2', at: 90, text: 'c' },
+    { id: 'c3', at: 130, text: 'd' },
+    { id: 'c4', at: 160, text: 'e' },
+  ];
+  const reply = JSON.stringify({
+    problem: { text: 'P ?', refs: ['c0'] },
+    goals: [],
+    solution: { text: 'S.', refs: ['c3'] },
+    plan: [
+      {
+        title: 'Le journal de transactions',
+        ref: 'c3',
+        intro: 'Le cœur de Delta Lake.',
+        points: [
+          { title: 'Un commit = un fichier JSON', detail: 'Chaque écriture ajoute un fichier numéroté.', kind: 'Essentiel', ref: 'c3' },
+          { title: 'Source de vérité', detail: 'La table est l’état obtenu en rejouant les commits.', kind: 'définition', ref: 'c4' },
+          { title: 'Historique', detail: 'Trois INSERT, un DELETE : quatre commits.', kind: 'example', ref: 'c4', code: 'DESCRIBE HISTORY ventes;' },
+          { title: 'Autre essentiel', detail: 'Un deuxième « essentiel » : ramené à un simple point.', kind: 'essentiel', ref: 'c99' },
+        ],
+      },
+      {
+        title: 'Les limites',
+        ref: 'c0',
+        intro: 'Pourquoi un data lake ne suffit pas.',
+        points: [
+          { title: 'Pas d’isolation', detail: 'Un lecteur voit deux versions mêlées.', kind: 'point', ref: 'c2' },
+          { title: 'Fichiers à la main', detail: 'Les réécrire casse les lectures.', kind: 'attention', ref: 'c1' },
+        ],
+      },
+    ],
+  });
+
+  it('chaque partie : sa phrase, ses points (explication, type, instant, commande) ; un seul « essentiel » par partie', () => {
+    const d = parseLesson(reply, lines);
+    expect(d.plan.map((p) => p.title)).toEqual(['Les limites', 'Le journal de transactions']);
+    const [limits, log] = d.plan;
+    expect(log.intro).toBe('Le cœur de Delta Lake.');
+    expect(log.children.map((p) => [p.title, p.kind, p.at])).toEqual([
+      ['Un commit = un fichier JSON', 'key', 130],
+      ['Source de vérité', 'definition', 160],
+      ['Historique', 'example', 160],
+      ['Autre essentiel', 'point', null],
+    ]);
+    expect(log.children[2].code).toBe('DESCRIBE HISTORY ventes;');
+    expect(log.children[0].detail).toBe('Chaque écriture ajoute un fichier numéroté.');
+    // No point marked essential: the first one (the most important) is.
+    expect(limits.children.map((p) => p.kind)).toEqual(['key', 'warning']);
+  });
+
+  it('dans la note : la partie, sa phrase en italique, chaque point avec son étiquette, son explication et son instant', () => {
+    const d = parseLesson(reply, lines);
+    const md = lessonMarkdown(d);
+    expect(md).toContain(
+      [
+        '> **Plan**',
+        '> 1. Les limites [00:00]',
+        '>    *Pourquoi un data lake ne suffit pas.*',
+        '>    - ★ **Essentiel — Pas d’isolation :** Un lecteur voit deux versions mêlées. [01:30]',
+        '>    - ⚠️ **Attention — Fichiers à la main :** Les réécrire casse les lectures. [00:48]',
+        '> 2. Le journal de transactions [02:10]',
+        '>    *Le cœur de Delta Lake.*',
+        '>    - ★ **Essentiel — Un commit = un fichier JSON :** Chaque écriture ajoute un fichier numéroté. [02:10]',
+        '>    - 📘 **Définition — Source de vérité :** La table est l’état obtenu en rejouant les commits. [02:40]',
+        '>    - 💡 **Exemple — Historique :** Trois INSERT, un DELETE : quatre commits. [02:40]',
+        '>      `DESCRIBE HISTORY ventes;`',
+        '>    - **Autre essentiel :** Un deuxième « essentiel » : ramené à un simple point.',
+      ].join('\n'),
+    );
+  });
+});
+
 describe('résumé : dans la note', () => {
   const draft = {
     problem: { text: 'Comment écrire à deux sans corrompre la table ?', at: [35] },
@@ -284,7 +359,7 @@ describe('résumé : le cours entier', () => {
     const md = courseMarkdown(s, plans, { heading: false });
     expect(md.startsWith('*Généré par IA')).toBe(true);
     expect(md).toContain('- G (chapitre 2)');
-    expect(md).toContain('1. **[ACID](https://www.youtube.com/watch?v=a)** — Le journal.\n   - Le journal [02:10](https://www.youtube.com/watch?v=a#t=130)');
+    expect(md).toContain('1. **[ACID](https://www.youtube.com/watch?v=a)** — Le journal.\n   1. Le journal [02:10](https://www.youtube.com/watch?v=a#t=130)');
   });
 
   it('la synthèse du cours lue : chapitres numérotés, leçons L1…', () => {

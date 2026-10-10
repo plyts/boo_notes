@@ -33,12 +33,27 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     await expect(p.getByRole('region', { name: 'Solution' })).toContainText('Un journal de transactions ordonné');
     // Subtitles read as sentences (00:00, 00:07, 00:15, 00:23); the moment that does not exist (c999) is not shown.
     await expect(p.getByRole('region', { name: 'Problématique' }).locator('.sum-ts')).toHaveText(['00:00', '00:07']);
-    // The plan, as a hierarchy: parts › points › details, numbered, each with its moment.
+    // The plan, « Détaillé »: each part with its sentence, and its most important points explained, each with its moment.
     const plan = p.getByRole('region', { name: 'Plan du cours' });
     await expect(plan.locator('.sum-lvl1 > .sum-node .sum-title')).toHaveText(['Les limites d’un data lake', 'Le journal de transactions', 'Time travel']);
-    await expect(plan.locator('.sum-lvl2 > .sum-node .sum-num')).toHaveText(['1.1', '2.1']);
-    await expect(plan.locator('.sum-lvl3 > .sum-node')).toContainText('Numérotés dans l’ordre');
-    await expect(plan.locator('.sum-count')).toHaveText('3 parties · 3 points');
+    await expect(plan.getByRole('button', { name: 'Détaillé' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(plan.locator('.sum-count-line')).toHaveText('3 parties · 7 points importants');
+    await expect(plan.locator('.sum-intro').first()).toHaveText('Pourquoi de simples fichiers ne suffisent pas.');
+    // One essential point per part, lit; a term defined, a trap, an example with its command.
+    await expect(plan.locator('.sum-pt.k-key')).toHaveCount(3);
+    await expect(plan.locator('.sum-pt.k-key').first()).toHaveText(/^Essentiel\s*Écritures concurrentes — Deux jobs qui écrivent en même temps peuvent corrompre une table\.\s*00:00$/);
+    await expect(plan.locator('.sum-pt.k-definition')).toContainText('DéfinitionJournal de transactions — Le registre des commits');
+    await expect(plan.locator('.sum-pt.k-warning')).toContainText('AttentionAucune garantie');
+    await expect(plan.locator('.sum-pt.k-example .sum-code')).toHaveText('SELECT * FROM ventes VERSION AS OF 3');
+    await expect(plan.locator('.sum-pt.k-example .sum-ts')).toHaveText('00:23');
+    // « Titres »: the short plan (the essential points starred); the choice kept.
+    await plan.getByRole('button', { name: 'Titres' }).click();
+    await expect(plan.locator('.sum-intro')).toHaveCount(0);
+    await expect(plan.locator('.sum-lvl2 > .sum-node .sum-num')).toHaveText(['1.1', '1.2', '2.1', '2.2', '2.3', '3.1', '3.2']);
+    await expect(plan.locator('.sum-star')).toHaveCount(3);
+    expect(await p.locator('body').evaluate(() => localStorage.getItem('boo:summary-plan-view'))).toBe('titles');
+    await plan.getByRole('button', { name: 'Détaillé' }).click();
+    await expect(plan.locator('.sum-pt')).toHaveCount(7);
     await expect(p.locator('.sum-ai')).toHaveText('IA · à vérifier');
 
     // What was sent: the key, the whole transcript, the rules — in one request (it fits).
@@ -62,7 +77,10 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     await expect.poll(async () => (await storedNote(sw))?.markdown ?? '').toMatch(/^> \[!summary\] Résumé de la leçon · IA d’après la transcription, à vérifier\n> \*\*Problématique —\*\* [^\n]+ \[00:00\]\n/);
     const md = (await storedNote(sw))!.markdown;
     expect(md).toContain('> **Objectifs**\n> - Expliquer le rôle du journal de transactions [00:07]');
-    expect(md).toContain('> **Plan**\n> 1. Les limites d’un data lake [00:00]\n>    1. Écritures concurrentes [00:00]\n> 2. Le journal de transactions [00:07]\n>    1. Un commit = un fichier JSON [00:15]');
+    // The plan detailed in the note too: each part's sentence, its points explained and marked.
+    expect(md).toContain('> **Plan**\n> 1. Les limites d’un data lake [00:00]\n>    *Pourquoi de simples fichiers ne suffisent pas.*\n>    - ★ **Essentiel — Écritures concurrentes :** Deux jobs qui écrivent en même temps peuvent corrompre une table. [00:00]\n>    - ⚠️ **Attention — Aucune garantie :**');
+    expect(md).toContain('>    - 📘 **Définition — Journal de transactions :** Le registre des commits, à côté des fichiers Parquet. [00:07]\n>    - **Lectures atomiques :** Les lecteurs ne voient que des commits complets. [00:15]');
+    expect(md).toContain('>    - 💡 **Exemple — Relire la version 3 :** Une requête lit la table telle qu’elle était. [00:23]\n>      `SELECT * FROM ventes VERSION AS OF 3`');
     expect(md).toMatch(/\n\n\[00:\d\d\] Ma première note$/);
     await p.getByRole('tab', { name: 'Résumé' }).click();
     await p.getByRole('button', { name: 'Insérer dans la note' }).click();

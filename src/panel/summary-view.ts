@@ -19,7 +19,7 @@ import {
 import { normalizeTitle } from '../shared/markdown';
 import { formatTimecode } from '../shared/time';
 import type { Transcript } from '../shared/transcript';
-import { courseCards, lessonCards, markCurrent, planCounts, planTree } from './summary-render';
+import { courseCards, isDetailed, lessonCards, markCurrent, planCounts, planTree, planView, viewSwitch, type PlanView } from './summary-render';
 
 /**
  * The panel's « Résumé » tab. « Cette leçon »: the summary of the video's
@@ -75,6 +75,8 @@ export class SummaryView {
   private provider = '';
   private now: number | null = null;
   private loadSeq = 0;
+  /** The plan's titles only, or its points explained (kept in this browser). */
+  private view: PlanView = planView();
 
   constructor(private readonly hooks: SummaryHooks) {
     this.body = h('div', { class: 'sum-body' });
@@ -328,8 +330,10 @@ export class SummaryView {
       out.push(this.progressCard(this.run));
       // The plan grows while the parts are read.
       if (this.run.outline.length) {
-        const nodes: PlanNode[] = this.run.outline.flatMap((d) => d.sections.map((s) => ({ title: s.title, at: null, children: s.points.map((p) => ({ title: p.title, at: null, children: [] })) })));
-        out.push(h('section', { class: 'sum-card sum-plan sum-growing' }, h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, `Plan — ${this.run.outline.length} partie${this.run.outline.length > 1 ? 's' : ''} lue${this.run.outline.length > 1 ? 's' : ''} sur ${this.run.partsTotal}`)), planTree(nodes, {})));
+        const nodes: PlanNode[] = this.run.outline.flatMap((d) =>
+          d.sections.map((s) => ({ title: s.title, at: null, ...(s.intro ? { intro: s.intro } : {}), children: s.points.map((p) => ({ title: p.title, at: null, children: [], ...(p.detail ? { detail: p.detail, kind: p.kind } : {}), ...(p.code ? { code: p.code } : {}) })) })),
+        );
+        out.push(h('section', { class: 'sum-card sum-plan sum-growing' }, h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, `Plan — ${this.run.outline.length} partie${this.run.outline.length > 1 ? 's' : ''} lue${this.run.outline.length > 1 ? 's' : ''} sur ${this.run.partsTotal}`)), planTree(nodes, {}, this.view)));
       }
       return out;
     }
@@ -395,13 +399,23 @@ export class SummaryView {
       s.parts > 1 ? ` · lue en ${s.parts} parties` : '',
     );
     const counts = planCounts(s.plan);
+    const detailed = isDetailed(s.plan);
+    const switcher = detailed
+      ? viewSwitch(this.view, (v) => {
+          const top = this.body.scrollTop;
+          this.view = v;
+          this.render();
+          this.body.scrollTop = top;
+        })
+      : null;
     const plan = s.plan.length
       ? h(
           'section',
           { class: 'sum-card sum-plan', 'aria-label': 'Plan du cours' },
-          h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, 'Plan du cours'), h('span', { class: 'sum-count' }, `${counts.parts} parties · ${counts.points} points`)),
+          h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, 'Plan du cours'), switcher ?? h('span', { class: 'sum-count' }, `${counts.parts} parties · ${counts.points} points`)),
+          detailed ? h('p', { class: 'sum-count-line' }, `${counts.parts} partie${counts.parts > 1 ? 's' : ''} · ${counts.points} point${counts.points > 1 ? 's importants' : ' important'}`) : null,
           (() => {
-            const tree = planTree(s.plan, seek);
+            const tree = planTree(s.plan, seek, this.view);
             tree.classList.add('sum-plan-tree');
             return tree;
           })(),

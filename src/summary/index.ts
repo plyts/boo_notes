@@ -4,7 +4,7 @@ import { normalizeTitle } from '../shared/markdown';
 import { callBackground } from '../shared/messages';
 import { timestampUrl } from '../shared/platforms';
 import { loadQa } from '../shared/qa-config';
-import { basisKey, basisOf, courseSummaryKey, type CourseSummary, type PlanNode } from '../shared/summary';
+import { basisKey, basisOf, courseSummaryKey, type CourseSummary } from '../shared/summary';
 import {
   courseContent,
   courseText,
@@ -19,7 +19,7 @@ import {
   type SummaryStep,
 } from '../shared/summarizer';
 import { formatTimecode } from '../shared/time';
-import { courseCards } from '../panel/summary-render';
+import { courseCards, isDetailed, planTree, planView, viewSwitch, type PlanView } from '../panel/summary-render';
 
 /**
  * The course's summary, large (a tab of its own): its lessons and their
@@ -40,6 +40,8 @@ let summary: CourseSummary | null = null;
 let running: { ctrl: AbortController; step: SummaryStep | null; lesson: { k: number; n: number; title: string } | null } | null = null;
 let error: { text: string; setup: boolean } | null = null;
 let provider = '';
+/** Each lesson's parts: their titles only, or their points explained. */
+let view: PlanView = planView();
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 function say(text: string): void {
@@ -120,30 +122,6 @@ function renderActions(): void {
     );
   }
   actions.replaceChildren(...list);
-}
-
-function partsList(nodes: readonly PlanNode[], url: string): HTMLElement {
-  const list = (items: readonly PlanNode[], depth: number, parent = ''): HTMLElement =>
-    h(
-      'ul',
-      { class: 'sum-tree' },
-      ...items.map((n, i) =>
-        h(
-          'li',
-          { class: `sum-lvl${depth + 1}` },
-          h(
-            'div',
-            { class: 'sum-node' },
-            h('span', { class: 'sum-fold' }),
-            h('span', { class: 'sum-num' }, depth === 0 ? String(i + 1) : `${parent}.${i + 1}`),
-            h('span', { class: 'sum-title' }, n.title),
-            n.at !== null && url ? h('a', { class: 'sum-ts', href: timestampUrl(url, n.at), target: '_blank', rel: 'noopener', title: `Ouvrir la leçon à ${formatTimecode(n.at)}` }, formatTimecode(n.at)) : h('span', {}),
-          ),
-          depth < 1 && n.children.length ? list(n.children, depth + 1, String(i + 1)) : null,
-        ),
-      ),
-    );
-  return list(nodes, 0);
 }
 
 function progressCard(): HTMLElement {
@@ -238,7 +216,7 @@ function renderMain(): void {
             h('span', { class: 'dur' }, ref.duration ? formatTimecode(ref.duration) : ''),
             ref.url ? h('a', { class: 'go', href: ref.url, target: '_blank', rel: 'noopener' }, icon('play', 12), 'Ouvrir') : h('span', {}),
           );
-          return parts.length ? [row, h('div', { class: 'parts' }, partsList(parts, ref.url))] : [row];
+          return parts.length ? [row, h('div', { class: 'parts' }, planTree(parts, { href: ref.url ? (at) => timestampUrl(ref.url, at) : null }, view))] : [row];
         }),
       );
       const fold = h('button', { type: 'button', class: 'chev', 'aria-expanded': 'true', 'aria-label': `Replier le chapitre ${ci + 1}` }, icon('chevronDown', 15));
@@ -254,11 +232,20 @@ function renderMain(): void {
         lessons,
       );
     });
+    const detailed = c.lessons.some((l) => isDetailed(l.summary?.plan ?? []));
+    const switcher = detailed
+      ? viewSwitch(view, (v) => {
+          const y = scrollY;
+          view = v;
+          renderMain();
+          scrollTo(0, y);
+        })
+      : null;
     out.push(
       h(
         'section',
         { class: 'sum-card sum-plan plan', 'aria-label': 'Plan du cours' },
-        h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, 'Plan du cours'), h('span', { class: 'sum-count' }, 'chapitres › leçons › parties — un clic ouvre la leçon à l’instant')),
+        h('h3', { class: 'sum-head' }, h('span', { class: 'sum-ico' }, icon('outline', 15)), h('span', {}, 'Plan du cours'), h('span', { class: 'sum-count' }, view === 'detailed' && detailed ? 'chapitres › leçons › parties › points importants — un clic ouvre la leçon à l’instant' : 'chapitres › leçons › parties — un clic ouvre la leçon à l’instant'), switcher),
         ...chapters,
       ),
     );

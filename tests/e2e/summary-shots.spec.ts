@@ -86,6 +86,11 @@ test('rendus : l’onglet Résumé d’une leçon, tous ses états', async ({ pa
     await panel(page).getByRole('region', { name: 'Plan du cours' }).scrollIntoViewIfNeeded();
     await expect(panel(page).locator('.sum-node.now')).toBeVisible();
     await panelShot(page, '07-lecon-plan-partie-en-cours');
+    // « Titres »: the short plan; back to « Détaillé ».
+    await panel(page).getByRole('button', { name: 'Titres', exact: true }).click();
+    await panel(page).getByRole('region', { name: 'Plan du cours' }).scrollIntoViewIfNeeded();
+    await panelShot(page, '07b-lecon-plan-titres');
+    await panel(page).getByRole('button', { name: 'Détaillé', exact: true }).click();
 
     // The transcript changed since: « à mettre à jour ».
     await sw.evaluate(async (key) => {

@@ -46,7 +46,7 @@ export async function mockOpenAi(opts: { limitFirst?: boolean; delayMs?: number 
         const lines = [...user.matchAll(/^\[(c\d+) [\d:]+\] (.*)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
         const step = Math.max(1, Math.floor(lines.length / 3));
         reply = {
-          sections: [0, 1, 2].map((k) => lines[k * step]).filter(Boolean).map((l, k) => ({ title: `Partie ${k + 1} : ${l.text.split(' ').slice(0, 4).join(' ')}`, ref: l.id, points: [{ title: 'Un point clé', ref: l.id }] })),
+          sections: [0, 1, 2].map((k) => lines[k * step]).filter(Boolean).map((l, k) => ({ title: `Partie ${k + 1} : ${l.text.split(' ').slice(0, 4).join(' ')}`, ref: l.id, intro: 'Ce que cette partie apporte.', points: [{ title: 'Un point clé', detail: 'Ce qu’il faut en retenir.', kind: 'essentiel', ref: l.id }] })),
           ideas: [{ kind: 'problem', text: 'Le problème posé.', ref: lines[0]?.id ?? 'c0' }],
         };
       } else if (system.includes('Voici un cours entier')) {
@@ -75,10 +75,36 @@ export async function mockOpenAi(opts: { limitFirst?: boolean; delayMs?: number 
             { text: 'Relire une version antérieure (time travel)', refs: [ref('time travel')] },
           ],
           solution: { text: 'Un journal de transactions ordonné : chaque écriture est un commit JSON, les lecteurs ne voient que des commits complets.', refs: [ref('transaction log'), ref('complete commits')] },
+          // Each part: its sentence, and its most important points explained (the essential one, a term, a trap, an example with its command).
           plan: [
-            { title: 'Les limites d’un data lake', ref: ref('Welcome'), children: [{ title: 'Écritures concurrentes', ref: ref('corrupt'), children: [] }] },
-            { title: 'Le journal de transactions', ref: ref('transaction log'), children: [{ title: 'Un commit = un fichier JSON', ref: ref('numbered JSON'), children: [{ title: 'Numérotés dans l’ordre', ref: ref('numbered JSON') }] }] },
-            { title: 'Time travel', ref: ref('time travel'), children: [] },
+            {
+              title: 'Les limites d’un data lake',
+              ref: ref('Welcome'),
+              intro: 'Pourquoi de simples fichiers ne suffisent pas.',
+              points: [
+                { title: 'Écritures concurrentes', detail: 'Deux jobs qui écrivent en même temps peuvent corrompre une table.', kind: 'essentiel', ref: ref('corrupt') },
+                { title: 'Aucune garantie', detail: 'Rien n’empêche un lecteur de voir une écriture à moitié faite.', kind: 'attention', ref: ref('reliability') },
+              ],
+            },
+            {
+              title: 'Le journal de transactions',
+              ref: ref('transaction log'),
+              intro: 'Le cœur de Delta Lake : un registre ordonné de toutes les écritures.',
+              points: [
+                { title: 'Un commit = un fichier JSON', detail: 'Chaque écriture ajoute un fichier JSON numéroté au journal.', kind: 'essentiel', ref: ref('numbered JSON') },
+                { title: 'Journal de transactions', detail: 'Le registre des commits, à côté des fichiers Parquet.', kind: 'definition', ref: ref('transaction log') },
+                { title: 'Lectures atomiques', detail: 'Les lecteurs ne voient que des commits complets.', kind: 'point', ref: ref('complete commits') },
+              ],
+            },
+            {
+              title: 'Time travel',
+              ref: ref('time travel'),
+              intro: 'Relire la table telle qu’elle était.',
+              points: [
+                { title: 'L’historique garde chaque version', detail: 'Chaque commit reste lisible : la table se relit à une version passée.', kind: 'essentiel', ref: ref('time travel') },
+                { title: 'Relire la version 3', detail: 'Une requête lit la table telle qu’elle était.', kind: 'exemple', ref: ref('older version'), code: 'SELECT * FROM ventes VERSION AS OF 3' },
+              ],
+            },
           ],
         };
       }
