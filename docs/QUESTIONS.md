@@ -55,12 +55,12 @@ recherche, « Recherche de la réponse dans le cours… » s’affiche sous la q
 continue**, et l’on peut écrire ailleurs dans la note.
 
 Sans IA prête, une seule ligne dit pourquoi et comment l’avoir :
-`> **Réponse :** indisponible — activez l’IA intégrée de Chrome, une fois (options › Questions › Télécharger)`.
+`> **Réponse :** indisponible — activez l’IA intégrée de Chrome, une fois (options › IA › Télécharger)`.
 « + › Chercher à nouveau » relance la question une fois l’IA prête.
 
 ### Qui écrit la réponse
 
-Options › Questions › **Qui rédige les réponses** :
+Options › **IA** (la même IA écrit les **résumés**, onglet Résumé du panneau) :
 
 - **IA de Chrome** (par défaut) : l’IA intégrée de Chrome (Gemini Nano), **sur cet ordinateur,
   gratuite, rien n’est envoyé**. Son modèle se télécharge une fois (bouton *Télécharger le
@@ -69,11 +69,20 @@ Options › Questions › **Qui rédige les réponses** :
   la question lui est posée en anglais et sa réponse est traduite en français par le **traducteur
   de Chrome**, téléchargé avec elle (lui aussi sur l’appareil). Tant qu’elle n’est pas là, une
   ligne dit comment l’activer.
-- **Claude** (Anthropic), avec **votre clé API** : *Vérifier et activer* essaie la clé, puis
-  propose les modèles qu’elle permet, le plus récent choisi. La clé reste dans le stockage local
-  du navigateur (non synchronisé) ; pour chaque question, la question et les extraits du cours
-  (transcription, texte de la page, notes) partent **directement** à l’API Claude, à aucun autre
-  serveur. Payant à l’usage, sur votre compte Anthropic.
+- **Paliers gratuits, avec une clé gratuite** : **Groq**, **OpenRouter** (ses modèles « :free »),
+  **Google Gemini** (AI Studio), **Mistral** (offre « Experiment »), **Cerebras**. Le lien
+  « Créer une clé gratuite » mène à la page du service ; *Vérifier et activer* essaie la clé, liste
+  ses modèles et choisit le suggéré. Leur limite atteinte (429), Boo Notes attend ce que le
+  service indique, puis reprend.
+- **Ollama** (sur cet ordinateur, gratuit, hors ligne) : ses modèles installés sont listés ; s’il
+  refuse l’extension, lancez-le avec `OLLAMA_ORIGINS=chrome-extension://*`.
+- **Claude** (Anthropic), avec **votre clé API** : payant à l’usage, sur votre compte Anthropic.
+- **Compatible OpenAI** : toute adresse qui parle l’API OpenAI (LM Studio, DeepSeek, GitHub
+  Models…), sa clé facultative, son modèle listé ou nommé.
+
+Les clés restent dans le stockage local du navigateur (non synchronisé), une par service ; pour
+chaque question, la question et les extraits du cours (transcription, texte de la page, notes)
+partent **directement** au service choisi, à aucun autre serveur.
 - **Sans IA** : les questions ne reçoivent pas de réponse (une ligne le rappelle).
 
 Dans tous les cas, l’IA ne répond qu’à partir des extraits du cours, en 2 à 4 phrases ; les
@@ -123,6 +132,6 @@ Les blocs sont des **callouts** Markdown (syntaxe d’Obsidian) : la note reste 
 | Recherche : sources, passages, classement (BM25), requête et réponse de l’IA | `src/shared/qa.ts`, `src/panel/answers.ts` |
 | Texte du cours dans l’onglet (page et cadres) | `src/shared/course-text.ts` (requête `course:text` du service worker) |
 | IA intégrée de Chrome (état, téléchargement, réponse, traduction) | `src/shared/chrome-ai.ts` |
-| API Claude (modèles, message) | `src/shared/claude.ts` ; réglage `qa:config` (`src/shared/qa-config.ts`) |
+| Fournisseurs (registre, requête, modèles, attente d’un palier gratuit) | `src/shared/ai-providers.ts`, `src/shared/ai-client.ts`, `src/shared/claude.ts` ; réglage `qa:config` (`src/shared/qa-config.ts`) |
 | Exports | `src/shared/pdf-notes.ts`, `src/shared/notion/blocks.ts`, `src/shared/notion/html.ts` |
 | Tests | `tests/unit/callouts.test.ts`, `tests/unit/qa.test.ts`, `tests/unit/blocks-export.test.ts`, `tests/e2e/questions.spec.ts` |

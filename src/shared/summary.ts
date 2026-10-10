@@ -1,4 +1,5 @@
 import { timestampToken } from './markdown';
+import { timestampUrl } from './platforms';
 import { formatTimecode } from './time';
 import type { Cue, Transcript } from './transcript';
 
@@ -574,9 +575,16 @@ export function withSummary(markdown: string, block: string): string {
   return rest ? `${block}\n\n${rest}` : `${block}\n`;
 }
 
-/** The course's summary as Markdown (to copy elsewhere). */
-export function courseMarkdown(s: CourseSummary, plans: ReadonlyMap<string, LessonSummary>): string {
-  const out = [`# ${s.course} — résumé du cours`, '', '*Généré par IA d’après les transcriptions — à vérifier.*', ''];
+/** A moment of a lesson: a link opening it there (`[02:10](…#t=130)`). */
+const lessonStamp = (url: string, at: number) => (url ? `[${formatTimecode(at)}](${timestampUrl(url, at)})` : timestampToken(at));
+
+/**
+ * The course's summary as Markdown (to copy elsewhere, and the first pages
+ * of the course's PDF): each lesson a link, each moment a link opening the
+ * lesson there.
+ */
+export function courseMarkdown(s: CourseSummary, plans: ReadonlyMap<string, LessonSummary>, opts: { heading?: boolean } = {}): string {
+  const out = [...(opts.heading === false ? [] : [`# ${s.course} — résumé du cours`, '']), '*Généré par IA d’après les transcriptions — à vérifier.*', ''];
   if (s.problem) out.push('## Problématique', '', s.problem, '');
   if (s.goals.length) {
     out.push('## Objectifs', '');
@@ -589,8 +597,9 @@ export function courseMarkdown(s: CourseSummary, plans: ReadonlyMap<string, Less
     out.push(`### ${i + 1} · ${c.title}`, '');
     if (c.synthesis) out.push(c.synthesis, '');
     c.lessons.forEach((l, j) => {
-      out.push(`${j + 1}. **${l.title}**${l.synthesis ? ` — ${l.synthesis}` : l.state === 'none' ? ' — *pas de transcription*' : ''}`);
-      for (const p of plans.get(l.noteId)?.plan ?? []) out.push(`   - ${p.title}${p.at !== null ? ` ${timestampToken(p.at)}` : ''}`);
+      const title = l.url ? `[${l.title}](${l.url})` : l.title;
+      out.push(`${j + 1}. **${title}**${l.synthesis ? ` — ${l.synthesis}` : l.state === 'none' ? ' — *pas de transcription*' : ''}`);
+      for (const p of plans.get(l.noteId)?.plan ?? []) out.push(`   - ${p.title}${p.at !== null ? ` ${lessonStamp(l.url, p.at)}` : ''}`);
     });
     out.push('');
   });

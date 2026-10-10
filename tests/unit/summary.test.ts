@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiError } from '../../src/shared/ai-client';
 import {
   basisOf,
+  courseMarkdown,
   coverage,
   isStale,
   lessonMarkdown,
@@ -262,6 +263,26 @@ describe('résumé : le cours entier', () => {
     const s = await summarizeCourse('Databricks', w);
     expect(s.full).toBe(false);
     expect(w.asked.at(-1)!.user).not.toContain('Transcription :');
+  });
+
+  it('le cours en Markdown (copie, PDF) : chaque leçon un lien, chaque instant un lien qui l’ouvre à ce moment', () => {
+    const s = {
+      course: 'Databricks',
+      problem: 'P ?',
+      goals: [{ text: 'G', chapter: 2 }],
+      solution: 'S',
+      chapters: [{ title: 'Delta', synthesis: 'Fiable.', lessons: [{ noteId: 'a', title: 'ACID', url: 'https://www.youtube.com/watch?v=a', chapter: 'Delta', duration: 60, synthesis: 'Le journal.', state: 'done' as const }] }],
+      read: {},
+      full: true,
+      provider: 'groq',
+      model: 'm',
+      createdAt: 1,
+    };
+    const plans = new Map([['a', { plan: [{ title: 'Le journal', at: 130, children: [] }] } as never]]);
+    const md = courseMarkdown(s, plans, { heading: false });
+    expect(md.startsWith('*Généré par IA')).toBe(true);
+    expect(md).toContain('- G (chapitre 2)');
+    expect(md).toContain('1. **[ACID](https://www.youtube.com/watch?v=a)** — Le journal.\n   - Le journal [02:10](https://www.youtube.com/watch?v=a#t=130)');
   });
 
   it('la synthèse du cours lue : chapitres numérotés, leçons L1…', () => {

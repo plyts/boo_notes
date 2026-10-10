@@ -2335,8 +2335,17 @@ ul.sum-goals li {
   background: var(--bg);
 }
 
+.sum-foot {
+  flex-wrap: nowrap;
+}
+
 .sum-foot .spacer {
   flex: 1;
+}
+
+.sum-btn.icon-only {
+  width: 32px;
+  padding: 0;
 }
 
 .tab svg {

@@ -58,6 +58,9 @@ export interface PdfOptions {
   course?: boolean;
 }
 
+/** The course's summary, written first in its PDF (not one of its lessons). */
+export const SUMMARY_NOTE_ID = 'boo:course-summary';
+
 // --- Page geometry and style ----------------------------------------------------------------
 
 const A4: [number, number] = [595.28, 841.89];
@@ -576,7 +579,8 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
   l.gap(120);
   l.paragraph([{ text: 'Boo Notes', bold: true, color: ACCENT }], { size: 30, lead: 38 });
   l.paragraph([{ text: opts.title, bold: true }], { size: 18, lead: 26 });
-  const count = notes.length;
+  const lessons = notes.filter((x) => x.id !== SUMMARY_NOTE_ID);
+  const count = lessons.length;
   const passages = notes.reduce((n, x) => n + x.markdown.split('\n').filter((line) => PASSAGE_LINE.test(line)).length, 0);
   const captures = notes.reduce((n, x) => n + (x.markdown.match(/!\[[^\]\n]*\]\(assets\//g)?.length ?? 0), 0);
   const spoken = notes.filter((x) => x.transcript?.cues.length).length;
@@ -588,7 +592,8 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
         text: [
           new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(opts.date),
           plural(count, opts.course ? 'leçon' : 'note'),
-          ...(opts.course ? [plural(new Set(notes.map((x) => x.chapter ?? '')).size, 'chapitre')] : []),
+          ...(opts.course ? [plural(new Set(lessons.map((x) => x.chapter ?? '')).size, 'chapitre')] : []),
+          ...(lessons.length < notes.length ? ['résumé du cours'] : []),
           plural(captures, 'image'),
           plural(passages, 'passage'),
           ...(spoken ? [plural(spoken, 'transcription')] : []),

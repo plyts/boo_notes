@@ -24,6 +24,12 @@ const CUES = [
 
 type Req = { path: string; headers: IncomingMessage['headers']; body: string };
 
+/** Pictures of the real screens, on demand (SUMMARY_SHOTS=<folder>). */
+const SHOTS = process.env.SUMMARY_SHOTS ?? '';
+const shot = async (target: Page, name: string) => {
+  if (SHOTS) await target.screenshot({ path: `${SHOTS}/${name}.png` });
+};
+
 /** A free-tier service speaking the OpenAI API: its models, and replies drawn from what it is shown. */
 async function mockOpenAi(opts: { limitFirst?: boolean } = {}): Promise<{ base: string; requests: Req[]; close(): Promise<void> }> {
   const requests: Req[] = [];
@@ -116,9 +122,11 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     await expect(p.getByRole('heading', { name: 'Résumer cette leçon' })).toBeVisible();
     await expect(p.locator('.sum-ok')).toContainText('Transcription complète · 7 répliques');
     await expect(p.locator('.sum-provider')).toContainText('IA : Groq · llama-3.3-70b-versatile');
+    await shot(page, '0-avant');
     await p.getByRole('button', { name: 'Générer le résumé' }).click();
     // The free tier's limit reached once: waited out, said so.
     await expect(p.locator('.sum-step')).toContainText('Limite du palier gratuit atteinte : reprise dans 1 s');
+    await shot(page, '0-attente');
     await expect(p.getByRole('region', { name: 'Problématique' })).toContainText('comment obtenir la fiabilité d’une base de données sur de simples fichiers ?', { timeout: 15_000 });
     await expect(p.getByRole('region', { name: 'Objectifs' }).locator('li')).toHaveText([/Expliquer le rôle du journal de transactions\s*00:07/, /Relire une version antérieure \(time travel\)\s*00:23/]);
     await expect(p.getByRole('region', { name: 'Solution' })).toContainText('Un journal de transactions ordonné');
@@ -131,6 +139,7 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     await expect(plan.locator('.sum-lvl3 > .sum-node')).toContainText('Numérotés dans l’ordre');
     await expect(plan.locator('.sum-count')).toHaveText('3 parties · 3 points');
     await expect(p.locator('.sum-ai')).toHaveText('IA · à vérifier');
+    await shot(page, '1-lecon');
 
     // What was sent: the key, the whole transcript, the rules — in one request (it fits).
     const sent = chats(ai.requests);
@@ -155,6 +164,7 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     expect(md).toContain('> **Objectifs**\n> - Expliquer le rôle du journal de transactions [00:07]');
     expect(md).toContain('> **Plan**\n> 1. Les limites d’un data lake [00:00]\n>    1. Écritures concurrentes [00:00]\n> 2. Le journal de transactions [00:07]\n>    1. Un commit = un fichier JSON [00:15]');
     expect(md).toMatch(/\n\n\[00:\d\d\] Ma première note$/);
+    await shot(page, '2-note');
     await p.getByRole('tab', { name: 'Résumé' }).click();
     await p.getByRole('button', { name: 'Insérer dans la note' }).click();
     await expect.poll(async () => ((await storedNote(sw))?.markdown.match(/\[!summary\]/g) ?? []).length).toBe(1);
@@ -218,6 +228,7 @@ test('Résumé du cours : chaque leçon lue en entier, puis le cours d’après 
     await expect(p.getByRole('region', { name: 'Objectifs du cours' }).locator('li')).toHaveText([/Comprendre le lakehouse\s*ch\. 1/, /Fiabiliser les tables avec Delta Lake\s*ch\. 2/]);
     const plan = p.getByRole('region', { name: 'Plan du cours' });
     await expect(plan.locator('.sum-chapter-head b')).toHaveText(['1 · Lakehouse', '2 · Delta Lake']);
+    await shot(page, '3-cours-panneau');
     await expect(plan.locator('.sum-lessons li')).toHaveText([/Qu’est-ce qu’un lakehouse \?Synthèse de L1\./, /Les transactions ACIDSynthèse de L2\./, /OPTIMIZE et Z-ORDERpas de transcription/]);
     // Two lessons read in full (one request each, they fit), then the course with all its transcripts.
     const sent = chats(ai.requests).map((r) => JSON.parse(r.body) as { messages: Array<{ content: string }> });
@@ -246,6 +257,10 @@ test('Résumé du cours : chaque leçon lue en entier, puis le cours d’après 
     await expect(acid.locator('.sum-lvl1 .sum-title').first()).toHaveText('Les limites d’un data lake');
     await expect(acid.locator('a.sum-ts').last()).toHaveAttribute('href', 'https://www.youtube.com/watch?v=e2eTest0001#t=23');
     await expect(big.locator('.sum-hint').last()).toContainText('d’après toutes les transcriptions, lues ensemble');
+    if (SHOTS) {
+      await big.setViewportSize({ width: 1400, height: 1000 });
+      await big.screenshot({ path: `${SHOTS}/4-cours-page.png`, fullPage: true });
+    }
     // A lesson's transcript grows: « à mettre à jour », only it read again.
     await sw.evaluate(async (t) => chrome.storage.local.set({ 'transcript:youtube:lessonIntro1': t }), transcriptOf([{ start: 0, text: 'A lakehouse keeps files in object storage.' }, { start: 4, text: 'And adds warehouse features.' }, { start: 9, text: 'Like transactions.' }], 12));
     await expect(big.getByRole('button', { name: 'Mettre à jour (1)' })).toBeVisible();
@@ -253,6 +268,9 @@ test('Résumé du cours : chaque leçon lue en entier, puis le cours d’après 
     await expect(big.locator('.side .progress')).toHaveText('2 leçons résumées sur 3', { timeout: 15_000 });
     await expect(big.getByRole('button', { name: 'Régénérer' })).toBeVisible();
     expect(chats(ai.requests)).toHaveLength(5);
+    // The course's PDF opens with its summary (then its lessons with something in them: the empty one without a transcript is left out).
+    await big.getByRole('button', { name: 'PDF' }).click();
+    await expect(big.locator('#toast')).toContainText('PDF du cours « Databricks — Data Engineer » téléchargé : son résumé, 2 leçons, 2 transcriptions', { timeout: 20_000 });
   } finally {
     await ai.close();
   }
@@ -268,6 +286,10 @@ test('options › IA : une adresse compatible OpenAI vérifiée (ses modèles li
     await expect(options.locator('.provider .p-name')).toHaveText(['IA de Chrome', 'Groq', 'OpenRouter', 'Google Gemini', 'Mistral', 'Cerebras', 'Ollama (sur cet ordinateur)', 'Claude', 'Compatible OpenAI', 'Sans IA']);
     await options.getByText('OpenRouter', { exact: true }).click();
     await expect(options.locator('#qa-badge')).toHaveText('OpenRouter : ajoutez votre clé');
+    if (SHOTS) {
+      await options.setViewportSize({ width: 1200, height: 1400 });
+      await options.locator('#questions').screenshot({ path: `${SHOTS}/5-options-ia.png` });
+    }
     await expect(options.locator('#qa-key-link')).toHaveText('Créer une clé gratuite');
     await expect(options.locator('#qa-key-link')).toHaveAttribute('href', 'https://openrouter.ai/settings/keys');
     await expect(options.locator('#qa-terms')).toContainText('« :free »');

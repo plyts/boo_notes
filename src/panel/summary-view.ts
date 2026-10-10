@@ -461,7 +461,7 @@ export class SummaryView {
       });
       const copy = h('button', { type: 'button', class: 'sum-btn' }, icon('copy', 15), 'Copier');
       copy.addEventListener('click', () => void this.copy(lessonMarkdown(s).replace(/^> ?/gm, '')));
-      const again = h('button', { type: 'button', class: 'sum-btn ghost' }, icon('refresh', 15), 'Régénérer');
+      const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé', 'aria-label': 'Régénérer' }, icon('refresh', 15));
       again.addEventListener('click', () => void this.generateLesson());
       buttons.push(insert, copy, h('span', { class: 'spacer' }), again);
     }
@@ -473,7 +473,7 @@ export class SummaryView {
       const content = this.content;
       const copy = h('button', { type: 'button', class: 'sum-btn' }, icon('copy', 15), 'Copier');
       copy.addEventListener('click', () => void this.copy(courseText(s, content)));
-      const again = h('button', { type: 'button', class: 'sum-btn ghost' }, icon('refresh', 15), 'Régénérer');
+      const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé du cours', 'aria-label': 'Régénérer' }, icon('refresh', 15));
       again.addEventListener('click', () => void this.generateCourse());
       buttons.push(open, copy, h('span', { class: 'spacer' }), again);
     }

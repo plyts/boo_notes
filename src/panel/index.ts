@@ -66,6 +66,7 @@ import { answerQuestion } from './answers';
 import { ConnectPanel } from './connect';
 import { LayoutMenu } from './layout-menu';
 import { SummaryView } from './summary-view';
+import { EditorView } from '@codemirror/view';
 import { withSummary } from '../shared/summary';
 import { MiniView } from './mini';
 import { TILING_ENABLED, type TileId } from '../shared/tiling';
@@ -1062,7 +1063,8 @@ class PanelApp {
     while (a < doc.length && a < next.length && doc[a] === next[a]) a++;
     let b = 0;
     while (b < doc.length - a && b < next.length - a && doc[doc.length - 1 - b] === next[next.length - 1 - b]) b++;
-    view.dispatch({ changes: { from: a, to: doc.length - b, insert: next.slice(a, next.length - b) }, selection: { anchor: 0 }, scrollIntoView: true });
+    // The cursor stays where it was (the block shows as a block, not as its Markdown); the top of the note in view.
+    view.dispatch({ changes: { from: a, to: doc.length - b, insert: next.slice(a, next.length - b) }, effects: EditorView.scrollIntoView(0, { y: 'start' }) });
     this.setView('notes');
   }
 

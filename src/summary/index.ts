@@ -123,7 +123,7 @@ function renderActions(): void {
 }
 
 function partsList(nodes: readonly PlanNode[], url: string): HTMLElement {
-  const list = (items: readonly PlanNode[], depth: number): HTMLElement =>
+  const list = (items: readonly PlanNode[], depth: number, parent = ''): HTMLElement =>
     h(
       'ul',
       { class: 'sum-tree' },
@@ -135,11 +135,11 @@ function partsList(nodes: readonly PlanNode[], url: string): HTMLElement {
             'div',
             { class: 'sum-node' },
             h('span', { class: 'sum-fold' }),
-            h('span', { class: 'sum-num' }, depth === 2 ? String.fromCharCode(97 + i) : String(i + 1)),
+            h('span', { class: 'sum-num' }, depth === 0 ? String(i + 1) : `${parent}.${i + 1}`),
             h('span', { class: 'sum-title' }, n.title),
             n.at !== null && url ? h('a', { class: 'sum-ts', href: timestampUrl(url, n.at), target: '_blank', rel: 'noopener', title: `Ouvrir la leçon à ${formatTimecode(n.at)}` }, formatTimecode(n.at)) : h('span', {}),
           ),
-          depth < 1 && n.children.length ? list(n.children, depth + 1) : null,
+          depth < 1 && n.children.length ? list(n.children, depth + 1, String(i + 1)) : null,
         ),
       ),
     );

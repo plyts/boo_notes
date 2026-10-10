@@ -354,6 +354,7 @@ a.btn {
 }
 
 a.btn[hidden],
+.row[hidden],
 .rows[hidden] {
   display: none;
 }

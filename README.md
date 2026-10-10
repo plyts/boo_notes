@@ -26,14 +26,31 @@ tableau de votre page.
     le **texte du cours** (la page, un module dans ses cadres) et les **notes** déjà prises — partent
     à l’IA, et **seule sa réponse** s’écrit sous la question, compacte, suivie d’une ligne « ✦
     Réponse générée par IA — à vérifier » avec l’**instant cliquable** d’où elle vient. Rédigée par
-    l’**IA intégrée de Chrome** (Gemini Nano, sur l’appareil, gratuite — par défaut) ou par
-    **Claude** avec votre clé API (options › Questions) ; sans IA prête, une ligne dit comment
+    l’IA choisie dans **options › IA** (voir plus bas) ; sans IA prête, une ligne dit comment
     l’activer.
   - **Note libre** : une note personnelle, **pas associée à l’horodatage** de la vidéo ; tout y
     reste possible — texte, **citations** du cours, **captures**, images, liens, réflexions.
   - **Vidéo, notes et cours ne se bloquent pas** : la vidéo continue pendant qu’on écrit, qu’on
     cite du texte de la page (bulle « Citer » ou `Alt+Shift+T` sur une sélection, même à côté d’une
     vidéo), qu’on capture ou qu’une réponse est cherchée.
+- **Résumé du cours** (onglet **Résumé** du panneau) : l’IA lit **toute la transcription** et en
+  tire la **problématique**, les **objectifs**, la **solution** et le **plan du cours hiérarchisé**
+  (parties › points › détails), chaque idée avec les **instants cliquables** d’où elle vient (un
+  instant cité qui n’existe pas dans la transcription est écarté) ; la partie en cours de lecture
+  est surlignée. Une longue vidéo est lue **par parties** (chacune en entier), puis réunie.
+  « **Insérer dans la note** » l’écrit en tête de la note (bloc repliable `> [!summary]`, qui part
+  avec elle vers Notion, l’app Desktop, le PDF) ; « Copier », « Régénérer » ; « à mettre à jour »
+  quand la transcription a grandi. **Tout le cours** : chaque leçon rangée dans le cours est lue en
+  entier, puis le cours entier — d’après **toutes ses transcriptions lues ensemble** quand elles
+  tiennent dans une requête (Gemini, Claude, OpenRouter…), sinon d’après les résumés des leçons ;
+  sa **page en grand** (chapitres › leçons › parties, chaque instant ouvre la leçon à ce moment) ;
+  le **PDF du cours** commence par ce résumé.
+- **IA au choix, plusieurs gratuites** (options › IA) : l’**IA de Chrome** (sur l’appareil), les
+  paliers gratuits de **Groq**, **OpenRouter** (modèles « :free »), **Google Gemini** (AI Studio),
+  **Mistral** et **Cerebras** avec une clé gratuite, **Ollama** sur votre ordinateur, **Claude**
+  (payant), ou toute adresse **compatible OpenAI** (LM Studio, DeepSeek, GitHub Models…). Chaque
+  clé est vérifiée et ses modèles listés ; la limite d’un palier gratuit atteinte, Boo Notes attend
+  ce que le service indique et reprend.
 - **Transcription** ([docs/TRANSCRIPTION.md](docs/TRANSCRIPTION.md)) : pendant la lecture, les
   **sous-titres horodatés** sont recopiés en arrière-plan dans une transcription à part (onglet
   **Transcription**), **traduits** sur l’appareil ou à la main (anglais → français, français →
@@ -103,6 +120,13 @@ tableau de votre page.
 | Mini : la réplique en cours et sa traduction, sur la vidéo | Plein écran partagé : la vidéo entière, les notes à côté |
 | --- | --- |
 | ![Mini (paroles)](docs/screenshots/mini.png) | ![Plein écran partagé](docs/screenshots/fullscreen-split.png) |
+
+**Résumé** — d’après toute la transcription : problématique, objectifs, solution, plan hiérarchisé
+(instants cliquables) ; et le cours entier, en grand :
+
+| Onglet Résumé d’une leçon | Résumé du cours (page en grand) |
+| --- | --- |
+| ![Onglet Résumé](docs/screenshots/panel-summary.png) | ![Résumé du cours](docs/screenshots/course-summary.png) |
 
 **Mode lecture** — un article : le passage cité est surligné dans la page et relié à sa note ;
 la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie une fiche.
@@ -252,6 +276,7 @@ elle est connectée.
 | **Mini (paroles)** | Widget translucide (verre dépoli, opacité réglable) : réplique en cours, traduction, voisines ; épingle = fenêtre **Document Picture-in-Picture** toujours au-dessus ; ⤢ / double-clic = panneau complet, prêt à écrire. |
 | **Écran partagé** | Ancré et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à côté des notes, quel que soit leur bord — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. En plein écran : 70 / 30 par défaut, séparateur à tirer (double-clic : 70 / 30). |
 | **Côte à côte (fenêtres)** | *Désactivé (`TILING_ENABLED = false`).* La fenêtre de la vidéo et celle des notes se partagent la zone de travail de l’écran (`screen.availLeft/Top/Width/Height`), frontière commune suivie par `chrome.windows.onBoundsChanged`, état d’avant rendu à la sortie. |
+| **Résumé** | Onglet du panneau : cartes Problématique (rouge) · Objectifs (bleu) · Solution (vert), plan en arbre repliable (violet) dont la partie en cours est surlignée ; états avant / pendant (étapes, plan qui grandit, attente d’un palier gratuit, « Arrêter ») / transcription partielle / à mettre à jour ; page du cours en grand (leçons et leur état sur le côté). |
 | **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
@@ -329,7 +354,13 @@ au survol seulement, son menu à la souris et au clavier ; question numérotée 
 l’ordre de la note, réponse compacte de l’IA avec son instant cliquable — IA de Chrome simulée,
 sans IA prête (une ligne), puis l’API Claude simulée — clé, modèle, transcription et texte de la page envoyés ; note libre
 sans horodatage où vont une capture et une citation de la page ; sortie d’un bloc par `Entrée` ; la
-vidéo qui continue de jouer ; section Questions des options).
+vidéo qui continue de jouer ; section IA des options), et le **résumé** (un service compatible
+OpenAI simulé, palier gratuit : sa limite attendue, toute la transcription envoyée, problématique,
+objectifs, solution, plan hiérarchisé, instant inventé écarté, instant cliqué, insertion en tête de
+note puis remplacement ; le cours entier — chaque leçon lue, toutes les transcriptions ensemble,
+leçon sans transcription signalée, page en grand, mise à jour de la seule leçon changée, PDF qui
+commence par le résumé ; options › IA : les paliers gratuits et leur lien « Créer une clé
+gratuite », une adresse compatible OpenAI vérifiée, ses modèles listés).
 
 ```
 src/
@@ -398,12 +429,17 @@ docs/         architecture, protocole, design, transcription, questions, Notion
 - **Notion depuis l’extension** : l’accès donné par « Connecter Notion » (ou le secret de
   l’intégration) est conservé dans le stockage local de l’extension ; le bouton demande une
   intégration publique et le serveur d’échange déployés une fois (voir [docs/NOTION.md](docs/NOTION.md)).
-- **Réponses aux questions** : l’IA intégrée de Chrome demande Chrome 138+ sur un ordinateur assez
-  puissant et le téléchargement de son modèle ; elle écrit en anglais (sa réponse est traduite en
-  français par le traducteur de Chrome). Claude demande une clé API Anthropic (la clé reste dans le
-  stockage local ; la question et les extraits du cours partent directement à l’API Claude). Sans
-  l’une ni l’autre, la question reste sans réponse (une ligne dit comment activer l’IA). Sans
-  transcription (vidéo sans sous-titres), la réponse s’appuie sur le texte de la page et vos notes.
+- **Réponses aux questions et résumés** : l’IA intégrée de Chrome demande Chrome 138+ sur un
+  ordinateur assez puissant et le téléchargement de son modèle ; elle écrit en anglais (traduit en
+  français par le traducteur de Chrome) et lit peu à la fois (une longue vidéo : de nombreuses
+  parties, plus lent). Les paliers gratuits (Groq, OpenRouter, Gemini, Mistral, Cerebras) demandent
+  une clé gratuite ; leurs limites (requêtes par minute, par jour — OpenRouter : 50 par jour sans
+  crédit) ralentissent le résumé d’un long cours, que Boo Notes attend sans s’arrêter. Les clés
+  restent dans le stockage local ; le texte du cours part directement au service choisi. Ollama
+  doit autoriser l’extension (`OLLAMA_ORIGINS=chrome-extension://*`). Le résumé demande une
+  transcription (sous-titres) ; une transcription captée en partie donne un résumé partiel (dit
+  avant de le lancer). Les modèles gratuits se trompent parfois : le résumé est marqué « IA · à
+  vérifier ».
 - **Lecteurs intégrés** (iframes) : pris en charge dès que l’extension peut lire l’hôte du lecteur
   (YouTube, et tout hôte autorisé en un clic depuis le panneau). Une iframe dans une iframe est
   pilotée, mais le HUD ne peut pas s’y superposer. Les lecteurs `new Audio()` sont vus dès leur

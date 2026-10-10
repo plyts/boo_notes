@@ -1,7 +1,8 @@
 import { asciiFileName, safeFileName } from '../shared/encoding';
 import { normalizeTitle } from '../shared/markdown';
 import { PDF_DOCUMENT, PDF_JOB, picturePaths, type PdfJob, type PdfJobReply } from '../shared/pdf-job';
-import type { PdfNote, PdfTranscript } from '../shared/pdf-notes';
+import { SUMMARY_NOTE_ID, type PdfNote, type PdfTranscript } from '../shared/pdf-notes';
+import { courseMarkdown, courseSummaryKey, summaryKey, type CourseSummary, type LessonSummary } from '../shared/summary';
 import { isTimeKind, noteSlug, PLATFORM_LABELS } from '../shared/platforms';
 import type { NoteStore } from '../shared/store';
 import { TranscriptStore } from '../shared/transcript-store';
@@ -74,6 +75,27 @@ async function collect(store: NoteStore, ids: string[] | null, opts: { course?: 
   return out.map(({ course: _course, chapterName: _chapter, createdAt: _at, ...note }) => note);
 }
 
+/** The course's summary as the first « note » of its PDF, when it has one. */
+async function courseSummaryOf(course: string): Promise<(PdfNote & { timed: boolean }) | null> {
+  const key = courseSummaryKey(normalizeTitle(course));
+  const s = (await chrome.storage.local.get(key))[key] as CourseSummary | undefined;
+  if (!s) return null;
+  const ids = s.chapters.flatMap((c) => c.lessons.map((l) => l.noteId));
+  const stored = ids.length ? await chrome.storage.local.get(ids.map(summaryKey)) : {};
+  const plans = new Map(ids.flatMap((id) => (stored[summaryKey(id)] ? [[id, stored[summaryKey(id)] as LessonSummary] as const] : [])));
+  return {
+    id: SUMMARY_NOTE_ID,
+    title: `Résumé du cours — ${s.course}`,
+    url: '',
+    source: 'Boo Notes · résumé par IA, à vérifier',
+    place: `${s.course} › Résumé du cours`,
+    chapter: 'Résumé du cours',
+    updatedAt: s.createdAt,
+    markdown: courseMarkdown(s, plans, { heading: false }),
+    timed: false,
+  };
+}
+
 let opening: Promise<void> | null = null;
 let jobs = 0;
 
@@ -116,6 +138,9 @@ export async function downloadPdf(store: NoteStore, ids: string[] | null, now = 
   const one = Boolean(ids && ids.length === 1);
   const notes = await collect(store, ids, { course: opts.course, transcripts: one || Boolean(opts.course) });
   if (!notes.length) throw new Error(opts.course ? `Le cours « ${opts.course} » n’a pas encore de notes` : ids ? 'La note est vide' : 'Aucune note à exporter');
+  // A course with its summary: written first (its problem, goals, solution and plan, each moment a link to its lesson).
+  const summary = opts.course ? await courseSummaryOf(opts.course) : null;
+  if (summary) notes.unshift(summary);
   const title = opts.course ?? (one ? notes[0].title : 'Toutes les notes');
   const pictures: Record<string, string> = {};
   for (const path of new Set(notes.flatMap((n) => picturePaths(n.markdown)))) {
@@ -140,7 +165,8 @@ export async function downloadPdf(store: NoteStore, ids: string[] | null, now = 
   }
   if (opts.course) {
     const spoken = notes.filter((n) => n.transcript).length;
-    return `PDF du cours « ${opts.course} » téléchargé : ${notes.length} leçon${notes.length > 1 ? 's' : ''}${spoken ? `, ${spoken} transcription${spoken > 1 ? 's' : ''}` : ''} — dans « Boo Notes »`;
+    const count = notes.length - (summary ? 1 : 0);
+    return `PDF du cours « ${opts.course} » téléchargé : ${summary ? 'son résumé, ' : ''}${count} leçon${count > 1 ? 's' : ''}${spoken ? `, ${spoken} transcription${spoken > 1 ? 's' : ''}` : ''} — dans « Boo Notes »`;
   }
   const pages = notes.length > 1 ? `${notes.length} notes` : `« ${title} »`;
   return `PDF téléchargé : ${pages} dans « Boo Notes »`;
