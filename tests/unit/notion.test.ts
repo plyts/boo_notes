@@ -3,6 +3,11 @@ import { ExtensionNotion, noteToSyncItem, pickVaultParent } from '../../src/back
 import type { NotionPlace, NotionStatus } from '../../src/shared/messages';
 import { NoteStore } from '../../src/shared/store';
 import { TranscriptStore } from '../../src/shared/transcript-store';
+import { normalizeTitle } from '../../src/shared/markdown';
+import { lessonSummaryBlocks } from '../../src/shared/notion/engine';
+import type { BlockSpec } from '../../src/shared/notion/blocks';
+import { basisOf, courseSummaryKey, lessonMarkdown, summaryKey, type CourseSummary, type LessonSummary } from '../../src/shared/summary';
+import type { Transcript } from '../../src/shared/transcript';
 import { PARENT_PAGE_ID, startMockNotion, type MockNotion } from '../../tools/mock-notion/server.mjs';
 import { MemoryArea } from './helpers';
 
@@ -316,5 +321,168 @@ describe('« Connecter Notion » : où faire le coffre, sans rien demander', () 
     expect(pickVaultParent([page('a', 'Journal'), page('b', 'Recettes')])?.id).toBe('a');
     expect(pickVaultParent([{ id: 'db', kind: 'database', title: 'Boo Notes — Mes notes' }])).toBeNull();
     expect(pickVaultParent([])).toBeNull();
+  });
+});
+
+describe('Le coffre Notion : résumés IA, notes et transcription, chacun à sa place', () => {
+  const id = 'youtube:abcdefghijk';
+  const cues = [
+    { id: 'c0', start: 0, end: 4, text: 'Welcome to Delta Lake transactions.' },
+    { id: 'c48', start: 48, end: 52, text: 'A failed job leaves half-written files.' },
+    { id: 'c130', start: 130, end: 134, text: 'The transaction log records every commit.' },
+  ];
+  const info = { lang: 'en', label: 'Sous-titres du lecteur · anglais', source: 'track' as const, complete: true, duration: 300 };
+  const summaryOf = (basis: Transcript): LessonSummary => ({
+    noteId: id,
+    title: video.title,
+    problem: { text: 'Deux jobs qui écrivent en même temps corrompent une table : comment écrire sans risque ?', at: [48] },
+    goals: [{ text: 'Expliquer le journal de transactions', at: [130] }],
+    solution: { text: 'Un journal ordonné de commits JSON.', at: [130] },
+    plan: [
+      {
+        title: 'Les limites d’un data lake',
+        at: 0,
+        intro: 'Pourquoi de simples fichiers ne suffisent pas.',
+        children: [
+          { title: 'Pas d’atomicité', at: 48, children: [], detail: 'Un job qui échoue laisse des fichiers à moitié écrits.', kind: 'key' },
+          { title: 'Fichiers modifiés à la main', at: 48, children: [], detail: 'Réécrire un Parquet casse les lectures.', kind: 'warning' },
+        ],
+      },
+      {
+        title: 'Le journal de transactions',
+        at: 130,
+        intro: 'Un registre ordonné de toutes les écritures.',
+        children: [
+          { title: 'Un commit = un fichier JSON', at: 130, children: [], detail: 'Chaque écriture ajoute un fichier numéroté.', kind: 'key' },
+          { title: 'Relire l’historique', at: 130, children: [], detail: 'Chaque version reste lisible.', kind: 'example', code: 'DESCRIBE HISTORY ventes;' },
+        ],
+      },
+    ],
+    basis: basisOf(basis),
+    provider: 'groq',
+    model: 'llama-3.3-70b-versatile',
+    createdAt: Date.UTC(2026, 9, 9),
+    parts: 1,
+  });
+  const props = async () => mock.state.pages.get((await notion.link(id))!.pageId.replace(/-/g, ''))!.properties as Record<string, { select?: { name: string } | null }>;
+
+  it('la page d’une leçon : ✨ le résumé IA, 📝 mes notes, 🎙️ la transcription — chacune sous son titre, sans doublon', async () => {
+    const t = await new TranscriptStore(area).put(id, info, cues, true);
+    const summary = summaryOf(t);
+    // The summary inserted in the note too: shown once, in its section.
+    await store.saveNote(id, video, `${lessonMarkdown(summary)}\n\n[00:12] Ma note sur le journal`);
+    await area.set({ [summaryKey(id)]: summary });
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    await notion.syncNow(id);
+
+    const content = mock.pageContent((await notion.link(id))!.pageId)!;
+    const outline = content.map((b) => `${b.type}: ${b.text}`);
+    expect(outline.slice(0, 9)).toEqual([
+      'video: ',
+      'heading_2: ✨ Résumé IA',
+      'paragraph: Généré par IA (Groq · llama-3.3-70b-versatile) d’après la transcription, le 9 octobre 2026 — à vérifier.',
+      'callout: Problématique — Deux jobs qui écrivent en même temps corrompent une table : comment écrire sans risque ? 00:48',
+      'callout: Objectifs',
+      'callout: Solution — Un journal ordonné de commits JSON. 02:10',
+      'heading_3: 🗺️ Plan du cours',
+      'numbered_list_item: Les limites d’un data lake 00:00',
+      'numbered_list_item: Le journal de transactions 02:10',
+    ]);
+    expect(content[4].children!.map((b) => b.text)).toEqual(['Expliquer le journal de transactions 02:10']);
+    // Each part: its sentence, its points — the essential one a callout, the others marked, a command in code.
+    expect(content[8].children!.map((b) => `${b.type}: ${b.text}`)).toEqual([
+      'paragraph: Un registre ordonné de toutes les écritures.',
+      'callout: Essentiel — Un commit = un fichier JSON : Chaque écriture ajoute un fichier numéroté. 02:10',
+      'bulleted_list_item: 💡 Exemple — Relire l’historique : Chaque version reste lisible. 02:10',
+      'code: DESCRIBE HISTORY ventes;',
+    ]);
+    expect(content[7].children![2].text).toBe('⚠️ Attention — Fichiers modifiés à la main : Réécrire un Parquet casse les lectures. 00:48');
+    // Then the notes (without the summary block), then the transcript.
+    expect(outline.slice(9)).toEqual(['divider: ', 'heading_2: 📝 Mes notes', 'paragraph: 00:12 Ma note sur le journal', 'divider: ', 'heading_2: 🎙️ Transcription', expect.stringMatching(/^paragraph: /), expect.stringMatching(/^heading_3: 00:00 – /)]);
+    expect(JSON.stringify(content)).not.toContain('Résumé de la leçon');
+    // Every moment a link to the video there.
+    const links = JSON.stringify([...mock.state.blocks.values()].map((b) => b[b.type as string]));
+    expect(links).toContain('https://www.youtube.com/watch?v=abcdefghijk#t=130');
+    // The table: « Résumé IA » and « Transcription » columns (filtered, every summary of the vault).
+    expect((await props())['Résumé IA']?.select?.name).toBe('✨ À jour');
+    expect((await props()).Transcription?.select?.name).toBe('Complète');
+
+    // The transcript grows: the summary said « à mettre à jour », there and in the table.
+    await new TranscriptStore(area).put(id, info, [{ id: 'c200', start: 200, end: 204, text: 'Time travel reads older versions.' }], false);
+    await notion.syncNow(id);
+    expect((await props())['Résumé IA']?.select?.name).toBe('↻ À mettre à jour');
+    expect(JSON.stringify(mock.pageContent((await notion.link(id))!.pageId))).toContain('↻ La transcription a changé depuis');
+  });
+
+  it('une note sans résumé garde sa page d’avant ; le résumé fait ensuite est écrit à la synchro suivante', async () => {
+    await store.saveNote(id, video, '[00:12] Ma note');
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    await notion.syncNow(id);
+    expect(mock.pageContent((await notion.link(id))!.pageId)!.map((b) => b.type)).toEqual(['video', 'paragraph']);
+    expect((await props())['Résumé IA']?.select ?? null).toBeNull();
+    const t = await new TranscriptStore(area).put(id, info, cues, true);
+    await area.set({ [summaryKey(id)]: summaryOf(t) });
+    await notion.enqueue(id);
+    await notion.flush();
+    expect(mock.pageContent((await notion.link(id))!.pageId)!.map((b) => b.text)).toContain('✨ Résumé IA');
+  });
+
+  it('la page du cours s’ouvre sur son résumé ; chaque chapitre et chaque leçon avec sa phrase', async () => {
+    const lesson = (n: number) => ({ platform: 'web' as const, url: `https://academy.test/delta/${n}`, title: `Leçon ${n}`, kind: 'video' as const });
+    const idOf = (n: number) => `web:academy.test/delta/${n}`;
+    await notion.connect('secret_test', PARENT_PAGE_ID);
+    for (const n of [1, 2]) {
+      await store.saveNote(idOf(n), lesson(n), `idée ${n}`);
+      await store.placeNote(idOf(n), lesson(n), { course: 'Databricks', chapter: n === 1 ? 'Lakehouse' : 'Delta Lake' });
+      await notion.syncNow(idOf(n));
+    }
+    const ref = (n: number, chapter: string) => ({ noteId: idOf(n), title: `Leçon ${n}`, url: lesson(n).url, chapter, duration: 60, synthesis: `Ce que dit la leçon ${n}.`, state: 'done' as const });
+    const course: CourseSummary = {
+      course: 'Databricks',
+      problem: 'Comment construire des pipelines fiables ?',
+      goals: [{ text: 'Comprendre le lakehouse', chapter: 1 }],
+      solution: 'Un lakehouse avec Delta Lake.',
+      chapters: [
+        { title: 'Lakehouse', synthesis: 'Pourquoi un lakehouse.', lessons: [ref(1, 'Lakehouse')] },
+        { title: 'Delta Lake', synthesis: 'Des fichiers aussi sûrs qu’une base.', lessons: [ref(2, 'Delta Lake')] },
+      ],
+      read: { [idOf(1)]: 'a', [idOf(2)]: 'b' },
+      full: true,
+      provider: 'groq',
+      model: 'llama-3.3-70b-versatile',
+      createdAt: Date.UTC(2026, 9, 9),
+    };
+    await area.set({ [courseSummaryKey(normalizeTitle('Databricks'))]: course });
+    await notion.courseSummaryChanged('Databricks');
+    await notion.flush();
+    const page = [...mock.state.pages.values()].find((p) => mock.titleOf(p.id) === 'Databricks')!;
+    const content = mock.pageContent(page.id)!;
+    expect(content.map((b) => `${b.type}: ${b.text}`)).toEqual([
+      'callout: 2 leçons · 2 chapitres · 0 terminée · 0 % du cours',
+      'heading_2: ✨ Résumé du cours',
+      'paragraph: Généré par IA d’après 2 transcriptions lues ensemble, le 9 octobre 2026 — à vérifier. Le plan détaillé de chaque leçon est dans sa page.',
+      'callout: Problématique du cours — Comment construire des pipelines fiables ?',
+      'callout: Objectifs du cours',
+      'callout: Solution — la démarche : Un lakehouse avec Delta Lake.',
+      'divider: ',
+      'heading_2: Lakehouse',
+      'paragraph: Pourquoi un lakehouse.',
+      'to_do: @Leçon 1  À commencer\nCe que dit la leçon 1.',
+      'heading_2: Delta Lake',
+      'paragraph: Des fichiers aussi sûrs qu’une base.',
+      'to_do: @Leçon 2  À commencer\nCe que dit la leçon 2.',
+    ]);
+    expect(content[4].children!.map((b) => b.text)).toEqual(['Comprendre le lakehouse  · chapitre 1']);
+    // Unchanged: not written again.
+    const writes = mock.state.requests.length;
+    await notion.courseSummaryChanged('Databricks');
+    await notion.flush();
+    expect(mock.state.requests.slice(writes).filter((r) => r.method !== 'GET')).toHaveLength(0);
+  });
+
+  it('jamais plus de deux niveaux de blocs par requête (la limite de Notion)', () => {
+    const depth = (b: BlockSpec): number => 1 + Math.max(0, ...('children' in b && b.children ? b.children.map(depth) : []));
+    const t = { ...info, target: 'fr', covered: [[0, 300]], cues, rev: 1 } as unknown as Transcript;
+    for (const b of lessonSummaryBlocks(summaryOf(t), () => null)) expect(depth(b)).toBeLessThanOrEqual(2);
   });
 });

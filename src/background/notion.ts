@@ -3,6 +3,7 @@ import type { NotionPlace, NotionStatus } from '../shared/messages';
 import { explainNotionError, NotionClient, NotionError, type NotionClientOptions } from '../shared/notion/client';
 import { DATABASE_TITLE, DEFAULT_VAULT_NAME, NotionEngine, type CourseEntry, type CoursePageLink, type NotionLink, type NotionSource, type NotionVault, type SyncItem } from '../shared/notion/engine';
 import { positionLabel, progressRatio, studyStatus } from '../shared/study';
+import { courseSummaryKey, summaryKey, type CourseSummary, type LessonSummary } from '../shared/summary';
 import type { MediaProgress, Note, NoteStore, StorageAreaLike } from '../shared/store';
 import { TranscriptStore } from '../shared/transcript-store';
 
@@ -201,7 +202,8 @@ export class ExtensionNotion {
         const note = await store.getNote(id);
         if (!note) return null;
         const transcript = await new TranscriptStore(area).get(id);
-        return { ...noteToSyncItem(note, await store.getProgress(id)), transcript };
+        const summary = ((await area.get(summaryKey(id)))[summaryKey(id)] as LessonSummary | undefined) ?? null;
+        return { ...noteToSyncItem(note, await store.getProgress(id)), transcript, summary };
       },
       getLink: (id) => this.link(id),
       setLink: async (id, link) => {
@@ -220,6 +222,10 @@ export class ExtensionNotion {
       setCoursePage: async (key, link) => {
         if (link) await area.set({ [coursePageKey(key)]: link });
         else await area.remove(coursePageKey(key));
+      },
+      courseSummary: async (course) => {
+        const key = courseSummaryKey(normalizeTitle(course));
+        return ((await area.get(key))[key] as CourseSummary | undefined) ?? null;
       },
     };
   }
@@ -515,6 +521,13 @@ export class ExtensionNotion {
     await this.emit();
   }
 
+  /** A course's summary was made (or made again): its page in the vault is written again. */
+  async courseSummaryChanged(course: string): Promise<void> {
+    if (!(await this.isConfigured())) return;
+    this.engine.markCourse(course);
+    this.schedule();
+  }
+
   /** A note deleted from this browser: nothing more to write for it (its page stays in Notion). */
   async forget(noteId: string): Promise<void> {
     await this.exclusive(async () => {
@@ -614,7 +627,19 @@ export class ExtensionNotion {
     const res = await this.opts.area.get(PENDING_KEY);
     const pending = { ...((res[PENDING_KEY] as Pending | undefined) ?? {}) };
     const ids = Object.keys(pending);
-    if (!ids.length) return;
+    if (!ids.length) {
+      // Only a course's page to write again (its summary changed).
+      if (!this.engine.hasDirtyCourses() || this.opts.desktopHandlesNotion()) return;
+      this.syncing = true;
+      await this.emit();
+      try {
+        await this.syncCourses();
+      } finally {
+        this.syncing = false;
+        await this.emit();
+      }
+      return;
+    }
     if (this.opts.desktopHandlesNotion()) {
       // The app received the notes and writes them itself.
       await this.exclusive(() => this.opts.area.remove(PENDING_KEY));

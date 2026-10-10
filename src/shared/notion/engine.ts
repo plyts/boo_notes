@@ -1,7 +1,10 @@
+import { providerLabel, type AiProviderId } from '../ai-providers';
 import { normalizeTitle } from '../markdown';
 import { KIND_LABELS, PLATFORM_LABELS, type MediaKind, type Platform } from '../platforms';
 import { STATUS_LABELS, type StudyStatus } from '../study';
 import { timestampUrl } from '../platforms';
+import { coverage, isStale, POINT_LABELS, withoutSummary, type CourseSummary, type LessonSummary, type PlanNode } from '../summary';
+import { formatTimecode } from '../time';
 import { TRANSCRIPT_LINE, type Transcript } from '../transcript';
 import { blockCount, hashBlock, markdownToBlocks, notionPageUrl, plainRichText, safeUrl, toNotion, transcriptBlocks, type BlockSpec, type Json, type RichText } from './blocks';
 import { explainNotionError, NotionClient, NotionError, parseNotionId, type NotionBlock, type NotionClientOptions, type NotionPage } from './client';
@@ -137,6 +140,8 @@ export interface SyncItem {
   chapter?: string | null;
   /** Subtitles of the media: a « Transcription » section ends the page. */
   transcript?: Transcript | null;
+  /** Its AI summary: a « Résumé IA » section opens the page (undefined: not known on this device). */
+  summary?: LessonSummary | null;
 }
 
 /** Where notes and their Notion mapping live (desktop library, extension storage). */
@@ -153,6 +158,8 @@ export interface NotionSource {
   courseEntries?(course: string | null): Promise<CourseEntry[]>;
   getCoursePage?(key: string): Promise<CoursePageLink | undefined>;
   setCoursePage?(key: string, link: CoursePageLink | undefined): Promise<void>;
+  /** The course's AI summary (null: none): its page opens with it. */
+  courseSummary?(course: string): Promise<CourseSummary | null>;
 }
 
 export interface EngineConfig {
@@ -208,6 +215,11 @@ export const LINKS_PROPERTY = 'Liens';
 export const COURSE_PROPERTY = COURSE_PROPERTY_NAME;
 export const CHAPTER_PROPERTY = CHAPTER_PROPERTY_NAME;
 export const SOURCES_PROPERTY = 'Supports';
+/** Whether the note has its AI summary (and whether it is still up to date): filtered, every summary of the vault. */
+export const SUMMARY_PROPERTY = 'Résumé IA';
+export const TRANSCRIPT_PROPERTY = 'Transcription';
+export const SUMMARY_STATES = { fresh: '✨ À jour', stale: '↻ À mettre à jour' } as const;
+export const TRANSCRIPT_STATES = { full: 'Complète', partial: 'Partielle' } as const;
 export const BACKLINKS_PROPERTY = 'Liée depuis';
 export const ID_PROPERTY = ID_PROPERTY_NAME;
 
@@ -248,6 +260,22 @@ export const DATABASE_PROPERTIES: Json = {
     },
   },
   Source: { url: {} },
+  [SUMMARY_PROPERTY]: {
+    select: {
+      options: [
+        { name: SUMMARY_STATES.fresh, color: 'green' },
+        { name: SUMMARY_STATES.stale, color: 'orange' },
+      ],
+    },
+  },
+  [TRANSCRIPT_PROPERTY]: {
+    select: {
+      options: [
+        { name: TRANSCRIPT_STATES.full, color: 'green' },
+        { name: TRANSCRIPT_STATES.partial, color: 'yellow' },
+      ],
+    },
+  },
   'Dernière activité': { date: {} },
   [ID_PROPERTY_NAME]: { rich_text: {} },
 };
@@ -318,6 +346,13 @@ function allProperties(item: SyncItem, links?: string[]): Json {
   if (item.sources) {
     props[SOURCES_PROPERTY] = { rich_text: plainRichText(item.sources.map((s) => `${KIND_LABELS[s.kind]} · ${s.title}`).join('\n')) };
   }
+  if (item.summary !== undefined) {
+    props[SUMMARY_PROPERTY] = { select: item.summary ? { name: isStale(item.summary, item.transcript ?? null) ? SUMMARY_STATES.stale : SUMMARY_STATES.fresh } : null };
+  }
+  if (item.transcript !== undefined) {
+    const state = coverage(item.transcript ?? null).state;
+    props[TRANSCRIPT_PROPERTY] = { select: state === 'none' ? null : { name: TRANSCRIPT_STATES[state] } };
+  }
   return props;
 }
 
@@ -352,11 +387,105 @@ function vaultIntro(): BlockSpec[] {
       rich: [
         ...plainRichText('Vos notes de cours, au même endroit.', { bold: true }),
         ...plainRichText(
-          ' Chaque cours a sa page ci-dessous, ses leçons rangées par chapitre ; chaque note rouvre la vidéo ou la page à l’instant noté. Tout arrive d’ici-même depuis Boo Notes : prenez vos notes, rangez-les dans un cours.',
+          ' Chaque cours a sa page ci-dessous : ✨ son résumé par IA, puis ses leçons par chapitre. Chaque leçon a la sienne, en trois parties : ✨ le résumé IA (problématique, objectifs, solution, plan détaillé), 📝 vos notes, 🎙️ la transcription — chaque instant rouvre la vidéo. Le tableau « Toutes les notes » les liste toutes : sa colonne « Résumé IA » retrouve chaque résumé. Tout arrive d’ici-même depuis Boo Notes.',
         ),
       ],
     },
   ];
+}
+
+// --- AI summaries -------------------------------------------------------------------------------
+
+const dateOf = (at: number) => new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(at);
+
+/** A moment, as the transcript shows it: a small code chip, a link to the video there. */
+function moment(seconds: number, timeUrl: (s: number) => string | null): RichText[] {
+  return [...plainRichText(' '), ...plainRichText(formatTimecode(seconds), { code: true }, safeUrl(timeUrl(seconds)))];
+}
+
+/** A point of a part: the essential one a yellow callout; a term, an example, a trap marked; its command in code under it. */
+function pointBlocks(n: PlanNode, timeUrl: (s: number) => string | null): BlockSpec[] {
+  const when = n.at !== null ? moment(n.at, timeUrl) : [];
+  if (!n.detail) return [{ type: 'bulleted_list_item', rich: [...plainRichText(n.title), ...when] }, ...n.children.flatMap((c) => pointBlocks(c, timeUrl))];
+  const kind = n.kind ?? 'point';
+  const label = kind === 'point' ? null : POINT_LABELS[kind];
+  const rich = [...plainRichText(label ? `${label.label} — ${n.title} : ` : `${n.title} : `, { bold: true }), ...plainRichText(n.detail), ...when];
+  const out: BlockSpec[] =
+    kind === 'key' ? [{ type: 'callout', emoji: '⭐', color: 'yellow_background', rich }] : [{ type: 'bulleted_list_item', rich: label ? [...plainRichText(`${label.mark} `), ...rich] : rich }];
+  if (n.code) out.push({ type: 'code', text: n.code, language: 'plain text' });
+  return out;
+}
+
+/**
+ * The « ✨ Résumé IA » section of a lesson's page: who wrote it and when;
+ * its problem, goals and solution in coloured callouts; then its plan, each
+ * part with its sentence and its points — every moment a link to the video.
+ */
+export function lessonSummaryBlocks(s: LessonSummary, timeUrl: (seconds: number) => string | null, opts: { stale?: boolean } = {}): BlockSpec[] {
+  const by = `${providerLabel(s.provider as AiProviderId) || s.provider}${s.model ? ` · ${s.model}` : ''}`;
+  const out: BlockSpec[] = [
+    { type: 'heading_2', rich: plainRichText('✨ Résumé IA') },
+    {
+      type: 'paragraph',
+      color: 'gray',
+      rich: [
+        ...plainRichText(`Généré par IA (${by}) d’après la transcription, le ${dateOf(s.createdAt)} — à vérifier.`, { italic: true }),
+        ...(opts.stale ? plainRichText(' ↻ La transcription a changé depuis : régénérez le résumé dans Boo Notes.', { italic: true, bold: true }) : []),
+      ],
+    },
+  ];
+  if (s.problem.text) out.push({ type: 'callout', emoji: '🎯', color: 'red_background', rich: [...plainRichText('Problématique — ', { bold: true }), ...plainRichText(s.problem.text), ...s.problem.at.slice(0, 1).flatMap((t) => moment(t, timeUrl))] });
+  if (s.goals.length) {
+    out.push({
+      type: 'callout',
+      emoji: '🚩',
+      color: 'blue_background',
+      rich: plainRichText('Objectifs', { bold: true }),
+      children: s.goals.map((g) => ({ type: 'bulleted_list_item', rich: [...plainRichText(g.text), ...g.at.slice(0, 1).flatMap((t) => moment(t, timeUrl))] })),
+    });
+  }
+  if (s.solution.text) out.push({ type: 'callout', emoji: '💡', color: 'green_background', rich: [...plainRichText('Solution — ', { bold: true }), ...plainRichText(s.solution.text), ...s.solution.at.slice(0, 1).flatMap((t) => moment(t, timeUrl))] });
+  if (s.plan.length) {
+    out.push({ type: 'heading_3', rich: plainRichText('🗺️ Plan du cours') });
+    for (const part of s.plan) {
+      const children: BlockSpec[] = [
+        ...(part.intro ? [{ type: 'paragraph' as const, color: 'gray' as const, rich: plainRichText(part.intro, { italic: true }) }] : []),
+        ...part.children.flatMap((c) => pointBlocks(c, timeUrl)),
+      ];
+      out.push({
+        type: 'numbered_list_item',
+        rich: [...plainRichText(part.title, { bold: true }), ...(part.at !== null ? moment(part.at, timeUrl) : [])],
+        ...(children.length ? { children } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+/** The « ✨ Résumé du cours » section of a course's page (each lesson's detailed plan is in its own page). */
+function courseSummaryBlocks(s: CourseSummary): BlockSpec[] {
+  const read = Object.keys(s.read).length;
+  const out: BlockSpec[] = [
+    { type: 'heading_2', rich: plainRichText('✨ Résumé du cours') },
+    {
+      type: 'paragraph',
+      color: 'gray',
+      rich: plainRichText(`Généré par IA d’après ${plural(read, 'transcription')}${s.full ? ' lues ensemble' : ''}, le ${dateOf(s.createdAt)} — à vérifier. Le plan détaillé de chaque leçon est dans sa page.`, { italic: true }),
+    },
+  ];
+  if (s.problem) out.push({ type: 'callout', emoji: '🎯', color: 'red_background', rich: [...plainRichText('Problématique du cours — ', { bold: true }), ...plainRichText(s.problem)] });
+  if (s.goals.length) {
+    out.push({
+      type: 'callout',
+      emoji: '🚩',
+      color: 'blue_background',
+      rich: plainRichText('Objectifs du cours', { bold: true }),
+      children: s.goals.map((g) => ({ type: 'bulleted_list_item', rich: [...plainRichText(g.text), ...(g.chapter ? plainRichText(`  · chapitre ${g.chapter}`, { color: 'gray' }) : [])] })),
+    });
+  }
+  if (s.solution) out.push({ type: 'callout', emoji: '💡', color: 'green_background', rich: [...plainRichText('Solution — la démarche : ', { bold: true }), ...plainRichText(s.solution)] });
+  out.push({ type: 'divider' });
+  return out;
 }
 
 /**
@@ -364,7 +493,7 @@ function vaultIntro(): BlockSpec[] {
  * link to its note, ticked once done. (Progress is rounded to tens: the page
  * is not rewritten at every minute watched.)
  */
-export function courseBlocks(course: string | null, rows: ReadonlyArray<CourseEntry & { pageId: string | null }>): BlockSpec[] {
+export function courseBlocks(course: string | null, rows: ReadonlyArray<CourseEntry & { pageId: string | null }>, summary: CourseSummary | null = null): BlockSpec[] {
   if (!rows.length) return [{ type: 'paragraph', rich: plainRichText('Aucune leçon rangée ici pour l’instant.', { italic: true, color: 'gray' }) }];
   const chapters = new Map<string, Array<CourseEntry & { pageId: string | null }>>();
   for (const r of rows) {
@@ -391,14 +520,21 @@ export function courseBlocks(course: string | null, rows: ReadonlyArray<CourseEn
           rich: plainRichText('Les notes prises hors de tout cours. Rangez-les depuis Boo Notes (« Ranger dans un cours ») : elles rejoignent la page de leur cours.'),
         },
   ];
+  if (course && summary) out.push(...courseSummaryBlocks(summary));
+  // The summary's words for each chapter and lesson (one sentence each).
+  const chapterSynthesis = new Map((summary?.chapters ?? []).map((c) => [normalizeTitle(c.title), c.synthesis]));
+  const lessonSynthesis = new Map((summary?.chapters ?? []).flatMap((c) => c.lessons.map((l) => [l.noteId, l.synthesis] as const)));
   for (const [chapter, list] of chapters) {
     if (chapter) out.push({ type: 'heading_2', rich: plainRichText(chapter) });
+    const syn = chapter ? chapterSynthesis.get(normalizeTitle(chapter)) : undefined;
+    if (syn) out.push({ type: 'paragraph', color: 'gray', rich: plainRichText(syn, { italic: true }) });
     for (const r of list) {
       const title: RichText[] = r.pageId
         ? [{ type: 'mention', mention: { type: 'page', page: { id: r.pageId } } }]
         : plainRichText(`${KIND_EMOJI[r.kind]} ${r.title || 'Sans titre'}`);
       const state = r.status === 'done' ? STATUS_LABELS.done : r.status === 'doing' ? `${STATUS_LABELS.doing} · ${pct(Math.round(r.ratio * 10) / 10)}` : STATUS_LABELS.todo;
-      out.push({ type: 'to_do', checked: r.status === 'done', rich: [...title, ...plainRichText(`  ${state}`, { color: 'gray' })] });
+      const about = lessonSynthesis.get(r.id);
+      out.push({ type: 'to_do', checked: r.status === 'done', rich: [...title, ...plainRichText(`  ${state}`, { color: 'gray' }), ...(about ? plainRichText(`\n${about}`, { italic: true, color: 'gray' }) : [])] });
     }
   }
   return out;
@@ -666,9 +802,20 @@ export class NotionEngine {
         });
       }
     }
-    // The transcript's attachment line becomes the section at the end of the page.
-    const body = item.transcript?.cues.length ? item.body.split('\n').filter((l) => !TRANSCRIPT_LINE.test(l)).join('\n') : item.body;
-    blocks.push(...markdownToBlocks(body, { wiki }));
+    const online = /^https?:\/\//.test(item.source) && (item.kind === 'video' || item.kind === 'audio');
+    const timeUrl = (s: number) => (online ? timestampUrl(item.source, s) : null);
+    // Three parts, each with its heading: ✨ the AI summary, 📝 the notes, 🎙️ the transcript.
+    const summary = item.summary ?? null;
+    if (summary) {
+      blocks.push(...lessonSummaryBlocks(summary, timeUrl, { stale: isStale(summary, item.transcript ?? null) }));
+      blocks.push({ type: 'divider' }, { type: 'heading_2', rich: plainRichText('📝 Mes notes') });
+    }
+    // The transcript's attachment line becomes the section at the end of the page; the summary block of the note is the section above.
+    let body = item.transcript?.cues.length ? item.body.split('\n').filter((l) => !TRANSCRIPT_LINE.test(l)).join('\n') : item.body;
+    if (summary) body = withoutSummary(body);
+    const notes = markdownToBlocks(body, { wiki });
+    if (summary && !notes.length) notes.push({ type: 'paragraph', color: 'gray', rich: plainRichText('Pas encore de notes sur cette leçon : prenez-les dans Boo Notes, à côté de la vidéo.', { italic: true }) });
+    blocks.push(...notes);
     const highlights = [...(item.highlights ?? [])].sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
     if (highlights.length) {
       blocks.push({ type: 'heading_3', rich: plainRichText('Passages surlignés') });
@@ -681,8 +828,8 @@ export class NotionEngine {
       }
     }
     if (item.transcript) {
-      const online = /^https?:\/\//.test(item.source) && (item.kind === 'video' || item.kind === 'audio');
-      blocks.push(...transcriptBlocks(item.transcript, (s) => (online ? timestampUrl(item.source, s) : null), { fold: true }));
+      if (summary && item.transcript.cues.length) blocks.push({ type: 'divider' });
+      blocks.push(...transcriptBlocks(item.transcript, timeUrl, { fold: true }));
     }
     return blocks;
   }
@@ -946,7 +1093,8 @@ export class NotionEngine {
     if (!pageId) return;
     const rows: Array<CourseEntry & { pageId: string | null }> = [];
     for (const e of entries) rows.push({ ...e, pageId: (await source.getLink(e.id))?.pageId ?? null });
-    const specs = courseBlocks(course, rows);
+    const summary = course && source.courseSummary ? await source.courseSummary(course).catch(() => null) : null;
+    const specs = courseBlocks(course, rows, summary);
     const hash = specs.map(hashBlock).join('.');
     const link = (await source.getCoursePage(key)) ?? { pageId, blocks: [], hash: '' };
     if (link.hash === hash) return;
@@ -964,6 +1112,15 @@ export class NotionEngine {
       written.push(...(await client.appendChildren(pageId, payload)).map((b) => b.id));
       await source.setCoursePage(key, { ...link, pageId, blocks: written, hash: i + 100 >= specs.length ? hash : '' });
     }
+  }
+
+  /** A course's page to write again (its summary changed). */
+  markCourse(course: string | null): void {
+    if (this.opts.source.courseEntries) this.dirtyCourses.set(courseKey(course), course);
+  }
+
+  hasDirtyCourses(): boolean {
+    return this.dirtyCourses.size > 0;
   }
 
   /** The course pages that changed since the last time: written again. */

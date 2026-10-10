@@ -15,6 +15,7 @@ export type Color =
   | 'default'
   | 'gray'
   | 'gray_background'
+  | 'red_background'
   | 'brown_background'
   | 'orange_background'
   | 'purple_background'

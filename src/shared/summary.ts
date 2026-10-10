@@ -112,8 +112,10 @@ export interface CourseSummary {
   createdAt: number;
 }
 
-export const summaryKey = (noteId: string) => `summary:${noteId}`;
-export const courseSummaryKey = (normalizedCourse: string) => `course-summary:${normalizedCourse}`;
+export const SUMMARY_PREFIX = 'summary:';
+export const COURSE_SUMMARY_PREFIX = 'course-summary:';
+export const summaryKey = (noteId: string) => `${SUMMARY_PREFIX}${noteId}`;
+export const courseSummaryKey = (normalizedCourse: string) => `${COURSE_SUMMARY_PREFIX}${normalizedCourse}`;
 
 // --- What the summary is made from ----------------------------------------------------------
 
@@ -686,24 +688,21 @@ export function planMarkdown(plan: readonly PlanNode[], stamp: (at: number) => s
 
 /** The note with the summary block at its top (an older one replaced). */
 export function withSummary(markdown: string, block: string): string {
-  const lines = markdown.split('\n');
-  let from = -1;
-  let to = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (new RegExp(`^>[ \\t]?\\[!${SUMMARY_TYPE}\\]`, 'i').test(lines[i])) {
-      from = i;
-      to = i;
-      while (to + 1 < lines.length && lines[to + 1].startsWith('>')) to++;
-      break;
-    }
-  }
-  if (from !== -1) {
-    // Its blank line after it goes too.
-    if (lines[to + 1] === '') to++;
-    lines.splice(from, to - from + 1);
-  }
-  const rest = lines.join('\n').replace(/^\n+/, '');
+  const rest = withoutSummary(markdown).replace(/^\n+/, '');
   return rest ? `${block}\n\n${rest}` : `${block}\n`;
+}
+
+/** The note without its summary block (Notion shows the summary in a section of its own). */
+export function withoutSummary(markdown: string): string {
+  const lines = markdown.split('\n');
+  const from = lines.findIndex((l) => new RegExp(`^>[ \\t]?\\[!${SUMMARY_TYPE}\\]`, 'i').test(l));
+  if (from === -1) return markdown;
+  let to = from;
+  while (to + 1 < lines.length && lines[to + 1].startsWith('>')) to++;
+  // Its blank line after it goes too.
+  if (lines[to + 1] === '') to++;
+  lines.splice(from, to - from + 1);
+  return lines.join('\n').replace(/^\n+/, '');
 }
 
 /** A moment of a lesson: a link opening it there (`[02:10](…#t=130)`). */

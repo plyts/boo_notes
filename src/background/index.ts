@@ -28,6 +28,7 @@ import { SessionState } from './session';
 import { DesktopSync } from './sync';
 import { Tiler } from './tiling';
 import { TILING_ENABLED } from '../shared/tiling';
+import { COURSE_SUMMARY_PREFIX, SUMMARY_PREFIX } from '../shared/summary';
 import type { Bounds } from '../shared/tiling';
 
 /**
@@ -1041,6 +1042,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes['notion:config']) notion.refresh();
+  if (area === 'local') {
+    // An AI summary made (panel, course page): its lesson's page in Notion, or its course's, written again.
+    for (const [key, change] of Object.entries(changes)) {
+      if (key.startsWith(SUMMARY_PREFIX) && change.newValue) void notion.enqueue(key.slice(SUMMARY_PREFIX.length)).catch(noop);
+      const course = (change.newValue as { course?: string } | undefined)?.course;
+      if (key.startsWith(COURSE_SUMMARY_PREFIX) && course) void notion.courseSummaryChanged(course).catch(noop);
+    }
+  }
   if (area !== 'sync' || !changes.settings) return;
   const before = normalizeSettings(changes.settings.oldValue);
   const after = normalizeSettings(changes.settings.newValue);
