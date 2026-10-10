@@ -65,6 +65,8 @@ import { CueTranslator, type TranslateStatus } from './translator';
 import { answerQuestion } from './answers';
 import { ConnectPanel } from './connect';
 import { LayoutMenu } from './layout-menu';
+import { SummaryView } from './summary-view';
+import { withSummary } from '../shared/summary';
 import { MiniView } from './mini';
 import { TILING_ENABLED, type TileId } from '../shared/tiling';
 import type { AskRequest } from './blocks';
@@ -192,7 +194,7 @@ class PanelApp {
   private readonly emptyState = new EmptyState(IS_MAC);
 
   // Transcript (subtitles collected in the background), passages, recordings.
-  private view: 'notes' | 'transcript' = 'notes';
+  private view: 'notes' | 'transcript' | 'summary' = 'notes';
   private transcript: Transcript | null = null;
   private caption: { cue: Cue | null; state: CaptionState } = { cue: null, state: { status: 'searching', source: null, label: '' } };
   private recording: { passage: { start: number; end?: number; recording: boolean } | null; audio: boolean } = { passage: null, audio: false };
@@ -201,6 +203,7 @@ class PanelApp {
   private tabs!: HTMLDivElement;
   private notesTab!: HTMLButtonElement;
   private transcriptTab!: HTMLButtonElement;
+  private summaryTab!: HTMLButtonElement;
   private editorHost!: HTMLElement;
   private liveEl!: HTMLDivElement;
   private recPill!: HTMLButtonElement;
@@ -208,6 +211,15 @@ class PanelApp {
   private mediaPop!: HTMLDivElement;
   private mediaUrl: string | null = null;
   private translateStatus: TranslateStatus = { state: 'off' };
+  /** « Résumé »: the lesson's (and the course's) summary from the transcripts. */
+  private readonly summaryView = new SummaryView({
+    seek: (seconds) => this.post({ type: 'seek', seconds }),
+    insert: (block) => this.insertSummary(block),
+    notify: (text, kind) => this.notify(text, kind),
+    openCourse: (course) => void callBackground({ type: 'summary:open', course }).catch((e: unknown) => this.notify(`Page du résumé impossible : ${e instanceof Error ? e.message : String(e)}`, 'error')),
+    openOptions: () => void callBackground({ type: 'options:open', section: 'questions' }).catch(() => undefined),
+  });
+
   private readonly transcriptView = new TranscriptView({
     seek: (seconds) => this.post({ type: 'seek', seconds }),
     pin: (cue) => this.pinCue(cue),
@@ -518,6 +530,7 @@ class PanelApp {
     this.timeline.update(t, duration);
     this.editor.setPlaybackTime(t);
     this.transcriptView.setTime(t);
+    this.summaryView.setTime(t);
   }
 
   /** Stats, timeline ticks and empty state follow the content (debounced). */
@@ -585,6 +598,7 @@ class PanelApp {
     this.note = null;
     this.reading = { ratio: 0, passage: null };
     this.setTranscript(null);
+    this.syncSummary();
     this.audioTrace = [];
     this.timeline.setCoverage([]);
     this.closeMedia();
@@ -608,6 +622,7 @@ class PanelApp {
       this.hideBanner();
       this.setSaveState(note.rev > 0 ? 'saved' : 'idle');
       this.renderHeader();
+      this.syncSummary();
       void this.loadTranscript(ctx.noteId);
       void this.loadAudioTrace();
     } catch (e) {
@@ -789,8 +804,8 @@ class PanelApp {
     this.recPill = h('button', { type: 'button', class: 'rec-pill', hidden: true }, icon('rec', 10), h('span', {}, 'REC'));
     this.recPill.addEventListener('click', () => this.setView('transcript'));
 
-    // Notes │ Transcription
-    const tab = (id: 'notes' | 'transcript', label: string) => {
+    // Notes │ Transcription │ Résumé
+    const tab = (id: 'notes' | 'transcript' | 'summary', label: string) => {
       const b = h('button', { type: 'button', role: 'tab', class: 'tab', id: `tab-${id}`, 'aria-selected': String(id === 'notes'), 'aria-controls': `view-${id}` }, h('span', {}, label));
       b.addEventListener('click', () => this.setView(id));
       return b;
@@ -798,12 +813,16 @@ class PanelApp {
     this.notesTab = tab('notes', 'Notes');
     this.transcriptTab = tab('transcript', 'Transcription');
     this.transcriptTab.append(h('span', { class: 'tab-count', hidden: true }));
-    this.tabs = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Vue du panneau' }, this.notesTab, this.transcriptTab);
+    this.summaryTab = tab('summary', 'Résumé');
+    this.summaryTab.prepend(icon('sparkles', 13));
+    this.tabs = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Vue du panneau' }, this.notesTab, this.transcriptTab, this.summaryTab);
     this.tabs.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
-      this.setView(this.view === 'notes' ? 'transcript' : 'notes');
-      (this.view === 'notes' ? this.notesTab : this.transcriptTab).focus();
+      const order = (['notes', 'transcript', 'summary'] as const).filter((v) => !this.tabOf(v).hidden);
+      const i = order.indexOf(this.view);
+      this.setView(order[(i + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length]);
+      this.tabOf(this.view).focus();
     });
 
     const editorHost = h('main', { class: 'editor', id: 'view-notes', role: 'tabpanel', 'aria-labelledby': 'tab-notes', 'aria-label': 'Éditeur de notes (Markdown)' });
@@ -813,6 +832,9 @@ class PanelApp {
     this.transcriptView.el.id = 'view-transcript';
     this.transcriptView.el.setAttribute('role', 'tabpanel');
     this.transcriptView.el.setAttribute('aria-labelledby', 'tab-transcript');
+    this.summaryView.el.id = 'view-summary';
+    this.summaryView.el.setAttribute('role', 'tabpanel');
+    this.summaryView.el.setAttribute('aria-labelledby', 'tab-summary');
     this.liveEl = this.buildLive();
     this.mediaPop = h('div', { class: 'media-pop', role: 'dialog', 'aria-label': 'Extrait', hidden: true });
 
@@ -837,6 +859,7 @@ class PanelApp {
       this.banner,
       editorHost,
       this.transcriptView.el,
+      this.summaryView.el,
       this.liveEl,
       this.mediaPop,
       h(
@@ -1006,26 +1029,57 @@ class PanelApp {
 
   // --- Transcript, live subtitle, passages ---------------------------------------------------
 
-  private setView(view: 'notes' | 'transcript'): void {
-    if (view === 'transcript' && (this.kind === 'page' || !this.ctx)) return;
+  private tabOf(view: 'notes' | 'transcript' | 'summary'): HTMLButtonElement {
+    return view === 'notes' ? this.notesTab : view === 'transcript' ? this.transcriptTab : this.summaryTab;
+  }
+
+  private setView(view: 'notes' | 'transcript' | 'summary'): void {
+    if ((view === 'transcript' || view === 'summary') && (this.kind === 'page' || !this.ctx)) return;
     const changed = view !== this.view;
     this.view = view;
-    this.notesTab.setAttribute('aria-selected', String(view === 'notes'));
-    this.transcriptTab.setAttribute('aria-selected', String(view === 'transcript'));
-    this.notesTab.tabIndex = view === 'notes' ? 0 : -1;
-    this.transcriptTab.tabIndex = view === 'transcript' ? 0 : -1;
+    for (const v of ['notes', 'transcript', 'summary'] as const) {
+      this.tabOf(v).setAttribute('aria-selected', String(view === v));
+      this.tabOf(v).tabIndex = view === v ? 0 : -1;
+    }
     this.editorHost.hidden = view !== 'notes';
     this.transcriptView.show(view === 'transcript');
+    this.summaryView.show(view === 'summary');
     document.documentElement.dataset.view = view;
     this.renderLive();
     if (!changed) return;
     if (view === 'transcript') this.transcriptView.focus();
-    else this.editor.focus();
+    else if (view === 'notes') this.editor.focus();
+  }
+
+  /** The summary written at the top of the note (an older one replaced), shown there. */
+  private insertSummary(block: string): void {
+    if (!this.note) return;
+    const view = this.editor.view;
+    const doc = view.state.doc.toString();
+    const next = withSummary(doc, block);
+    // Only what differs is replaced: the rest of the note (and its history) untouched.
+    let a = 0;
+    while (a < doc.length && a < next.length && doc[a] === next[a]) a++;
+    let b = 0;
+    while (b < doc.length - a && b < next.length - a && doc[doc.length - 1 - b] === next[next.length - 1 - b]) b++;
+    view.dispatch({ changes: { from: a, to: doc.length - b, insert: next.slice(a, next.length - b) }, selection: { anchor: 0 }, scrollIntoView: true });
+    this.setView('notes');
+  }
+
+  /** What the summary tab shows: this note, its course. */
+  private syncSummary(): void {
+    const ctx = this.ctx;
+    void this.summaryView.set(
+      ctx && this.note && this.kind !== 'page'
+        ? { noteId: ctx.noteId, title: this.title || this.note.title, course: this.note.course ?? null, chapter: this.note.chapter ?? null, timed: true }
+        : null,
+    );
   }
 
   private setTranscript(t: Transcript | null): void {
     this.transcript = t;
     this.transcriptView.set(t);
+    this.summaryView.setTranscript(t);
     const count = this.transcriptTab.querySelector<HTMLElement>('.tab-count')!;
     count.textContent = t?.cues.length ? String(t.cues.length) : '';
     count.hidden = !t?.cues.length;
@@ -1383,6 +1437,7 @@ class PanelApp {
       this.note = { ...(this.note ?? note), course: note.course, chapter: note.chapter, placedAt: note.placedAt, rev: note.rev };
       if (!note.course) delete this.note.course;
       this.renderPlace();
+      this.syncSummary();
       this.notify(note.course ? `Rangée dans ${note.course} › ${note.chapter}` : 'Note retirée du cours', 'success');
     } catch (e) {
       this.notify(e instanceof Error ? e.message : String(e), 'error');

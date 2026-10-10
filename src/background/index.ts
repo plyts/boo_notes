@@ -569,8 +569,13 @@ const handlers: Handlers = {
     await focusTab(tab.id);
   },
 
-  'options:open': async () => {
-    await chrome.runtime.openOptionsPage();
+  'options:open': async (msg) => {
+    if (msg.section) await chrome.tabs.create({ url: chrome.runtime.getURL(`options/options.html#${encodeURIComponent(msg.section)}`) });
+    else await chrome.runtime.openOptionsPage();
+  },
+
+  'summary:open': async (msg) => {
+    await chrome.tabs.create({ url: chrome.runtime.getURL(`summary/summary.html?course=${encodeURIComponent(msg.course)}`) });
   },
 
   'shortcuts:list': async () => {

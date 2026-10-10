@@ -232,7 +232,9 @@ export type BackgroundRequest =
   | { type: 'tile:status'; tabId: number }
   /** The video tab brought to the front (« Agrandir » from the always-on-top Mini). */
   | { type: 'tab:focus' }
-  | { type: 'options:open' }
+  | { type: 'options:open'; section?: string }
+  /** The large page of a course's summary (a tab). */
+  | { type: 'summary:open'; course: string }
   | { type: 'shortcuts:list' }
   | { type: 'sync:status' }
   | { type: 'sync:retry' }
@@ -340,6 +342,7 @@ export interface BackgroundResponses {
   'tile:status': TileId | null;
   'tab:focus': void;
   'options:open': void;
+  'summary:open': void;
   'shortcuts:list': Array<{ name: string; shortcut: string; description: string }>;
   'sync:status': SyncStatus;
   'sync:retry': SyncStatus;
