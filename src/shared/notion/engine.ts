@@ -533,8 +533,14 @@ export function courseBlocks(course: string | null, rows: ReadonlyArray<CourseEn
         ? [{ type: 'mention', mention: { type: 'page', page: { id: r.pageId } } }]
         : plainRichText(`${KIND_EMOJI[r.kind]} ${r.title || 'Sans titre'}`);
       const state = r.status === 'done' ? STATUS_LABELS.done : r.status === 'doing' ? `${STATUS_LABELS.doing} · ${pct(Math.round(r.ratio * 10) / 10)}` : STATUS_LABELS.todo;
+      // Its sentence under it (a ticked line is struck through: the sentence stays readable).
       const about = lessonSynthesis.get(r.id);
-      out.push({ type: 'to_do', checked: r.status === 'done', rich: [...title, ...plainRichText(`  ${state}`, { color: 'gray' }), ...(about ? plainRichText(`\n${about}`, { italic: true, color: 'gray' }) : [])] });
+      out.push({
+        type: 'to_do',
+        checked: r.status === 'done',
+        rich: [...title, ...plainRichText(`  ${state}`, { color: 'gray' })],
+        ...(about ? { children: [{ type: 'paragraph', color: 'gray', rich: plainRichText(about, { italic: true }) }] } : {}),
+      });
     }
   }
   return out;

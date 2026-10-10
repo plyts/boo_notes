@@ -34,17 +34,28 @@ tableau de votre page.
     cite du texte de la page (bulle « Citer » ou `Alt+Shift+T` sur une sélection, même à côté d’une
     vidéo), qu’on capture ou qu’une réponse est cherchée.
 - **Résumé du cours** (onglet **Résumé** du panneau) : l’IA lit **toute la transcription** et en
-  tire la **problématique**, les **objectifs**, la **solution** et le **plan du cours hiérarchisé**
-  (parties › points › détails), chaque idée avec les **instants cliquables** d’où elle vient (un
-  instant cité qui n’existe pas dans la transcription est écarté) ; la partie en cours de lecture
-  est surlignée. Une longue vidéo est lue **par parties** (chacune en entier), puis réunie.
-  « **Insérer dans la note** » l’écrit en tête de la note (bloc repliable `> [!summary]`, qui part
-  avec elle vers Notion, l’app Desktop, le PDF) ; « Copier », « Régénérer » ; « à mettre à jour »
+  tire la **problématique**, les **objectifs**, la **solution** et le **plan du cours détaillé** :
+  chaque partie avec une phrase sur ce qu’elle apporte et ses **3 à 5 points les plus importants**,
+  du plus important au moins important, chacun **expliqué en 1 à 2 phrases** — un point
+  **★ Essentiel** par partie (surligné), les autres marqués **Définition**, **Exemple** (sa commande
+  recopiée en code) ou **Attention** (un piège) ; chaque idée avec les **instants cliquables** d’où
+  elle vient (un instant cité qui n’existe pas dans la transcription est écarté) ; le point en cours
+  de lecture est surligné. « **Titres | Détaillé** » au-dessus du plan (Détaillé par défaut, le
+  choix est retenu). Une longue vidéo est lue **par parties** (chacune en entier), puis réunie.
+  « **Insérer dans la note** » l’écrit en tête de la note (bloc repliable `> [!summary]`, plan
+  détaillé compris, qui part avec elle vers l’app Desktop et le PDF) ; « **PDF** » télécharge le
+  résumé seul (chaque instant est un lien vers la vidéo) ; copier, régénérer ; « à mettre à jour »
   quand la transcription a grandi. **Tout le cours** : chaque leçon rangée dans le cours est lue en
   entier, puis le cours entier — d’après **toutes ses transcriptions lues ensemble** quand elles
   tiennent dans une requête (Gemini, Claude, OpenRouter…), sinon d’après les résumés des leçons ;
-  sa **page en grand** (chapitres › leçons › parties, chaque instant ouvre la leçon à ce moment) ;
-  le **PDF du cours** commence par ce résumé.
+  sa **page en grand** (chapitres › leçons › parties › points, chaque instant ouvre la leçon à ce
+  moment) ; « **PDF du résumé** » (le résumé seul) ou « **PDF du cours** » (le résumé, puis chaque
+  leçon, ses notes et sa transcription).
+- **Le coffre Notion centralise tout** : chaque leçon y a sa page en trois parties — **✨ Résumé
+  IA** (problématique, objectifs, solution en encadrés de couleur, plan détaillé), **📝 Mes notes**,
+  **🎙️ Transcription** — ; chaque cours ouvre sa page sur **son résumé** ; le tableau « Toutes les
+  notes » gagne les colonnes **Résumé IA** (✨ À jour / ↻ À mettre à jour) et **Transcription**
+  (Complète / Partielle) pour retrouver tous les résumés d’un filtre. Voir [docs/NOTION.md](docs/NOTION.md).
 - **IA au choix, plusieurs gratuites** (options › IA) : l’**IA de Chrome** (sur l’appareil), les
   paliers gratuits de **Groq**, **OpenRouter** (modèles « :free »), **Google Gemini** (AI Studio),
   **Mistral** et **Cerebras** avec une clé gratuite, **Ollama** sur votre ordinateur, **Claude**
@@ -121,12 +132,18 @@ tableau de votre page.
 | --- | --- |
 | ![Mini (paroles)](docs/screenshots/mini.png) | ![Plein écran partagé](docs/screenshots/fullscreen-split.png) |
 
-**Résumé** — d’après toute la transcription : problématique, objectifs, solution, plan hiérarchisé
-(instants cliquables) ; et le cours entier, en grand :
+**Résumé** — d’après toute la transcription : problématique, objectifs, solution, plan détaillé
+(dans chaque partie, ses points les plus importants expliqués ; instants cliquables) ; le cours
+entier, en grand ; le résumé en PDF :
 
-| Onglet Résumé d’une leçon | Résumé du cours (page en grand) |
-| --- | --- |
-| ![Onglet Résumé](docs/screenshots/panel-summary.png) | ![Résumé du cours](docs/screenshots/course-summary.png) |
+| Onglet Résumé d’une leçon | Résumé du cours (page en grand) | Le résumé en PDF |
+| --- | --- | --- |
+| ![Onglet Résumé](docs/screenshots/panel-summary.png) | ![Résumé du cours](docs/screenshots/course-summary.png) | ![Résumé en PDF](docs/screenshots/summary-pdf.png) |
+
+**Le coffre Notion** — vos notes, les résumés IA et les transcriptions, chacun à sa place (pages
+réelles écrites par Boo Notes) :
+
+![Le coffre Notion](docs/screenshots/notion-vault.png)
 
 **Mode lecture** — un article : le passage cité est surligné dans la page et relié à sa note ;
 la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie une fiche.
@@ -276,7 +293,7 @@ elle est connectée.
 | **Mini (paroles)** | Widget translucide (verre dépoli, opacité réglable) : réplique en cours, traduction, voisines ; épingle = fenêtre **Document Picture-in-Picture** toujours au-dessus ; ⤢ / double-clic = panneau complet, prêt à écrire. |
 | **Écran partagé** | Ancré et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à côté des notes, quel que soit leur bord — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. En plein écran : 70 / 30 par défaut, séparateur à tirer (double-clic : 70 / 30). |
 | **Côte à côte (fenêtres)** | *Désactivé (`TILING_ENABLED = false`).* La fenêtre de la vidéo et celle des notes se partagent la zone de travail de l’écran (`screen.availLeft/Top/Width/Height`), frontière commune suivie par `chrome.windows.onBoundsChanged`, état d’avant rendu à la sortie. |
-| **Résumé** | Onglet du panneau : cartes Problématique (rouge) · Objectifs (bleu) · Solution (vert), plan en arbre repliable (violet) dont la partie en cours est surlignée ; états avant / pendant (étapes, plan qui grandit, attente d’un palier gratuit, « Arrêter ») / transcription partielle / à mettre à jour ; page du cours en grand (leçons et leur état sur le côté). |
+| **Résumé** | Onglet du panneau : cartes Problématique (rouge) · Objectifs (bleu) · Solution (vert), plan repliable (violet) — « Titres \| Détaillé » : chaque partie, sa phrase en italique, ses points expliqués (★ Essentiel sur fond jaune, Définition bleue, Exemple vert et sa commande, Attention orange), le point en cours surligné ; états avant / pendant (étapes, plan qui grandit, attente d’un palier gratuit, « Arrêter ») / transcription partielle / à mettre à jour ; pied « Insérer dans la note · copier · PDF · régénérer » ; page du cours en grand (leçons et leur état sur le côté, « PDF du résumé », « PDF du cours »). |
 | **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
@@ -356,10 +373,12 @@ sans IA prête (une ligne), puis l’API Claude simulée — clé, modèle, tran
 sans horodatage où vont une capture et une citation de la page ; sortie d’un bloc par `Entrée` ; la
 vidéo qui continue de jouer ; section IA des options), et le **résumé** (un service compatible
 OpenAI simulé, palier gratuit : sa limite attendue, toute la transcription envoyée, problématique,
-objectifs, solution, plan hiérarchisé, instant inventé écarté, instant cliqué, insertion en tête de
-note puis remplacement ; le cours entier — chaque leçon lue, toutes les transcriptions ensemble,
-leçon sans transcription signalée, page en grand, mise à jour de la seule leçon changée, PDF qui
-commence par le résumé ; options › IA : les paliers gratuits et leur lien « Créer une clé
+objectifs, solution, plan détaillé — un point Essentiel par partie, définition, piège, exemple et sa
+commande, « Titres | Détaillé » retenu —, instant inventé écarté, instant cliqué, insertion en tête
+de note (plan détaillé compris) puis remplacement, PDF du résumé seul et ses liens ; le cours entier
+— chaque leçon lue, toutes les transcriptions ensemble, leçon sans transcription signalée, page en
+grand, mise à jour de la seule leçon changée, PDF du résumé, PDF du cours qui commence par le
+résumé ; options › IA : les paliers gratuits et leur lien « Créer une clé
 gratuite », une adresse compatible OpenAI vérifiée, ses modèles listés).
 
 ```

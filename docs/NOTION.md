@@ -131,6 +131,8 @@ Ce qui se lit d’un coup d’œil, rien de plus :
 | Type | Vidéo · Audio · PDF · Texte · Image · Page web · Fiche |
 | Plateforme | YouTube · Udemy · Coursera · Notion · Web · Fichier local |
 | Source | Lien de la leçon, de la vidéo ou de la page (vide pour un fichier local) |
+| Résumé IA | ✨ À jour · ↻ À mettre à jour (la transcription a changé depuis) · vide : pas de résumé — filtrez « n’est pas vide » : tous les résumés du coffre |
+| Transcription | Complète · Partielle (sous-titres captés pendant la lecture) · vide : aucune |
 | Dernière activité | Date de la dernière note ou progression |
 | Liens / Liée depuis | Notes reliées par `[[Titre]]`, et l’inverse (tenu à jour par Notion) |
 | Boo ID | Identifiant de la note (utilisé par Boo Notes, ne pas modifier) |
@@ -139,12 +141,35 @@ Les tables des premières versions gardent leurs autres colonnes (Position, Note
 Prochaine révision), toujours remplies. Idées de vues : **par cours** (groupé par *Cours*), **« En
 cours »** (Statut), **Kanban** par Statut, **galerie** par Type.
 
+## Le coffre : notes, résumés IA, transcriptions
+
+Le coffre range trois sortes de contenus, chacune reconnaissable à son titre :
+
+| | Où | Quoi |
+| --- | --- | --- |
+| ✨ **Résumé IA** | en tête de la page de chaque leçon ; en tête de la page de chaque cours | problématique, objectifs, solution, plan détaillé — généré par l’IA choisie dans Boo Notes, « à vérifier » |
+| 📝 **Mes notes** | sous le résumé, dans la page de la leçon | vos notes horodatées, questions, captures, passages |
+| 🎙️ **Transcription** | à la fin de la page de la leçon, repliée | les sous-titres, chaque réplique liée à son instant |
+
+Le tableau « Toutes les notes » les relie : ses colonnes **Résumé IA** et **Transcription** disent
+ce que chaque leçon a ; un filtre sur « Résumé IA » liste tous les résumés. Un résumé fait (ou
+refait) dans Boo Notes — onglet Résumé, page du cours — réécrit la page de sa leçon, ou celle de son
+cours, à la synchronisation suivante (rien n’est réécrit s’il n’a pas changé). Quand la transcription
+a changé depuis, la page et le tableau disent « ↻ À mettre à jour ».
+
+![Le coffre Notion](screenshots/notion-vault.png)
+
+> Quand l’app **Boo Notes Desktop** écrit dans Notion à la place de l’extension, les résumés
+> n’arrivent dans Notion que par la note : « Insérer dans la note » (le bloc résumé part avec elle).
+
 ## Les pages des cours
 
 Une page par cours dans le coffre (📘), tenue à jour par Boo Notes : un résumé (nombre de leçons,
-de chapitres, terminées, progression du cours), puis **chaque chapitre** et **ses leçons** dans
-l’ordre où vous les avez commencées — une case cochée quand la leçon est terminée, un lien vers la
-note, son état. Une leçon rangée ailleurs quitte la page de l’ancien cours ; les notes rangées
+de chapitres, terminées, progression du cours), puis, quand le cours a été résumé, **✨ Résumé du
+cours** — sa problématique (encadré rouge), ses objectifs avec leur chapitre (bleu), sa démarche
+(vert) —, puis **chaque chapitre** (sa phrase de synthèse en gris) et **ses leçons** dans l’ordre
+où vous les avez commencées — une case cochée quand la leçon est terminée, un lien vers la note,
+son état, et sa phrase de synthèse dessous. Une leçon rangée ailleurs quitte la page de l’ancien cours ; les notes rangées
 nulle part sont dans **📥 Notes à ranger**. La progression y est arrondie à la dizaine : la page
 n’est pas réécrite à chaque minute regardée.
 
@@ -156,6 +181,12 @@ n’est pas réécrite à chaque minute regardée.
   étudiée (téléversée), ou un encadré « Fichier local : cours.pdf » — et, pour une note appuyée sur
   **plusieurs supports**, un en-tête par support (PDF, enregistrement de l’amphi, vidéo…), chaque
   repère renvoyant au sien.
+- Puis, quand la leçon a été résumée, **✨ Résumé IA** : qui l’a écrit et quand (« à vérifier ») ;
+  la **problématique** (encadré rouge 🎯), les **objectifs** (bleu 🚩), la **solution** (vert 💡) ;
+  puis **🗺️ Plan du cours** : chaque partie numérotée avec son instant, sa phrase en italique, ses
+  points — le point **Essentiel** dans un encadré jaune ⭐, les autres marqués 📘 Définition,
+  💡 Exemple (sa commande dans un bloc de code), ⚠️ Attention — chaque instant ouvre la vidéo. Puis
+  un séparateur et **📝 Mes notes** (le bloc résumé inséré dans la note n’y est pas répété).
 - Puis la note, **une ligne = un bloc** : `04:15` rouvre la vidéo à cet instant (l’extension gère
   `#t=` sur toutes les plateformes), `p. 12`, `§ 4`, `◉ 3` rappellent la page, le paragraphe ou le
   repère de l’image ; une **citation** d’article garde son lien `↗` qui rouvre la page *sur le
@@ -166,8 +197,8 @@ n’est pas réécrite à chaque minute regardée.
   surlignages avec leur couleur.
 - Un **passage** d’une vidéo (`[02:05–06:07]`) devient une image légendée « Passage 02:05–06:07 ·
   titre » (l’extrait enregistré reste dans le dossier de notes).
-- La **transcription** (sous-titres collectés pendant la lecture) termine la page, **repliée par
-  tranches de la vidéo** (« 00:00 – 12:30 · 100 répliques ») : la page reste courte, chaque tranche
+- La **transcription** (sous-titres collectés pendant la lecture ; après un séparateur quand la
+  page a son résumé) termine la page, **repliée par tranches de la vidéo** (« 00:00 – 12:30 · 100 répliques ») : la page reste courte, chaque tranche
   s’ouvre d’un clic ; une réplique par paragraphe — heure liée à l’instant de la vidéo, texte,
   traduction en italique, 💬 votre commentaire. Voir [TRANSCRIPTION.md](TRANSCRIPTION.md).
 - Une **Question** garde sa réponse compacte de l’IA, avec la mention « Réponse générée par IA — à

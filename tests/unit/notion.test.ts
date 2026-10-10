@@ -467,12 +467,14 @@ describe('Le coffre Notion : résumés IA, notes et transcription, chacun à sa 
       'divider: ',
       'heading_2: Lakehouse',
       'paragraph: Pourquoi un lakehouse.',
-      'to_do: @Leçon 1  À commencer\nCe que dit la leçon 1.',
+      'to_do: @Leçon 1  À commencer',
       'heading_2: Delta Lake',
       'paragraph: Des fichiers aussi sûrs qu’une base.',
-      'to_do: @Leçon 2  À commencer\nCe que dit la leçon 2.',
+      'to_do: @Leçon 2  À commencer',
     ]);
     expect(content[4].children!.map((b) => b.text)).toEqual(['Comprendre le lakehouse  · chapitre 1']);
+    // Each lesson's sentence under it.
+    expect(content[9].children!.map((b) => b.text)).toEqual(['Ce que dit la leçon 1.']);
     // Unchanged: not written again.
     const writes = mock.state.requests.length;
     await notion.courseSummaryChanged('Databricks');
