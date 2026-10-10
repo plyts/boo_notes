@@ -98,12 +98,19 @@ export interface ChromeAiPrompt {
 }
 
 /** One question to the model: its reply (JSON, see ANSWER_SCHEMA). */
-export async function askChromeAi(lang: AiLang, prompt: ChromeAiPrompt, signal?: AbortSignal): Promise<string> {
+export function askChromeAi(lang: AiLang, prompt: ChromeAiPrompt, signal?: AbortSignal): Promise<string> {
+  return promptChromeAi(lang, prompt, ANSWER_SCHEMA, signal);
+}
+
+/**
+ * One request to the model, its reply shaped by `schema` (JSON). `prompt.user`
+ * is built from as many characters as it can read (about 3 a token).
+ */
+export async function promptChromeAi(lang: AiLang, prompt: ChromeAiPrompt, schema: object, signal?: AbortSignal): Promise<string> {
   const lm = api();
   if (!lm) throw new Error('l’IA intégrée n’existe pas dans ce navigateur');
   const session = await lm.create({ ...optionsFor(lang), initialPrompts: [{ role: 'system', content: prompt.system }], signal });
   try {
-    // A small model: the passages it is given fit in what it can read (about 3 characters a token).
     const room = session.inputQuota ? Math.max(1500, (session.inputQuota - (session.inputUsage ?? 0) - 700) * 3) : 12_000;
     let user = prompt.user(Math.min(room, 24_000));
     if (session.measureInputUsage && session.inputQuota) {
@@ -112,7 +119,23 @@ export async function askChromeAi(lang: AiLang, prompt: ChromeAiPrompt, signal?:
         if ((await session.measureInputUsage(user)) + (session.inputUsage ?? 0) < session.inputQuota - 400) break;
       }
     }
-    return await session.prompt(user, { responseConstraint: ANSWER_SCHEMA, signal });
+    return await session.prompt(user, { responseConstraint: schema, signal });
+  } finally {
+    session.destroy();
+  }
+}
+
+/**
+ * How many characters of text the model reads in one request, its
+ * instructions (`system`) and its reply left aside.
+ */
+export async function chromeAiRoom(lang: AiLang, system: string, reply = 1500): Promise<number> {
+  const lm = api();
+  if (!lm) throw new Error('l’IA intégrée n’existe pas dans ce navigateur');
+  const session = await lm.create({ ...optionsFor(lang), initialPrompts: [{ role: 'system', content: system }] });
+  try {
+    if (!session.inputQuota) return 9_000;
+    return Math.max(2_500, Math.min(24_000, (session.inputQuota - (session.inputUsage ?? 0) - reply) * 3));
   } finally {
     session.destroy();
   }

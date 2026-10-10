@@ -26,7 +26,7 @@
           <a href="#sites" data-icon="globe">Sites</a>
           <a href="#desktop" data-icon="desktop">App Desktop</a>
           <a href="#notion" data-icon="notion">Notion</a>
-          <a href="#questions" data-icon="question">Questions</a>
+          <a href="#questions" data-icon="question">IA</a>
           <a href="#donnees" data-icon="download">Données</a>
         </nav>
         <button type="button" class="sidebar-status" id="sidebar-status" data-state="offline">
@@ -438,25 +438,16 @@
 
         <section id="questions" class="group" aria-labelledby="h-questions">
           <header class="group-head">
-            <h2 id="h-questions">Questions</h2>
+            <h2 id="h-questions">IA — questions et résumés</h2>
             <p>
-              Survolez une ligne de vos notes : son bouton + en fait une <strong>Question</strong> ou une <strong>Note libre</strong>.
-              Une question est numérotée et sa réponse est cherchée dans le cours — la transcription de la vidéo d’abord, puis le
-              texte de la page et vos notes —, avec ses sources et leurs horodatages. La vidéo continue pendant ce temps.
+              L’IA choisie répond aux <strong>Questions</strong> de vos notes (le bouton + d’une ligne) et écrit les
+              <strong>Résumés</strong> (onglet Résumé du panneau : problématique, objectifs, solution, plan du cours) à partir de la
+              transcription. Plusieurs sont <strong>gratuites</strong> : celle de Chrome, sur cet ordinateur, ou le palier gratuit d’un
+              service avec une clé — Groq, OpenRouter, Google Gemini, Mistral, Cerebras.
             </p>
           </header>
-          <div class="card rows">
-            <div class="row">
-              <span class="row-text">
-                <span class="row-label" id="l-qa-provider">Qui rédige les réponses</span>
-                <span class="row-desc" id="qa-provider-desc"></span>
-              </span>
-              <div class="segmented" role="radiogroup" aria-labelledby="l-qa-provider">
-                <label><input type="radio" name="qaProvider" value="chrome" /><span>IA de Chrome</span></label>
-                <label><input type="radio" name="qaProvider" value="claude" /><span>Claude</span></label>
-                <label><input type="radio" name="qaProvider" value="none" /><span>Sans IA</span></label>
-              </div>
-            </div>
+          <div class="card provider-list" id="qa-providers" role="radiogroup" aria-label="Qui rédige les réponses et les résumés"></div>
+          <div class="card rows" id="chrome-ai-card">
             <div class="row" id="chrome-ai-row">
               <span class="row-text">
                 <span class="row-label">IA intégrée de Chrome (Gemini Nano)</span>
@@ -465,25 +456,33 @@
               <button type="button" class="btn" id="chrome-ai-download" hidden>Télécharger le modèle</button>
             </div>
           </div>
-          <div class="card" id="qa-claude-card">
+          <div class="card" id="qa-key-card" hidden>
             <div class="status-card" id="qa-card" data-state="offline">
               <span class="status-orb" aria-hidden="true"></span>
               <div class="status-text">
-                <span id="qa-badge" class="status-title">Claude : pas de clé</span>
+                <span id="qa-badge" class="status-title">…</span>
                 <span id="qa-detail" class="row-desc" role="status"></span>
               </div>
+              <a id="qa-key-link" class="btn" target="_blank" rel="noopener" hidden>Obtenir une clé</a>
             </div>
+            <p class="provider-terms" id="qa-terms"></p>
             <form class="rows inset" id="qa-form">
-              <div class="row stacked">
-                <label class="row-label" for="qa-key">Clé API Claude (Anthropic)</label>
-                <input type="password" id="qa-key" spellcheck="false" autocomplete="off" placeholder="sk-ant-… (console.anthropic.com › API Keys)" required />
-                <span class="row-desc">
-                  La clé reste dans ce navigateur. Pour chaque question, la question et les extraits du cours (transcription, texte de
-                  la page, vos notes) sont envoyés directement à l’API Claude d’Anthropic, à aucun autre serveur.
-                </span>
+              <div class="row stacked" id="qa-base-row" hidden>
+                <label class="row-label" for="qa-base">Adresse de l’API</label>
+                <input type="url" id="qa-base" spellcheck="false" autocomplete="off" placeholder="https://…/v1" />
+                <span class="row-desc">Jusqu’à sa version (…/v1) : Boo Notes y appelle /chat/completions et /models.</span>
+              </div>
+              <div class="row stacked" id="qa-key-row">
+                <label class="row-label" for="qa-key" id="qa-key-label">Clé API</label>
+                <input type="password" id="qa-key" spellcheck="false" autocomplete="off" />
+                <span class="row-desc" id="qa-key-desc"></span>
+              </div>
+              <div class="row stacked" id="qa-model-row" hidden>
+                <label class="row-label" for="qa-model-name">Modèle</label>
+                <input type="text" id="qa-model-name" spellcheck="false" autocomplete="off" placeholder="nom du modèle (s’il n’est pas listé)" />
               </div>
               <div class="row">
-                <span class="row-text"><span class="row-desc">Payant à l’usage, sur votre compte Anthropic.</span></span>
+                <span class="row-text"><span class="row-desc" id="qa-form-note">La clé est vérifiée, puis un modèle est choisi.</span></span>
                 <button type="submit" class="btn" id="qa-connect">Vérifier et activer</button>
               </div>
             </form>
@@ -491,14 +490,14 @@
               <div class="row">
                 <label class="row-text" for="qa-model">
                   <span class="row-label">Modèle</span>
-                  <span class="row-desc">Ceux que votre clé peut utiliser, du plus récent au plus ancien.</span>
+                  <span class="row-desc" id="qa-model-desc">Ceux que votre clé peut utiliser.</span>
                 </label>
                 <select id="qa-model"></select>
               </div>
               <div class="row">
                 <span class="row-text">
                   <span class="row-label">Retirer la clé</span>
-                  <span class="row-desc">Les réponses reviennent à l’IA intégrée de Chrome.</span>
+                  <span class="row-desc">L’IA de Chrome reprend la main si celle-ci était choisie.</span>
                 </span>
                 <button type="button" id="qa-remove" class="btn danger">Retirer</button>
               </div>

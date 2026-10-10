@@ -1,10 +1,11 @@
 import { chromeAiState, frenchReady, prepareChromeAi, type ChromeAiState } from '../shared/chrome-ai';
-import { listModels, type ClaudeModel } from '../shared/claude';
+import { AiError, defaultModel, listModels, type AiModel } from '../shared/ai-client';
+import { originPattern, PROVIDERS, REMOTE_IDS, type AiProviderId, type RemoteId } from '../shared/ai-providers';
 import { h, icon, type IconName } from '../shared/icons';
 import { IS_MAC, keycaps } from '../shared/keycaps';
 import { callBackground, type CommandId, type NotesSyncStatus, type NotionStatus, type SyncStatus } from '../shared/messages';
 import { PLATFORM_LABELS } from '../shared/platforms';
-import { loadQa, saveQa, type QaConfig } from '../shared/qa-config';
+import { accountReady, chooseProvider, loadQa, removeAccount, saveAccount, type QaConfig } from '../shared/qa-config';
 import { isLoopbackWsUrl, loadSettings, saveSettings, type Settings } from '../shared/settings';
 import { DEFAULT_SHORTCUTS, inPageBindings } from '../shared/shortcuts';
 
@@ -300,36 +301,88 @@ async function setUpNotionOAuth(): Promise<void> {
   });
 }
 
-const PROVIDER_DESC: Record<QaConfig['provider'], string> = {
-  chrome: 'Sur cet ordinateur, gratuitement : rien n’est envoyé. Sa réponse s’écrit sous la question, compacte, à vérifier.',
-  claude: 'Claude (Anthropic), avec votre clé : la question et les extraits du cours lui sont envoyés.',
-  none: 'Pas de réponse aux questions : elles restent des questions.',
-};
+const TIER_TAGS: Record<string, string> = { free: 'Gratuit', local: 'Sur cet appareil', paid: 'Payant', custom: 'Votre adresse' };
 
-/** Options › Questions: who writes the answers — Chrome's built-in AI, Claude (the user's key), or no AI. */
-function renderQa(qa: QaConfig, shown: QaConfig['provider'], models: ClaudeModel[] | null, error = ''): void {
+/** A provider's name without what follows it in brackets (« Ollama »). */
+const shortLabel = (id: RemoteId) => PROVIDERS[id].label.replace(/\s*\(.*\)$/, '');
+
+/** Options › IA: the providers, one row each — Chrome's AI first, the free tiers, Ollama, Claude, one's own, none. */
+function buildProviders(): void {
+  const row = (value: AiProviderId, name: string, tier: string, tag: string, desc: string) =>
+    h(
+      'label',
+      { class: 'provider', 'data-provider': value },
+      h('input', { type: 'radio', name: 'qaProvider', value }),
+      h('span', { class: 'p-name' }, name),
+      h('span', { class: 'p-tag', 'data-tier': tier }, tag),
+      h('span', { class: 'p-desc' }, desc),
+    );
+  const rows = [
+    row('chrome', 'IA de Chrome', 'local', 'Gratuit · sur cet appareil', 'Rien n’est envoyé. Un petit modèle : les longues vidéos sont lues par parties.'),
+    ...REMOTE_IDS.map((id) => row(id, PROVIDERS[id].label, PROVIDERS[id].tier, TIER_TAGS[PROVIDERS[id].tier], PROVIDERS[id].terms)),
+    row('none', 'Sans IA', 'custom', '—', 'Les questions restent des questions ; pas de résumé.'),
+  ];
+  (document.getElementById('qa-providers') as HTMLElement).replaceChildren(...rows);
+}
+
+/** Options › IA: who writes — Chrome's built-in AI, a provider with its key (free tiers first), or no AI. */
+function renderQa(qa: QaConfig, shown: AiProviderId, models: AiModel[] | null, error = ''): void {
   checkRadio('qaProvider', shown);
-  (document.getElementById('qa-provider-desc') as HTMLElement).textContent = PROVIDER_DESC[shown];
-  (document.getElementById('chrome-ai-row') as HTMLElement).hidden = shown !== 'chrome';
-  (document.getElementById('qa-claude-card') as HTMLElement).hidden = shown !== 'claude';
-  const keyed = Boolean(qa.key && qa.model);
-  (document.getElementById('qa-card') as HTMLElement).dataset.state = keyed ? (error ? 'offline' : 'connected') : 'offline';
-  (document.getElementById('qa-badge') as HTMLElement).textContent = keyed ? 'Claude activé' : 'Claude : ajoutez votre clé';
-  const model = models?.find((m) => m.id === qa.model);
-  (document.getElementById('qa-detail') as HTMLElement).textContent = keyed
-    ? error || `Modèle : ${model?.name ?? qa.model}`
-    : 'Votre clé est vérifiée, puis le modèle le plus récent est choisi.';
-  (document.getElementById('qa-form') as HTMLElement).hidden = keyed;
-  (document.getElementById('qa-actions') as HTMLElement).hidden = !keyed;
+  for (const el of document.querySelectorAll<HTMLElement>('.provider')) {
+    const id = el.dataset.provider as AiProviderId;
+    el.dataset.ready = String(id in PROVIDERS && accountReady(id as RemoteId, qa.accounts[id as RemoteId]));
+  }
+  (document.getElementById('chrome-ai-card') as HTMLElement).hidden = shown !== 'chrome';
+  const card = document.getElementById('qa-key-card') as HTMLElement;
+  card.hidden = !(shown in PROVIDERS);
+  if (!(shown in PROVIDERS)) return;
+  const id = shown as RemoteId;
+  const p = PROVIDERS[id];
+  const name = shortLabel(id);
+  const account = qa.accounts[id];
+  const ready = accountReady(id, account);
+  card.dataset.provider = id;
+  (document.getElementById('qa-card') as HTMLElement).dataset.state = ready && !error ? 'connected' : 'offline';
+  (document.getElementById('qa-badge') as HTMLElement).textContent = ready ? `${name} activé` : p.key === 'required' ? `${name} : ajoutez votre clé` : `${name} : à vérifier`;
+  const model = models?.find((m) => m.id === account?.model);
+  (document.getElementById('qa-detail') as HTMLElement).textContent = ready
+    ? error || `Modèle : ${model?.name ?? account?.model}${qa.provider === id ? '' : ' — choisissez-le ci-dessus pour l’utiliser'}`
+    : p.key === 'none'
+      ? 'Boo Notes demande à Ollama ses modèles installés, puis en choisit un.'
+      : 'Votre clé est vérifiée, puis un modèle est choisi.';
+  (document.getElementById('qa-terms') as HTMLElement).textContent = p.terms;
+  const link = document.getElementById('qa-key-link') as HTMLAnchorElement;
+  link.hidden = !p.keyUrl;
+  if (p.keyUrl) {
+    link.href = p.keyUrl;
+    link.textContent = p.key === 'none' ? 'Installer Ollama' : p.tier === 'free' ? 'Créer une clé gratuite' : 'Obtenir une clé';
+  }
+  (document.getElementById('qa-base-row') as HTMLElement).hidden = !(id === 'custom' || id === 'ollama');
+  const base = document.getElementById('qa-base') as HTMLInputElement;
+  base.required = id === 'custom';
+  base.placeholder = p.base || 'https://…/v1';
+  if (!base.value || base.dataset.for !== id) base.value = account?.base ?? (id === 'ollama' ? p.base : '');
+  base.dataset.for = id;
+  (document.getElementById('qa-key-row') as HTMLElement).hidden = p.key === 'none';
+  const key = document.getElementById('qa-key') as HTMLInputElement;
+  key.required = p.key === 'required';
+  key.placeholder = p.keyHint ? `${p.keyHint}${p.keyUrl ? ` (${new URL(p.keyUrl).host})` : ''}` : p.key === 'optional' ? 'facultative' : '';
+  (document.getElementById('qa-key-label') as HTMLElement).textContent = `Clé API ${name}${p.key === 'optional' ? ' (facultative)' : ''}`;
+  (document.getElementById('qa-key-desc') as HTMLElement).textContent =
+    `La clé reste dans ce navigateur. Pour chaque question ou résumé, le texte du cours (transcription, page, vos notes) est envoyé directement à ${name}, à aucun autre serveur.`;
+  (document.getElementById('qa-model-row') as HTMLElement).hidden = id !== 'custom';
+  (document.getElementById('qa-form') as HTMLElement).hidden = ready;
+  (document.getElementById('qa-actions') as HTMLElement).hidden = !ready;
+  (document.getElementById('qa-model-desc') as HTMLElement).textContent = p.only === 'free' ? 'Ses modèles gratuits (« :free »).' : 'Ceux que votre clé peut utiliser.';
   const select = document.getElementById('qa-model') as HTMLSelectElement;
-  const list = models?.length ? models : qa.model ? [{ id: qa.model, name: qa.model }] : [];
+  const list = models?.length ? models : account?.model ? [{ id: account.model, name: account.model }] : [];
   select.replaceChildren(...list.map((m) => h('option', { value: m.id }, m.name)));
-  select.value = qa.model;
+  select.value = account?.model ?? '';
 }
 
 const CHROME_AI_TEXT: Record<ChromeAiState['state'], string> = {
-  unsupported: 'Absente de ce navigateur : il faut Chrome 138 ou plus récent, sur ordinateur. Sans elle, choisissez Claude.',
-  unavailable: 'Indisponible sur cet ordinateur (il faut une machine assez puissante et de l’espace disque libre). Sans elle, choisissez Claude.',
+  unsupported: 'Absente de ce navigateur : il faut Chrome 138 ou plus récent, sur ordinateur. Sans elle, choisissez un palier gratuit (Groq, Gemini…).',
+  unavailable: 'Indisponible sur cet ordinateur (il faut une machine assez puissante et de l’espace disque libre). Sans elle, choisissez un palier gratuit (Groq, Gemini…).',
   downloadable: 'Le modèle n’est pas encore sur cet ordinateur : téléchargez-le une fois (quelques Go, en arrière-plan).',
   downloading: 'Téléchargement du modèle en cours…',
   available: 'Prête : vos questions reçoivent une réponse rédigée sur cet ordinateur.',
@@ -354,27 +407,42 @@ async function renderChromeAi(): Promise<ChromeAiState> {
 }
 
 async function setUpQa(): Promise<void> {
+  buildProviders();
   let qa = await loadQa();
-  let shown: QaConfig['provider'] = qa.provider;
-  let models: ClaudeModel[] | null = null;
-  renderQa(qa, shown, models);
-  void renderChromeAi();
-  if (qa.key && qa.model) {
-    listModels(qa.key, qa.base).then(
-      (list) => renderQa(qa, shown, (models = list)),
-      (e: unknown) => renderQa(qa, shown, models, e instanceof Error ? e.message : String(e)),
+  let shown: AiProviderId = qa.provider;
+  const lists = new Map<RemoteId, AiModel[]>();
+  const errors = new Map<RemoteId, string>();
+  const render = () => renderQa(qa, shown, shown in PROVIDERS ? (lists.get(shown as RemoteId) ?? null) : null, shown in PROVIDERS ? (errors.get(shown as RemoteId) ?? '') : '');
+  /** The models of a provider set up (its list, once). */
+  const fetchModels = (id: RemoteId) => {
+    const a = qa.accounts[id];
+    if (!accountReady(id, a) || lists.has(id)) return;
+    listModels({ id, key: a.key, base: a.base }).then(
+      (list) => {
+        lists.set(id, list);
+        errors.delete(id);
+        render();
+      },
+      (e: unknown) => {
+        errors.set(id, e instanceof Error ? e.message : String(e));
+        render();
+      },
     );
-  }
+  };
+  render();
+  void renderChromeAi();
+  if (shown in PROVIDERS) fetchModels(shown as RemoteId);
   for (const radio of field('qaProvider')) {
     radio.addEventListener('change', async () => {
-      shown = radio.value as QaConfig['provider'];
-      // Claude needs its key first: chosen once the key is checked.
-      if (shown !== 'claude' || (qa.key && qa.model)) {
-        qa = await saveQa({ provider: shown });
+      shown = radio.value as AiProviderId;
+      // A provider is chosen once it is ready (its key checked); until then, its card asks for it.
+      if (!(shown in PROVIDERS) || accountReady(shown as RemoteId, qa.accounts[shown as RemoteId])) {
+        qa = await chooseProvider(shown);
         flashSaved();
       }
-      renderQa(qa, shown, models);
+      render();
       if (shown === 'chrome') void renderChromeAi();
+      if (shown in PROVIDERS) fetchModels(shown as RemoteId);
     });
   }
   const download = document.getElementById('chrome-ai-download') as HTMLButtonElement;
@@ -396,38 +464,63 @@ async function setUpQa(): Promise<void> {
     }
   });
   const key = document.getElementById('qa-key') as HTMLInputElement;
+  const base = document.getElementById('qa-base') as HTMLInputElement;
+  const modelName = document.getElementById('qa-model-name') as HTMLInputElement;
   const button = document.getElementById('qa-connect') as HTMLButtonElement;
-  document.getElementById('qa-form')?.addEventListener('submit', async (e) => {
+  document.getElementById('qa-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    button.disabled = true;
-    button.textContent = 'Vérification…';
-    try {
-      // The key is tried first: the models it may use, the most recent chosen.
-      const list = await listModels(key.value.trim(), qa.base);
-      if (!list.length) throw new Error('aucun modèle n’est disponible pour cette clé');
-      qa = await saveQa({ provider: 'claude', key: key.value.trim(), model: list[0].id });
-      shown = 'claude';
-      key.value = '';
-      renderQa(qa, shown, (models = list));
-      flashSaved('Claude activé : vos questions reçoivent une réponse rédigée');
-    } catch (err) {
-      flashSaved(err instanceof Error ? err.message : String(err), false);
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Vérifier et activer';
-    }
+    if (!(shown in PROVIDERS)) return;
+    const id = shown as RemoteId;
+    const p = PROVIDERS[id];
+    const address = (id === 'custom' || id === 'ollama' ? base.value.trim() : '') || qa.accounts[id]?.base || '';
+    // Its address may need Chrome's permission (asked now, while the click lasts); the services that allow it work without.
+    const origin = originPattern(address || p.base);
+    if (origin) void chrome.permissions?.request({ origins: [origin] }).catch(() => false);
+    void (async () => {
+      button.disabled = true;
+      button.textContent = 'Vérification…';
+      try {
+        const target = { id, key: key.value.trim(), base: address || undefined };
+        // The key is tried first: the models it may use, the suggested one chosen.
+        let list: AiModel[] = [];
+        try {
+          list = await listModels(target);
+        } catch (err) {
+          // One's own service may not list its models: the name given is taken.
+          if (!(id === 'custom' && modelName.value.trim() && err instanceof AiError && err.status !== 401)) throw err;
+        }
+        const wanted = modelName.value.trim();
+        const model = wanted && (id === 'custom' || list.some((m) => m.id === wanted)) ? wanted : defaultModel(id, list);
+        if (!model) throw new Error(p.only === 'free' ? 'aucun modèle gratuit n’est proposé pour cette clé' : 'aucun modèle n’est disponible ici');
+        qa = await saveAccount(id, { key: target.key, model, ...(address ? { base: address } : {}) });
+        lists.set(id, list);
+        errors.delete(id);
+        key.value = '';
+        render();
+        flashSaved(`${shortLabel(id)} activé : vos questions et résumés sont rédigés par ${model}`);
+      } catch (err) {
+        flashSaved(err instanceof Error ? err.message : String(err), false);
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Vérifier et activer';
+      }
+    })();
   });
   const select = document.getElementById('qa-model') as HTMLSelectElement;
   select.addEventListener('change', async () => {
-    qa = await saveQa({ model: select.value });
-    renderQa(qa, shown, models);
+    if (!(shown in PROVIDERS)) return;
+    qa = await saveAccount(shown as RemoteId, { model: select.value }, qa.provider === shown);
+    render();
     flashSaved('Modèle enregistré');
   });
   document.getElementById('qa-remove')?.addEventListener('click', async () => {
-    qa = await saveQa({ provider: 'chrome', key: '', model: '' });
-    shown = 'chrome';
-    models = null;
-    renderQa(qa, shown, models);
+    if (!(shown in PROVIDERS)) return;
+    const id = shown as RemoteId;
+    qa = await removeAccount(id);
+    lists.delete(id);
+    errors.delete(id);
+    shown = qa.provider;
+    render();
     void renderChromeAi();
     flashSaved('Clé retirée');
   });

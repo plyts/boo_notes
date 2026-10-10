@@ -253,7 +253,7 @@ test('Claude répond : sa réponse seule, compacte, « générée par IA — à 
   }
 });
 
-test('options › Questions : Claude choisi, sa clé vérifiée, le modèle le plus récent pris, puis la clé retirée', async ({ context, sw }) => {
+test('options › IA : Claude choisi, sa clé vérifiée, le modèle le plus récent pris, puis la clé retirée', async ({ context, sw }) => {
   const claude = await mockClaude();
   try {
     await sw.evaluate(async (base) => chrome.storage.local.set({ 'qa:config': { provider: 'chrome', key: '', model: '', base } }), claude.base);
@@ -263,7 +263,7 @@ test('options › Questions : Claude choisi, sa clé vérifiée, le modèle le p
     // Chrome's built-in AI by default: its state said (the test browser has the API, not the model).
     await expect(options.getByRole('radio', { name: 'IA de Chrome' })).toBeChecked();
     await expect(options.locator('#chrome-ai-state')).toContainText(/Absente de ce navigateur|Indisponible sur cet ordinateur|pas encore sur cet ordinateur/);
-    await expect(options.locator('#qa-claude-card')).toBeHidden();
+    await expect(options.locator('#qa-key-card')).toBeHidden();
     // Claude: its key first.
     await options.getByText('Claude', { exact: true }).click();
     await expect(options.locator('#qa-badge')).toHaveText('Claude : ajoutez votre clé');
@@ -374,7 +374,7 @@ for (const fr of [true, false]) {
   });
 }
 
-test('options › Questions : le modèle de l’IA de Chrome téléchargé d’un clic, sa progression affichée', async ({ context, sw }) => {
+test('options › IA : le modèle de l’IA de Chrome téléchargé d’un clic, sa progression affichée', async ({ context, sw }) => {
   await stubChromeAi(context, { fr: true, state: 'downloadable' });
   const options = await context.newPage();
   await options.goto(`chrome-extension://${new URL(sw.url()).host}/options/options.html#questions`);

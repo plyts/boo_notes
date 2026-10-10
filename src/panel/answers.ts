@@ -1,11 +1,12 @@
 import type { Answer, AnswerSource } from '../shared/callouts';
-import { ClaudeError, sendMessage } from '../shared/claude';
+import { chat } from '../shared/ai-client';
+import { isRemote, PROVIDERS } from '../shared/ai-providers';
 import { findCallouts } from '../shared/callouts';
 import type { CourseText } from '../shared/course-text';
 import { callBackground } from '../shared/messages';
 import { askChromeAi, chromeAiState, toFrench } from '../shared/chrome-ai';
 import { buildPrompt, extracts, forPrompt, notePassages, pagePassages, parseAnswer, rank, sourceOf, transcriptPassages, type NoteSource, type ParsedAnswer, type Passage, type Ranked } from '../shared/qa';
-import { loadQa, type QaConfig } from '../shared/qa-config';
+import { accountOf, loadQa, type QaConfig } from '../shared/qa-config';
 import type { Note, NoteSummary } from '../shared/store';
 import type { Transcript } from '../shared/transcript';
 
@@ -15,8 +16,9 @@ import type { Transcript } from '../shared/transcript';
  * module in its frames), then the notes already taken — go to the AI, and
  * only its answer comes back, compact, said to be written by an AI, with the
  * moments it comes from. Chrome's built-in AI writes it on this computer (the
- * default), or Claude with a key set in the options; without an AI, one line
- * says why. Nothing here touches the video: it plays on meanwhile.
+ * default), or the provider set in the options (a free tier — Groq,
+ * OpenRouter, Gemini, Mistral, Cerebras —, Ollama, Claude, one's own
+ * address); without an AI, one line says why. Nothing here touches the video: it plays on meanwhile.
  */
 
 export interface AnswerContext {
@@ -109,22 +111,25 @@ const NO_COURSE = 'aucun contenu du cours n’est encore disponible (transcripti
 
 export async function answerQuestion(ctx: AnswerContext, config?: QaConfig): Promise<Answer> {
   const qa = config ?? (await loadQa());
-  if (qa.provider === 'none') return { method: 'none', text: '', refs: [], note: 'les réponses par IA sont désactivées : choisissez l’IA de Chrome ou Claude (options › Questions)' };
+  if (qa.provider === 'none') return { method: 'none', text: '', refs: [], note: 'les réponses par IA sont désactivées : choisissez une IA (options › IA)' };
   const passages = await gatherPassages(ctx);
   const extra = ctx.transcript?.lang ? await translated(ctx.question, ctx.transcript.lang) : '';
   const ranked = rank(ctx.question, passages, { stamp: ctx.stamp, extra });
   const query = `${ctx.question} ${extra}`;
   // Nothing cited: the passages closest to the question stand for where it comes from.
   const refs = (parsed: ParsedAnswer) => refsOf(parsed.sources.length || !parsed.found ? parsed.sources : extracts(ranked, 2).map((p) => sourceOf(p, null, query)));
-  if (qa.provider === 'chrome') return answerOnDevice(ctx, passages, ranked, refs);
+  if (qa.provider === 'chrome' || !isRemote(qa.provider)) return answerOnDevice(ctx, passages, ranked, refs);
+  const account = accountOf(qa, qa.provider);
+  const label = PROVIDERS[qa.provider].label;
+  if (!account) return { method: 'none', text: '', refs: [], note: `${label} n’est pas prêt : ajoutez sa clé (options › IA)` };
   if (!passages.length) return { method: 'none', text: '', refs: [], note: NO_COURSE };
-  const { system, user } = buildPrompt(ctx.question, forPrompt(passages, ranked), { title: ctx.title, stamp: ctx.stamp });
+  const { system, user } = buildPrompt(ctx.question, forPrompt(passages, ranked, PROVIDERS[qa.provider].budget), { title: ctx.title, stamp: ctx.stamp });
   try {
-    const reply = await sendMessage({ key: qa.key, model: qa.model, system, user, base: qa.base, maxTokens: 900 });
+    const reply = await chat({ id: qa.provider, ...account }, { system, user, maxTokens: 900 });
     const parsed = parseAnswer(reply, passages);
     return { method: 'ai', text: parsed.found ? parsed.answer : '', refs: refs(parsed) };
   } catch (e) {
-    return { method: 'none', text: '', refs: [], note: `Claude n’a pas pu répondre (${e instanceof ClaudeError || e instanceof Error ? e.message : String(e)})` };
+    return { method: 'none', text: '', refs: [], note: `${label} n’a pas pu répondre (${e instanceof Error ? e.message : String(e)})` };
   }
 }
 
@@ -137,10 +142,10 @@ async function answerOnDevice(ctx: AnswerContext, passages: Passage[], ranked: R
   if (ai.state !== 'available' || !ai.lang) {
     const note =
       ai.state === 'downloadable'
-        ? 'activez l’IA intégrée de Chrome, une fois (options › Questions › Télécharger)'
+        ? 'activez l’IA intégrée de Chrome, une fois (options › IA › Télécharger)'
         : ai.state === 'downloading'
           ? 'l’IA intégrée de Chrome se télécharge : réessayez dans un moment (+ › Chercher à nouveau)'
-          : 'l’IA intégrée de Chrome n’est pas disponible sur cet ordinateur : choisissez Claude (options › Questions)';
+          : 'l’IA intégrée de Chrome n’est pas disponible sur cet ordinateur : choisissez une IA gratuite (Groq, Gemini…) dans options › IA';
     return { method: 'none', text: '', refs: [], note };
   }
   if (!passages.length) return { method: 'none', text: '', refs: [], note: NO_COURSE };
