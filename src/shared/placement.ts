@@ -33,7 +33,7 @@ export interface PanelPlace {
 export const DOCK_ZONE = 40;
 export const FLOAT_MIN = { w: 300, h: 240 } as const;
 export const MINI_MIN = { w: 260, h: 104 } as const;
-export const MINI_DEFAULT = { w: 480, h: 184 } as const;
+export const MINI_DEFAULT = { w: 500, h: 228 } as const;
 export const GLASS_DEFAULT = 0.55;
 /** Share of the screen the video keeps in a fullscreen split. */
 export const SPLIT_MIN = 0.4;

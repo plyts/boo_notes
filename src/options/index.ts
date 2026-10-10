@@ -58,6 +58,7 @@ function renderSettings(s: Settings): void {
   checkRadio('layout', s.layout);
   checkRadio('dockSide', s.dockSide);
   field('splitRatio')[0].value = String(s.splitRatio);
+  field('miniTextSize')[0].value = String(s.miniTextSize);
   checkRadio('theme', s.theme);
   checkRadio('replaySeconds', String(s.replaySeconds));
   checkRadio('captureFormat', s.captureFormat);
@@ -70,6 +71,7 @@ function renderSettings(s: Settings): void {
 
 function renderOutputs(): void {
   (document.getElementById('drawerWidth-out') as HTMLOutputElement).value = `${field('drawerWidth')[0].value} px`;
+  (document.getElementById('miniTextSize-out') as HTMLOutputElement).value = `${field('miniTextSize')[0].value} px`;
   (document.getElementById('splitRatio-out') as HTMLOutputElement).value = `${Math.round(Number(field('splitRatio')[0].value) * 100)} %`;
   (document.getElementById('captureQuality-out') as HTMLOutputElement).value =
     `${Math.round(Number(field('captureQuality')[0].value) * 100)} %`;
@@ -94,6 +96,7 @@ function readPatch(target: HTMLInputElement | HTMLSelectElement): Partial<Settin
     case 'replaySeconds':
     case 'drawerWidth':
     case 'splitRatio':
+    case 'miniTextSize':
     case 'captureQuality':
       return { [name]: Number(target.value) };
     case 'layout':

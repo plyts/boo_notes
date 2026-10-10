@@ -15,6 +15,8 @@ export interface Settings {
   stripHeight: number;
   /** Fullscreen split: the share of the screen the video keeps (0.4–0.85). */
   splitRatio: number;
+  /** Mini: size of the line being said, in px (12–48); the other lines follow it. */
+  miniTextSize: number;
   theme: Theme;
   /** Prefix new note lines with the current timecode. */
   autoTimestamp: boolean;
@@ -61,6 +63,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   dockSide: 'right',
   stripHeight: 300,
   splitRatio: SPLIT_DEFAULT,
+  miniTextSize: 18,
   theme: 'auto',
   autoTimestamp: true,
   autoPause: false,
@@ -115,6 +118,7 @@ export function normalizeSettings(raw: unknown): Settings {
     dockSide: isDockSide(r.dockSide) ? r.dockSide : d.dockSide,
     stripHeight: Math.round(clamp(num(r.stripHeight, d.stripHeight), STRIP_MIN_HEIGHT, STRIP_MAX_HEIGHT)),
     splitRatio: Math.round(clamp(num(r.splitRatio, d.splitRatio), SPLIT_MIN, SPLIT_MAX) * 1000) / 1000,
+    miniTextSize: Math.round(clamp(num(r.miniTextSize, d.miniTextSize), 12, 48)),
     theme: pick(r.theme, ['auto', 'dark', 'light'], d.theme),
     autoTimestamp: bool(r.autoTimestamp, d.autoTimestamp),
     autoPause: bool(r.autoPause, d.autoPause),

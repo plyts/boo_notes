@@ -70,6 +70,10 @@ describe('placement du panneau', () => {
     expect(normalizeSettings({})).toMatchObject({ dockSide: 'right', stripHeight: 300, splitRatio: 0.7 });
     expect(normalizeSettings({ dockSide: 'left', stripHeight: 5000, splitRatio: 0.1 })).toMatchObject({ dockSide: 'left', stripHeight: 720, splitRatio: 0.4 });
     expect(normalizeSettings({ dockSide: 'diagonal' }).dockSide).toBe('right');
+    // The Mini's text size: 18 px by default, 12–48 px.
+    expect(normalizeSettings({}).miniTextSize).toBe(18);
+    expect(normalizeSettings({ miniTextSize: 99 }).miniTextSize).toBe(48);
+    expect(normalizeSettings({ miniTextSize: 3 }).miniTextSize).toBe(12);
   });
 });
 

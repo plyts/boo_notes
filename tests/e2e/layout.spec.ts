@@ -111,7 +111,8 @@ test('« Plein écran avec les notes » : bouton du panneau, aller et retour', a
   const button = panel(page).getByRole('button', { name: 'Plein écran avec les notes' });
   await expect(button).toBeVisible();
   await button.click();
-  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.tagName)).toBe('MAIN');
+  // The player itself, like the site's own fullscreen button: same split screen either way.
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('movie_player');
   await expect(page.locator('#movie_player')).toHaveAttribute('data-boo-notes-fit', 'fill');
   await expect.poll(async () => {
     const { video, notes } = await boxes(page);

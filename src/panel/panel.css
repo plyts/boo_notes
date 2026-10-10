@@ -1670,12 +1670,31 @@ html[data-mode='pip'] .mini-bar {
   accent-color: #a497ff;
 }
 
+.mini-size {
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mini-size.smaller {
+  font-size: 11px;
+}
+
+.mini-size.larger {
+  font-size: 16px;
+}
+
+.mini-size:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Every line follows the size chosen for the one being said (--mini-size, A− / A+). */
 .mini-lines {
   display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  justify-content: safe center;
+  justify-content: flex-start;
   gap: 3px;
   overflow: hidden;
 }
@@ -1686,14 +1705,12 @@ html[data-mode='pip'] .mini-bar {
   flex: none;
 }
 
-.mini-prev,
-.mini-next {
-  flex: 0 1 auto;
-  min-height: 0;
+.mini-prev {
+  flex: none;
   margin: 0;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.5);
-  font-size: 12.5px;
+  font-size: max(12px, calc(var(--mini-size, 18px) * 0.72));
   line-height: 1.35;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -1703,9 +1720,9 @@ html[data-mode='pip'] .mini-bar {
   all: unset;
   display: block;
   color: #fff;
-  font-size: 17px;
+  font-size: var(--mini-size, 18px);
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.3;
   overflow-wrap: anywhere;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: pointer;
@@ -1713,7 +1730,7 @@ html[data-mode='pip'] .mini-bar {
 
 .mini-now.idle {
   color: rgba(255, 255, 255, 0.78);
-  font-size: 14px;
+  font-size: max(13px, calc(var(--mini-size, 18px) * 0.8));
   font-weight: 500;
   cursor: default;
 }
@@ -1721,7 +1738,51 @@ html[data-mode='pip'] .mini-bar {
 .mini-tr {
   margin: 0;
   color: #cfc8ff;
-  font-size: 15px;
+  font-size: calc(var(--mini-size, 18px) * 0.86);
   font-style: italic;
-  line-height: 1.35;
+  line-height: 1.3;
 }
+
+/* The next lines, one after the other, fading out where the widget ends. */
+.mini-upcoming {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}
+
+.mini-next-line {
+  flex: none;
+}
+
+.mini-next-line:nth-child(n + 2) {
+  opacity: 0.8;
+}
+
+.mini-next-line:nth-child(n + 3) {
+  opacity: 0.62;
+}
+
+.mini-next,
+.mini-next-tr {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+.mini-next {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: max(12px, calc(var(--mini-size, 18px) * 0.76));
+}
+
+.mini-next-tr {
+  color: rgba(207, 200, 255, 0.6);
+  font-size: max(11px, calc(var(--mini-size, 18px) * 0.66));
+  font-style: italic;
+}
+

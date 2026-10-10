@@ -703,7 +703,14 @@ class PanelApp {
       expand: () => this.post({ type: 'mini', action: 'expand' }),
       close: () => this.post({ type: 'mini', action: 'close' }),
       seek: (seconds) => this.post({ type: 'seek', seconds }),
+      textSize: (px) => {
+        this.settings = { ...this.settings, miniTextSize: px };
+        void saveSettings({ miniTextSize: px }).catch(() => undefined);
+      },
+      // Its own window (always on top) is resized by hand.
+      fit: (height) => MODE !== 'pip' && this.post({ type: 'mini-fit', height }),
     });
+    this.mini.setTextSize(this.settings.miniTextSize);
     this.fsHint = h('div', { class: 'fs-hint', hidden: true }, 'Échap : quitter le plein écran');
 
     const actions: HTMLElement[] = [];
@@ -2058,6 +2065,8 @@ class PanelApp {
         this.settings = normalizeSettings(changes.settings.newValue);
         this.autoPause.enabled = this.settings.autoPause;
         this.applyTheme();
+        // The Mini's text size, chosen here, in the options or in its always-on-top window.
+        this.mini.setTextSize(this.settings.miniTextSize);
         this.renderLive();
         if (before.autoTranslate !== this.settings.autoTranslate || before.translateTo !== this.settings.translateTo) {
           void this.setTranslate(this.settings.autoTranslate, false);

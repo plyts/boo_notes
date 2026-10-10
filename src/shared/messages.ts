@@ -538,5 +538,7 @@ export type PanelToContent =
   | { type: 'mini'; action: 'enter' | 'expand' | 'pin' | 'unpin' | 'close' }
   /** Tint of the Mini's glass (0.15–0.9). */
   | { type: 'glass'; value: number }
+  /** The Mini's lines no longer fit (larger text): the widget at least this tall (px). */
+  | { type: 'mini-fit'; height: number }
   /** Docks the panel to a side, or lets it float. */
   | { type: 'place'; to: DockSide | 'float' };

@@ -272,6 +272,18 @@ deux leçons du même module ne partagent jamais une note (ni son classement cou
   s’effaçant. Quand le plein écran se termine, les notes reviennent dans la page. Un panneau retiré
   envoie ses dernières modifications aussitôt (`pagehide`), sans file d’attente. Un cadre sans agent
   (ou une vidéo seule) en plein écran laisse la place à son conteneur.
+- **Ancré, la page entière se décale** : la marge sur `<html>` ne déplace pas les éléments fixés à la
+  fenêtre. Ceux qui sont calés sur le bord de l’ancrage (la colonne « Contenu du cours » d’Udemy :
+  sans cela cachée sous les notes, sa place réservée restant vide à côté de la vidéo) sont trouvés
+  par `elementsFromPoint` le long de ce bord et décalés de la taille des notes (`left` / `right` en
+  ligne, rendus tels quels ensuite ; `src/content/edges.ts`, revu chaque seconde tant que les notes
+  sont ancrées). Les éléments sur toute la largeur et le lecteur sont laissés de côté.
+- **Un seul plein écran partagé** : le bouton ⤢ du panneau met **le lecteur lui-même** en plein écran,
+  comme le bouton du site (son conteneur seulement pour une vidéo nue ou un cadre, qui ne peuvent
+  pas contenir les notes) ; un site qui met **toute la page** en plein écran (Udemy) voit son lecteur
+  ajusté de la même façon, avec un fond noir autour (`box-shadow`, retiré ensuite). Dans les trois
+  cas le lecteur, déjà à la taille de l’écran, est réduit dans la place libre et centré : la vidéo
+  la remplit.
 - **Panneau déplacé** : la poignée, les bords et les zones d’ancrage sont dans le Shadow DOM du
   drawer, au-dessus de l’iframe (un geste commencé dans l’iframe n’arriverait pas à la page) ; le
   pointeur est capturé (`setPointerCapture`) et l’iframe ignore la souris pendant le geste. Les marges

@@ -228,6 +228,8 @@ class ContentApp {
       },
       onPlaced: () => this.afterPlacement(true),
       onExpand: () => this.expandMini(),
+      isOwn: (el) => el === this.overlay.host,
+      player: () => this.player.box(),
     });
     this.subtitles = new SubtitleCollector({
       flush: async (noteId, info, cues, replace, engaged) => {
@@ -961,7 +963,14 @@ class ContentApp {
     // Floating notes and the Mini sit over the video by choice.
     const notes = this.drawer.docked ? this.drawer.rect() : null;
     const side = this.drawer.dockSide;
-    if (fs && fs !== document.documentElement && fs !== document.body) {
+    // The site put the whole page fullscreen (Udemy's own fullscreen): its player, filling the screen, goes
+    // beside the notes like a player fullscreen by itself — centred in the free part of the screen.
+    if (fs && (fs === document.documentElement || fs === document.body)) {
+      if (notes) this.fit.apply(this.player.box(), areaBeside(notes, side, innerWidth, innerHeight, true), 'fill', [], true);
+      else this.fit.clear();
+      return;
+    }
+    if (fs) {
       // Split screen: the video in the part the notes leave (their side follows where they are docked).
       const area = notes ? areaBeside(notes, side, innerWidth, innerHeight, true) : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
       const subject = this.fullscreenSubject;
@@ -993,12 +1002,15 @@ class ContentApp {
   }
 
   /**
-   * Puts `subject`'s container fullscreen: `subject` can then be scaled into
-   * the part of the screen the notes leave. Resolves to the error, if refused.
+   * Puts `subject` fullscreen, like the site's own fullscreen button: the
+   * player lays itself out on the whole screen, then is scaled into the part
+   * the notes leave (the picture filling it, centred). A bare video or a
+   * frame cannot hold the notes: its container instead. Resolves to the
+   * error, if refused.
    */
   private async enterFullscreen(subject: HTMLElement): Promise<string | null> {
     const parent = subject.parentElement;
-    const root = parent && parent !== document.body ? parent : document.documentElement;
+    const root = hostsChildren(subject) ? subject : parent && parent !== document.body ? parent : document.documentElement;
     this.fullscreenBackdrop = { el: root, value: root.style.getPropertyValue('background'), priority: root.style.getPropertyPriority('background') };
     this.fullscreenSubject = subject;
     root.style.setProperty('background', '#000', 'important');
@@ -2188,6 +2200,9 @@ class ContentApp {
       case 'glass':
         this.drawer.setGlass(msg.value);
         this.afterPlacement(true);
+        return;
+      case 'mini-fit':
+        if (this.drawer.growMini(msg.height)) this.afterPlacement(true);
         return;
       case 'place':
         if (msg.to === 'float') this.drawer.undock();

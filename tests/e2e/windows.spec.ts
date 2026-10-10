@@ -238,12 +238,13 @@ test.describe('Mini (paroles)', () => {
     await expect(mini).toBeVisible();
     await expect(mini.locator('.mini-now')).toHaveText('The circulation of F around the boundary');
     await expect(mini.locator('.mini-prev')).toHaveText('Welcome to the lesson.');
-    await expect(mini.locator('.mini-next')).toHaveText('equals the flux of its curl.');
+    // The next lines, one after the other.
+    await expect(mini.locator('.mini-next')).toHaveText(['equals the flux of its curl.', 'Any questions?']);
     await expect(mini.locator('.mini-tr')).toHaveText('[fr] The circulation of F around the boundary');
     await expect(mini.locator('.mini-clock')).toHaveText('EN DIRECT · 00:04');
     // Small and see-through, over the video: the page keeps its whole width.
     const box = await boxOf(drawer(page));
-    expect(box.height).toBeLessThan(220);
+    expect(box.height).toBeLessThan(260);
     expect(await margin(page, 'right')).toBe('');
     expect(await drawer(page).evaluate((el) => getComputedStyle(el).backdropFilter)).toContain('blur');
 
@@ -275,6 +276,52 @@ test.describe('Mini (paroles)', () => {
     expect(Math.round((await boxOf(drawer(page))).x)).toBe(Math.round(box.x + 120));
     await runCommand(sw, page, 'toggle-mini');
     await expect(drawer(page)).not.toHaveClass(/mini/);
+  });
+
+  test('Mini : la taille du texte se règle (A− / A+, Ctrl + molette, + / −), retenue ; le widget grandit pour la suivre', async ({ page, sw }) => {
+    await openWatch(page);
+    await addTrack(page);
+    await setVideo(page, 4);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await p.getByRole('button', { name: 'Mode Mini' }).click();
+    const mini = p.getByRole('region', { name: 'Mini : paroles en direct' });
+    await expect(mini.locator('.mini-now')).toHaveText('The circulation of F around the boundary');
+    const size = () => mini.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--mini-size'));
+    const font = () => mini.locator('.mini-now').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(await size()).toBe('18px');
+    const before = await boxOf(drawer(page));
+
+    // A+ up to the largest: larger lines, kept in the settings; the widget grows so the line still fits.
+    const larger = mini.getByRole('button', { name: 'Texte plus grand' });
+    for (let i = 0; i < 20 && !(await larger.isDisabled()); i++) await larger.click();
+    expect(await size()).toBe('48px');
+    expect(await font()).toBe(48);
+    await expect.poll(async () => (await storedSettings(sw))?.miniTextSize).toBe(48);
+    await expect.poll(async () => (await boxOf(drawer(page))).height).toBeGreaterThan(before.height);
+    // The next lines follow the size (smaller than the line being said).
+    const next = await mini.locator('.mini-next').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(next).toBeGreaterThan(18);
+    expect(next).toBeLessThan(48);
+
+    // Ctrl + molette over the widget (a pinch on a touchpad): one step smaller; the page is not zoomed.
+    const b = await boxOf(drawer(page));
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, 120);
+    await page.keyboard.up('Control');
+    await expect.poll(size).toBe('46px');
+    // + / − on the widget.
+    await mini.getByRole('button', { name: 'Texte plus petit' }).focus();
+    await page.keyboard.press('-');
+    await expect.poll(size).toBe('44px');
+    await expect.poll(async () => (await storedSettings(sw))?.miniTextSize).toBe(44);
+
+    // Kept: the Mini of another page opens at that size.
+    await openWatch(page);
+    await openNotes(sw, page);
+    await panel(page).getByRole('button', { name: 'Mode Mini' }).click();
+    await expect.poll(() => panel(page).getByRole('region', { name: 'Mini : paroles en direct' }).evaluate((el) => (el as HTMLElement).style.getPropertyValue('--mini-size'))).toBe('44px');
   });
 
   test('épingle : le Mini dans sa fenêtre toujours au-dessus ; fermée, il revient dans la page', async ({ page, sw }) => {

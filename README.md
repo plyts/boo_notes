@@ -66,17 +66,23 @@ tableau de votre page.
 - **Le panneau se pose où l’on veut** : sa poignée **⠿** (en haut à gauche) le déplace — il flotte
   sur la page, ses bords le redimensionnent ; contre un **bord** de la fenêtre, une zone s’allume
   (« Relâchez : ancré à droite ») et il s’y **ancre** : **droite, gauche, haut ou bas** (bande sur
-  toute la largeur), la page se décale et la vidéo reste entière. Chaque site retient où il a été
-  posé, et sa taille. Menu **Disposition** (icône à côté de « Mini ») pour faire de même au clic.
+  toute la largeur), la page se décale et la vidéo reste entière ; ce que la page fixe à ce bord (la
+  colonne « Contenu du cours » d’Udemy, un bouton de discussion) se décale avec elle, au lieu de
+  passer sous les notes en laissant une bande vide. Chaque site retient où il a été posé, et sa
+  taille. Menu **Disposition** (icône à côté de « Mini ») pour faire de même au clic.
 - **Mini (paroles)** : le bouton **Mini** (ou `Alt+Maj+M`) réduit le panneau à un petit widget en
   **verre dépoli** sur la vidéo — la réplique en cours en grand, **sa traduction** en italique, la
-  précédente et la suivante en retrait ; elles défilent avec la vidéo. Poignée, **épingle « toujours
+  précédente au-dessus et **les suivantes à la suite** (avec leur traduction), qui défilent avec la
+  vidéo. **Taille du texte** au choix : **A− / A+**, Ctrl + molette (ou pincer le pavé tactile), touches
+  **+ / −** ; retenue, et le widget grandit pour la suivre. Poignée, **épingle « toujours
   au-dessus »** (le Mini part dans sa propre petite fenêtre, au-dessus de toutes les applications,
   pendant que la vidéo continue derrière), **opacité** du fond, **⤢ Agrandir** (ou double-clic : le
   panneau complet revient à sa place, curseur en fin de note) et ×.
 - **Plein écran partagé** : la vidéo garde **70 %** de l’écran (réglable : on tire le séparateur, ou
   options › Panneau), les notes le reste, **du côté où elles sont ancrées** ; en bas des notes, la
-  réplique en cours et sa traduction ; `Échap` quitte le plein écran.
+  réplique en cours et sa traduction ; `Échap` quitte le plein écran. Même résultat avec le bouton
+  plein écran du site (même quand il met toute la page en plein écran, comme Udemy) et avec le
+  bouton ⤢ du panneau : la vidéo remplit la place libre, centrée, sur fond noir.
 - **Côte à côte (fenêtres)** : la fenêtre Chrome de la vidéo et la fenêtre des notes se partagent
   l’**écran** — 2/3 · 1/3, 1/2 · 1/2, notes à gauche, 3/4 · 1/4 — avec une **frontière commune**
   (redimensionner l’une redimensionne l’autre) ; « Quitter côte à côte » rend à la fenêtre sa taille.
@@ -300,7 +306,8 @@ d’ancrage et ancrage à gauche, la vidéo entière ; carte flottante redimensi
 bande en bas et sa hauteur ; Mini : réplique, traduction, voisines, opacité, déplacement, ⤢ prêt à
 écrire, `Alt+Maj+M` ; épingle « toujours au-dessus » en Picture-in-Picture ; plein écran 70 / 30 et
 son séparateur, notes à gauche ; « Côte à côte » des fenêtres, frontière commune et retour à l’état
-d’avant), **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
+d’avant ; taille du texte du Mini et répliques suivantes ; **page façon Udemy** : colonne fixée au
+bord rangée à côté des notes, plein écran du site et du panneau identiques), **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu, **mise à jour de
@@ -352,7 +359,8 @@ docs/         architecture, protocole, design, transcription, questions, Notion
   plateformes mais non vérifiés sur les sites réels depuis cet environnement. Des replis existent
   (plus grande `<video>` visible, `document.title`, marqueur le long du bas de la vidéo).
 - **Panneau ancré** : la page est décalée via une marge sur `<html>` (du côté de l’ancrage) ; les
-  éléments en `position: fixed` d’un site restent calés sur la fenêtre (le panneau démarre sous
+  éléments en `position: fixed` calés sur ce bord (colonnes, boutons) sont décalés d’autant ; ceux
+  qui couvrent toute la largeur (en-têtes) restent calés sur la fenêtre (le panneau démarre sous
   l’en-tête fixe de YouTube pour ne pas le masquer). Ancré en haut ou en bas, la page défile : un
   lecteur plus haut que la place laissée est réduit tant qu’il commence dans cette place.
 - **Mini « toujours au-dessus »** : une fenêtre Picture-in-Picture de document (Chrome 116+), une à

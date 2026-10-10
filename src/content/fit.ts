@@ -34,7 +34,9 @@ interface Mapping {
 
 type Saved = Array<[property: string, value: string, priority: string]>;
 
-const FIT_PROPS = ['translate', 'scale'];
+const FIT_PROPS = ['translate', 'scale', 'box-shadow'];
+/** Black all around the player (the fullscreen backdrop of a page fullscreen as a whole). */
+const BACKDROP = '0 0 0 200vmax #000';
 // Longhands only: a shorthand restored from '' would wipe the longhands set without it.
 const KEEP_PROPS = ['translate', 'scale', 'transform-origin', 'top', 'right', 'bottom', 'left', 'width', 'height', 'pointer-events'];
 
@@ -77,9 +79,10 @@ export class PlayerFit {
    * Fits `el` into `area` (its unbounded sides far out, see areaBeside).
    * `mode`: `shrink` (side by side: only scaled down, anchored at its
    * corner) or `fill` (fullscreen: scaled to fill, centred). `keep`: fixed
-   * boxes inside `el` that must stay as they are.
+   * boxes inside `el` that must stay as they are. `backdrop`: black around
+   * it (the page's own fullscreen of the whole page, its other parts hidden).
    */
-  apply(el: HTMLElement | null, area: Area | null, mode: 'shrink' | 'fill', keep: HTMLElement[] = []): void {
+  apply(el: HTMLElement | null, area: Area | null, mode: 'shrink' | 'fill', keep: HTMLElement[] = [], backdrop = false): void {
     if (!el || !area || area.right - area.left < 80 || area.bottom - area.top < 60) {
       this.clear();
       return;
@@ -119,7 +122,11 @@ export class PlayerFit {
         this.clear();
         return;
       }
-      const fit = Math.min((area.right - x0) / width, bounded ? (area.bottom - y0) / height : 1, 1);
+      // Moved out of the notes' way, it ends no further than it did (a player beside notes on the left is
+      // narrowed by their gap, not pushed into what stands on its right).
+      const xEnd = Math.min(area.right, left + width);
+      const yEnd = Math.min(area.bottom, top + height);
+      const fit = Math.min((xEnd - x0) / width, bounded ? (yEnd - y0) / height : 1, 1);
       s = Math.max(0.3, fit);
       ax = x0 - s * left;
       ay = y0 - s * top;
@@ -148,6 +155,7 @@ export class PlayerFit {
     const o = originOf(el, { left, top });
     el.style.setProperty('scale', String(next.s), 'important');
     el.style.setProperty('translate', `${round(next.ax - (1 - next.s) * o.x, 2)}px ${round(next.ay - (1 - next.s) * o.y, 2)}px`, 'important');
+    if (backdrop) el.style.setProperty('box-shadow', BACKDROP, 'important');
     el.dataset.booNotesFit = mode;
     this.keepAsIs(kept, next, { left, top });
   }

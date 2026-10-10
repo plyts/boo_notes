@@ -23,6 +23,7 @@ import {
   STRIP_MIN_HEIGHT,
   type DrawerLayout,
 } from '../shared/settings';
+import { EdgeShift } from './edges';
 import { attachStyles } from './overlay';
 
 const DEFAULT_WIDTH = DEFAULT_SETTINGS.drawerWidth;
@@ -175,6 +176,10 @@ export interface DrawerOptions {
   onPlaced?: () => void;
   /** Double-click (or Entrée) on the Mini's grip: the full panel back. */
   onExpand?: () => void;
+  /** Other boxes of Boo Notes in the page (the HUD): never moved with the page's fixed elements. */
+  isOwn?: (el: Element) => boolean;
+  /** The player's box: fitted beside the notes on its own. */
+  player?: () => Element | null;
 }
 
 export class Drawer {
@@ -198,6 +203,10 @@ export class Drawer {
   private readonly savedMargins = new Map<string, { value: string; priority: string }>();
   private handle!: HTMLElement;
   private readonly abort = new AbortController();
+  /** The page's elements fixed to the docked edge, moved with the page (see EdgeShift). */
+  private readonly edges: EdgeShift;
+  /** While docked: the page's fixed elements looked at again (pages add and move them). */
+  private edgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly opts: DrawerOptions) {
     this.width = opts.width;
@@ -205,6 +214,10 @@ export class Drawer {
     this.split = opts.splitRatio ?? SPLIT_DEFAULT;
     this.mode = opts.layout === 'overlay' ? 'float' : 'dock';
     this.side = opts.side ?? 'right';
+    this.edges = new EdgeShift({
+      isOwn: (el) => this.owns(el) || (el instanceof HTMLElement && el.id.startsWith('boo-notes')) || Boolean(opts.isOwn?.(el)),
+      player: () => opts.player?.() ?? null,
+    });
     this.host = h('div', { id: 'boo-notes-drawer' });
     this.host.style.cssText = 'all:initial;display:block;position:fixed;top:0;right:0;width:0;height:0;z-index:2147483647;';
     const root = this.host.attachShadow({ mode: 'open' });
@@ -294,6 +307,17 @@ export class Drawer {
     if (this.mini === on) return;
     this.mini = on;
     this.apply();
+  }
+
+  /** The Mini at least `height` px tall (its larger text must fit), kept on screen; false when it already was. */
+  growMini(height: number): boolean {
+    if (!this.mini) return false;
+    const b = this.miniRect();
+    const h = Math.min(Math.round(height), innerHeight - 16);
+    if (b.h >= h) return false;
+    this.miniBox = clampBox({ ...b, h }, innerWidth, innerHeight, MINI_MIN);
+    this.apply();
+    return true;
   }
 
   /** Tint of the Mini's glass (0.15 clear – 0.9 dark). */
@@ -458,6 +482,8 @@ export class Drawer {
   destroy(): void {
     this.opened = false;
     this.apply();
+    this.edges.clear();
+    if (this.edgeTimer) clearInterval(this.edgeTimer);
     this.abort.abort();
     this.host.remove();
   }
@@ -559,9 +585,19 @@ export class Drawer {
   /** Docked notes: the page gives them its side (margin of the root element); restored after. */
   private applyMargins(): void {
     const want = new Map<string, string>();
-    if (this.opened && this.docked && !this.fullscreenTarget) {
-      const side = this.side;
-      want.set(`margin-${side}`, `${side === 'top' || side === 'bottom' ? this.shownHeight : this.shown}px`);
+    const docking = this.opened && this.docked && !this.fullscreenTarget;
+    const size = this.side === 'top' || this.side === 'bottom' ? this.shownHeight : this.shown;
+    if (docking) want.set(`margin-${this.side}`, `${size}px`);
+    // The page's elements fixed to that edge move with it; looked at again every second while docked.
+    this.edges.apply(docking ? this.side : null, docking ? size : 0);
+    if (docking && !this.edgeTimer) {
+      this.edgeTimer = setInterval(() => {
+        const still = this.opened && this.docked && !this.fullscreenTarget;
+        this.edges.apply(still ? this.side : null, still ? (this.side === 'top' || this.side === 'bottom' ? this.shownHeight : this.shown) : 0);
+      }, 1000);
+    } else if (!docking && this.edgeTimer) {
+      clearInterval(this.edgeTimer);
+      this.edgeTimer = null;
     }
     const html = document.documentElement;
     let changed = false;
