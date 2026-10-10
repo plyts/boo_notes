@@ -26,6 +26,8 @@ import { DIAGNOSTIC_MENU, runDiagnostic } from './diagnostic';
 import { downloadPdf } from './pdf';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
+import { Tiler } from './tiling';
+import type { Bounds } from '../shared/tiling';
 
 /**
  * Background service worker: owns storage, keyboard commands, the single
@@ -293,6 +295,63 @@ function normalizeOrigin(origin: string): string {
   return url.origin;
 }
 
+// --- Notes window (pop-out) and « Côte à côte » --------------------------------
+
+/**
+ * Opens the notes of `tabId` in a window of their own (or brings it to the
+ * front): next to the right edge of the video window, or at `bounds`.
+ */
+async function openPopout(tabId: number, parentWindowId: number, bounds?: Bounds): Promise<number> {
+  const data = await session.get();
+  const existing = data.popouts[tabId];
+  if (existing !== undefined) {
+    try {
+      await chrome.windows.update(existing, { ...(bounds ? { state: 'normal', ...bounds } : {}), focused: true });
+      return existing;
+    } catch {
+      // Stale entry: the window is gone, create a new one.
+    }
+  }
+  const settings = await loadSettings();
+  const parent = await chrome.windows.get(parentWindowId);
+  const width = Math.max(380, settings.drawerWidth + 40);
+  const height = Math.min(parent.height ?? 820, 820);
+  const base: chrome.windows.CreateData = {
+    url: chrome.runtime.getURL(`panel/panel.html?tab=${tabId}&mode=popout`),
+    type: 'popup',
+    width,
+    height,
+    focused: true,
+  };
+  let win: chrome.windows.Window | undefined;
+  try {
+    // At its zone, or next to the right edge of the video window.
+    win = await chrome.windows.create(
+      bounds ? { ...base, ...bounds } : { ...base, left: Math.max(0, (parent.left ?? 0) + (parent.width ?? width) - width - 24), top: (parent.top ?? 0) + 48 },
+    );
+    // Some window managers place a new window their way: put it in its zone again.
+    if (bounds && win?.id !== undefined) await chrome.windows.update(win.id, bounds).catch(noop);
+  } catch {
+    // Bounds refused (must be ≥ 50 % on a visible screen): let Chrome place the window.
+    win = await chrome.windows.create(base);
+  }
+  if (win?.id === undefined) throw new Error('Impossible d’ouvrir la fenêtre');
+  const windowId = win.id;
+  await session.update((d) => {
+    d.popouts[tabId] = windowId;
+  });
+  return windowId;
+}
+
+const tiler = new Tiler({
+  openNotes: async (tabId, bounds) => {
+    const tab = await chrome.tabs.get(tabId);
+    return openPopout(tabId, tab.windowId, bounds);
+  },
+});
+
+chrome.windows.onBoundsChanged.addListener((win) => void tiler.onBoundsChanged(win).catch(noop));
+
 // --- Keyboard commands ------------------------------------------------------
 
 /** Commands that bring the notes to the foreground. */
@@ -483,51 +542,28 @@ const handlers: Handlers = {
 
   'popout:open': async (_msg, sender) => {
     const tab = requireTab(sender);
-    const data = await session.get();
-    const existing = data.popouts[tab.id];
-    if (existing !== undefined) {
-      try {
-        await chrome.windows.update(existing, { focused: true });
-        return { windowId: existing };
-      } catch {
-        // Stale entry: the window is gone, create a new one.
-      }
-    }
-    const settings = await loadSettings();
-    const parent = await chrome.windows.get(tab.windowId);
-    const width = Math.max(380, settings.drawerWidth + 40);
-    const height = Math.min(parent.height ?? 820, 820);
-    const base: chrome.windows.CreateData = {
-      url: chrome.runtime.getURL(`panel/panel.html?tab=${tab.id}&mode=popout`),
-      type: 'popup',
-      width,
-      height,
-      focused: true,
-    };
-    let win: chrome.windows.Window | undefined;
-    try {
-      // Next to the right edge of the video window.
-      win = await chrome.windows.create({
-        ...base,
-        left: Math.max(0, (parent.left ?? 0) + (parent.width ?? width) - width - 24),
-        top: (parent.top ?? 0) + 48,
-      });
-    } catch {
-      // Bounds refused (must be ≥ 50 % on a visible screen): let Chrome place the window.
-      win = await chrome.windows.create(base);
-    }
-    if (win?.id === undefined) throw new Error('Impossible d’ouvrir la fenêtre');
-    const windowId = win.id;
-    await session.update((d) => {
-      d.popouts[tab.id] = windowId;
-    });
-    return { windowId };
+    return { windowId: await openPopout(tab.id, tab.windowId) };
   },
 
   'popout:close': async (msg) => {
     const data = await session.get();
     const windowId = data.popouts[msg.tabId];
     if (windowId !== undefined) await chrome.windows.remove(windowId).catch(noop);
+  },
+
+  'tile:set': async (msg) => {
+    await tiler.set(msg.tabId, msg.tile, msg.area);
+  },
+
+  'tile:clear': async (msg) => {
+    await tiler.clear(msg.tabId);
+  },
+
+  'tile:status': async (msg) => tiler.status(msg.tabId),
+
+  'tab:focus': async (_msg, sender) => {
+    const tab = requireTab(sender);
+    await focusTab(tab.id);
   },
 
   'options:open': async () => {
@@ -977,6 +1013,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
+  void tiler.onRemoved(windowId).catch(noop);
   const owner = SessionState.popoutOwner(await session.get(), windowId);
   if (owner === null) return;
   await session.update((d) => {

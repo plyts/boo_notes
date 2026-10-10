@@ -94,7 +94,7 @@ test('options page', async ({ context, sw }) => {
   const page = await context.newPage();
   await page.setViewportSize({ width: 1200, height: 900 });
   await page.goto(`chrome-extension://${id}/options/options.html#bienvenue`);
-  await expect(page.locator('#shortcut-rows .row')).toHaveCount(7);
+  await expect(page.locator('#shortcut-rows .row')).toHaveCount(8);
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/options.png` });
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -232,4 +232,53 @@ test('transcript tab, live subtitle and passage card', async ({ context, page, s
   await page.mouse.move(10, 10);
   await page.waitForTimeout(600);
   await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-passage.png` });
+});
+
+test('where the notes stand: Mini, layout menu, fullscreen split', async ({ context, page, sw }) => {
+  await mkdir(OUT, { recursive: true });
+  const lines: Array<[number, string, string]> = [
+    [0, 'A DAG describes the dependencies between tasks.', 'Un DAG décrit les dépendances entre les tâches.'],
+    [3, 'Each task runs when the tasks it depends on are done.', 'Chaque tâche s’exécute quand celles dont elle dépend sont terminées.'],
+    [6, 'That is why the graph must not contain a cycle.', 'C’est pourquoi le graphe ne doit contenir aucun cycle.'],
+    [9, 'An operator defines what a single task does.', 'Un opérateur définit ce que fait une tâche.'],
+  ];
+  const vtt = ['WEBVTT', '', ...lines.flatMap(([s, en]) => [`00:00:${String(s).padStart(2, '0')}.000 --> 00:00:${String(s + 3).padStart(2, '0')}.000`, en, ''])].join('\n');
+  await context.route('https://www.youtube.com/__fixtures/dag.vtt', (route) => route.fulfill({ contentType: 'text/vtt', body: vtt }));
+  await context.addInitScript((table: Record<string, string>) => {
+    if (location.protocol !== 'chrome-extension:') return;
+    Object.assign(globalThis, { Translator: { availability: async () => 'available', create: async () => ({ translate: async (t: string) => table[t] ?? t }) } });
+  }, Object.fromEntries(lines.map(([, en, fr]) => [en, fr])));
+  await sw.evaluate(async () => {
+    const { settings } = await chrome.storage.sync.get('settings');
+    await chrome.storage.sync.set({ settings: { ...(settings ?? {}), autoTranslate: true, translateTo: 'fr' } });
+  });
+  await page.setViewportSize({ width: 1180, height: 700 });
+  await openWatch(page, '&theme=dark');
+  await page.evaluate(() => {
+    const t = document.createElement('track');
+    Object.assign(t, { kind: 'subtitles', srclang: 'en', label: 'English', src: '/__fixtures/dag.vtt' });
+    document.querySelector('video')!.append(t);
+    document.querySelector('h1')!.textContent = 'Introduction to Airflow — les DAG';
+  });
+  await setVideo(page, 4);
+  await openNotes(sw, page);
+  const p = panel(page);
+  await page.keyboard.type('Un DAG décrit les dépendances');
+  await p.getByRole('button', { name: 'Disposition du panneau' }).click();
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(400);
+  await page.locator('#boo-notes-drawer .drawer').screenshot({ path: `${OUT}/panel-layout.png` });
+  await page.keyboard.press('Escape');
+  await p.getByRole('button', { name: 'Mode Mini' }).click();
+  await expect(p.locator('.mini-tr')).toHaveText('Chaque tâche s’exécute quand celles dont elle dépend sont terminées.');
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/mini.png`, clip: { x: 0, y: 40, width: 700, height: 440 } });
+  await p.getByRole('button', { name: 'Agrandir : panneau complet (double-clic)' }).click();
+  await page.locator('#movie_player').dblclick({ position: { x: 100, y: 100 } });
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('movie_player');
+  await page.mouse.move(10, 400);
+  await page.waitForTimeout(2800);
+  await page.screenshot({ path: `${OUT}/fullscreen-split.png` });
+  await page.evaluate(() => document.exitFullscreen());
 });

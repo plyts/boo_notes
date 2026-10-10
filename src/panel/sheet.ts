@@ -18,6 +18,7 @@ export const COMMAND_LABELS: Record<CommandId, string> = {
   replay: 'Revoir les dernières secondes',
   'passage-start': 'Début du passage',
   'passage-end': 'Fin du passage (extrait)',
+  'toggle-mini': 'Mode Mini (paroles) · retour au panneau',
 };
 
 const EDITOR_TIPS: Array<[string, string]> = [

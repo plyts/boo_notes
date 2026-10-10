@@ -217,6 +217,16 @@ const ICONS = {
   ],
   chevronDown: [['path', { d: 'M6 9.5l6 6 6-6' }]],
   grip: [['path', { d: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01' }]],
+  /** The Mini: a small widget with the line being said. */
+  mini: [
+    ['rect', { x: '3', y: '5', width: '18', height: '14', rx: '3' }],
+    ['path', { d: 'M7.5 11h9M9.5 14.5h5' }],
+  ],
+  /** Where the panel stands in the window. */
+  placement: [
+    ['rect', { x: '3', y: '4', width: '18', height: '16', rx: '2' }],
+    ['rect', { x: '12.5', y: '7.5', width: '5.5', height: '9', rx: '1' }],
+  ],
   filter: [['path', { d: 'M4 6h16M7 12h10M10 18h4' }]],
   layers: [
     ['path', { d: 'M12 3.5l9 4.5-9 4.5-9-4.5z' }],

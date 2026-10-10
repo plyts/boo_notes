@@ -18,6 +18,7 @@ import {
   type ScormState,
   type MediaMeta,
   type PanelToContent,
+  type PanelView,
   type PlaybackState,
   type TabMessage,
 } from '../shared/messages';
@@ -27,6 +28,7 @@ import { detectVideoContext, readStartTime, timestampUrl, withLesson, type Lesso
 import type { Note } from '../shared/store';
 import { loadSettings, normalizeSettings, onSettingsChanged, saveSettings, type Settings } from '../shared/settings';
 import { findBinding, inPageBindings, type InPageBinding } from '../shared/shortcuts';
+import { areaBeside, MINI_DEFAULT, normalizePlace, placeKey } from '../shared/placement';
 import { formatTimecode } from '../shared/time';
 import { adapterForHost, detectPageTheme, headerInset, queryVisible, type PlatformAdapter } from './adapters';
 import { captureVideoFrame, nextFrame, probeFrame, type Shot } from './capture';
@@ -111,6 +113,10 @@ class ContentApp {
   private pinned = false;
   private embeddedPort: Port | null = null;
   private popoutPort: Port | null = null;
+  /** The Mini in its always-on-top window (Document Picture-in-Picture), and its panel. */
+  private pipWindow: Window | null = null;
+  private pipPort: Port | null = null;
+  private settingsApplied = false;
   private embeddedWaiters: Array<(port: Port) => void> = [];
   private intervals: Array<ReturnType<typeof setInterval>> = [];
   private titleWatch: ReturnType<typeof setInterval> | null = null;
@@ -203,11 +209,25 @@ class ContentApp {
       panelUrl: () => chrome.runtime.getURL(`panel/panel.html?tab=${this.tabId}&mode=embedded`),
       width: this.settings.drawerWidth,
       layout: this.settings.layout,
+      side: this.settings.dockSide,
+      stripHeight: this.settings.stripHeight,
+      splitRatio: this.settings.splitRatio,
       topInset: () => headerInset(this.adapter),
+      videoRect: () => this.player.rect(),
       onResized: (width) => {
         void saveSettings({ drawerWidth: width }).catch(() => undefined);
         this.scheduleFit();
       },
+      onStripResized: (height) => {
+        void saveSettings({ stripHeight: height }).catch(() => undefined);
+        this.scheduleFit();
+      },
+      onSplit: (ratio) => {
+        void saveSettings({ splitRatio: ratio }).catch(() => undefined);
+        this.scheduleFit();
+      },
+      onPlaced: () => this.afterPlacement(true),
+      onExpand: () => this.expandMini(),
     });
     this.subtitles = new SubtitleCollector({
       flush: async (noteId, info, cues, replace, engaged) => {
@@ -248,7 +268,7 @@ class ContentApp {
 
   /** The user is taking notes on this page (panel open): its transcript is kept even before the note exists. */
   private get engaged(): boolean {
-    return this.notesShown || this.popoutPort !== null;
+    return this.notesShown || this.popoutPort !== null || this.pipWindow !== null;
   }
 
   private noteMeta(): NoteMeta {
@@ -261,6 +281,8 @@ class ContentApp {
     document.addEventListener(TEARDOWN_EVENT, this.destroy, { once: true });
     // A teardown may arrive during any await below: never resurrect a destroyed instance.
     this.applySettings(await loadSettings());
+    if (this.dead) return;
+    await this.restorePlace();
     if (this.dead) return;
     this.tabId = (await this.bg({ type: 'hello' })).tabId;
     if (this.dead) return;
@@ -307,12 +329,14 @@ class ContentApp {
     if (this.titleWatch) clearInterval(this.titleWatch);
     if (this.notesShown) step(() => sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ href: location.href, at: Date.now() })));
     step(() => this.fit.clear());
+    step(() => this.pipWindow?.close());
     step(() => this.drawer.destroy());
     step(() => this.overlay.destroy());
     step(() => this.reader.stop());
     for (const r of [this.passage?.recording, this.rangeRecording?.recording, this.trace?.recording]) step(() => void r?.stop().catch(() => undefined));
     step(() => this.embeddedPort?.disconnect());
     step(() => this.popoutPort?.disconnect());
+    step(() => this.pipPort?.disconnect());
     step(() => this.stopSettingsWatch?.());
     step(() => chrome.runtime.onMessage.removeListener(this.onTabMessage));
     step(() => chrome.runtime.onConnect.removeListener(this.onPanelConnect));
@@ -585,10 +609,19 @@ class ContentApp {
   }
 
   private applySettings(s: Settings): void {
+    const before = this.settings;
+    const first = !this.settingsApplied;
+    this.settingsApplied = true;
     this.settings = s;
     this.overlay.setEnabled(s.hudEnabled);
     this.drawer.setWidth(s.drawerWidth);
-    this.drawer.setLayout(s.layout);
+    this.drawer.setStripHeight(s.stripHeight);
+    this.drawer.setSplitRatio(s.splitRatio);
+    // The default place (each site then remembers its own): chosen again in the options, it applies here too.
+    const placed = first || before.layout !== s.layout || before.dockSide !== s.dockSide;
+    if (first || before.layout !== s.layout) this.drawer.setLayout(s.layout);
+    if (first || before.dockSide !== s.dockSide) this.drawer.setSide(s.dockSide);
+    if (placed && !first) this.afterPlacement(true);
     this.subtitles?.setEnabled(s.transcribe);
     if (!s.keepAudio) void this.closeTrace();
   }
@@ -679,6 +712,7 @@ class ContentApp {
     port.onMessage.addListener((msg: PanelToContent) => this.onPanelMessage(port, msg));
     port.onDisconnect.addListener(() => {
       if (port === this.embeddedPort) this.embeddedPort = null;
+      if (port === this.pipPort) this.pipPort = null;
       if (port === this.popoutPort) {
         this.popoutPort = null;
         this.notifyFrames();
@@ -722,6 +756,7 @@ class ContentApp {
     }
     // The notes stay open in fullscreen, beside the video (which makes room for them).
     this.syncLayer(true);
+    this.afterPlacement();
     if (!fs) {
       if (this.fullscreenBackdrop) {
         this.fullscreenBackdrop.el.style.setProperty('background', this.fullscreenBackdrop.value, this.fullscreenBackdrop.priority);
@@ -861,7 +896,7 @@ class ContentApp {
    * where no page can hide it.
    */
   private checkPanel(): void {
-    if (this.dead || !this.drawer.isOpen || this.popoutPort) {
+    if (this.dead || !this.drawer.isOpen || this.popoutPort || this.drawer.isMini) {
       this.coveredSince = 0;
       return;
     }
@@ -923,10 +958,12 @@ class ContentApp {
   private updateFit(): void {
     if (this.dead) return;
     const fs = document.fullscreenElement;
-    // Floating notes (« superposé » layout) sit over the video by choice.
-    const notes = this.drawer.layoutMode === 'side-by-side' ? this.drawer.rect() : null;
+    // Floating notes and the Mini sit over the video by choice.
+    const notes = this.drawer.docked ? this.drawer.rect() : null;
+    const side = this.drawer.dockSide;
     if (fs && fs !== document.documentElement && fs !== document.body) {
-      const area = new DOMRect(0, 0, notes ? notes.left : innerWidth, innerHeight);
+      // Split screen: the video in the part the notes leave (their side follows where they are docked).
+      const area = notes ? areaBeside(notes, side, innerWidth, innerHeight, true) : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
       const subject = this.fullscreenSubject;
       if (!hostsChildren(fs) || !(fs instanceof HTMLElement)) this.fit.clear();
       // What Boo Notes put fullscreen: it fills the screen beside the notes.
@@ -935,7 +972,7 @@ class ContentApp {
       else this.fit.apply(fs, area, 'fill', [this.drawer.host, this.overlay.host]);
       return;
     }
-    if (notes) this.fit.apply(this.player.box(), new DOMRect(0, 0, notes.left - 8, innerHeight), 'shrink');
+    if (notes) this.fit.apply(this.player.box(), areaBeside(notes, side, innerWidth, innerHeight, false), 'shrink');
     else this.fit.clear();
   }
 
@@ -1283,6 +1320,9 @@ class ContentApp {
       case 'passage-end':
         this.overlay.toast('Les passages découpent une vidéo ou un audio : aucun média sur cette page', 'error');
         break;
+      case 'toggle-mini':
+        this.overlay.toast('Le Mini montre les paroles d’une vidéo ou d’un audio : aucun média sur cette page', 'error');
+        break;
     }
   }
 
@@ -1381,11 +1421,17 @@ class ContentApp {
       case 'passage-end':
         await this.passageEnd();
         break;
+      case 'toggle-mini':
+        if (this.drawer.isMini && (this.drawer.isOpen || this.pipWindow)) this.expandMini();
+        else this.enterMini();
+        break;
     }
   }
 
   private openDrawer(focus: 'keep' | 'end' | null): void {
     if (this.popoutPort) return;
+    // The Mini in its own window: the full panel comes back to the page instead.
+    if (this.pipWindow) this.leaveMini();
     // The panel is a page of the extension: none to show once it is reloaded.
     if (!chrome.runtime?.id) {
       this.orphan();
@@ -1418,6 +1464,11 @@ class ContentApp {
   private closeDrawer(): void {
     this.hideInFrame();
     this.drawer.close();
+    // Opened again, the notes come back whole.
+    if (this.drawer.isMini) {
+      this.drawer.setMini(false);
+      this.afterPlacement();
+    }
     this.notifyFrames();
     this.scheduleFit();
     this.overlay.hideMarker();
@@ -1433,6 +1484,8 @@ class ContentApp {
   /** The editor that receives keyboard input: the pop-out if any, else the (opened) drawer. */
   private async inputEditor(): Promise<Port> {
     if (this.popoutPort) return this.popoutPort;
+    // Writing takes the full panel (the Mini only shows the line being said).
+    if (this.drawer.isMini || this.pipWindow) this.leaveMini();
     if (!this.notesShown) this.openDrawer(null);
     // Shown in a fullscreen frame: its agent gave the panel the keyboard.
     if (!this.frameHost) this.drawer.focus();
@@ -1979,7 +2032,7 @@ class ContentApp {
   // --- Panels (drawer iframe / pop-out window) ------------------------------------------
 
   private postPanels(msg: ContentToPanel): void {
-    for (const port of [this.embeddedPort, this.popoutPort]) {
+    for (const port of [this.embeddedPort, this.popoutPort, this.pipPort]) {
       try {
         port?.postMessage(msg);
       } catch {
@@ -2003,10 +2056,14 @@ class ContentApp {
       case 'hello':
         if (msg.mode === 'popout') {
           this.popoutPort = port;
+          this.closePip();
           this.hideInFrame();
           this.drawer.destroyFrame();
+          this.drawer.setMini(false);
           this.embeddedPort = null;
           this.notifyFrames();
+        } else if (msg.mode === 'pip') {
+          this.pipPort = port;
         } else {
           this.embeddedPort = port;
           for (const resolve of this.embeddedWaiters.splice(0)) resolve(port);
@@ -2026,6 +2083,7 @@ class ContentApp {
         if (this.blockedPlayers) port.postMessage({ type: 'players', hosts: this.blockedPlayers.split(' ') } satisfies ContentToPanel);
         if (this.scorm) port.postMessage({ type: 'scorm', state: this.scorm } satisfies ContentToPanel);
         port.postMessage({ type: 'caption', cue: this.caption.cue, state: this.caption.state } satisfies ContentToPanel);
+        port.postMessage({ type: 'view', view: this.panelView() } satisfies ContentToPanel);
         this.broadcastRecording();
         return;
       case 'seek':
@@ -2053,7 +2111,7 @@ class ContentApp {
         else port.postMessage({ type: 'insert-timestamp', seconds: this.player.time(), focus: true } satisfies ContentToPanel);
         break;
       case 'escape':
-        if (port === this.popoutPort) return;
+        if (port === this.popoutPort || port === this.pipPort) return;
         if (this.pinned) {
           this.drawer.blurToPage();
           queryVisible<HTMLElement>(this.adapter.playerFocusSelectors)?.focus({ preventScroll: true });
@@ -2062,7 +2120,8 @@ class ContentApp {
         }
         return;
       case 'close':
-        if (port !== this.popoutPort) this.closeDrawer();
+        if (port === this.pipPort) this.closeMini();
+        else if (port !== this.popoutPort) this.closeDrawer();
         return;
       case 'pin':
         this.setPinned(msg.value);
@@ -2119,8 +2178,181 @@ class ContentApp {
       case 'fullscreen':
         void this.fullscreenWithNotes();
         break;
+      case 'mini':
+        if (msg.action === 'enter') this.enterMini();
+        else if (msg.action === 'expand') this.expandMini();
+        else if (msg.action === 'pin') void this.pinMini();
+        else if (msg.action === 'unpin') this.unpinMini();
+        else this.closeMini();
+        return;
+      case 'glass':
+        this.drawer.setGlass(msg.value);
+        this.afterPlacement(true);
+        return;
+      case 'place':
+        if (msg.to === 'float') this.drawer.undock();
+        else this.drawer.dock(msg.to);
+        this.afterPlacement(true);
+        return;
     }
     this.markInteraction();
+  }
+
+  // --- Where the panel stands: docked, floating, Mini ---------------------------------------
+
+  /** The place this site's notes were last given (side, floating box, Mini). */
+  private async restorePlace(): Promise<void> {
+    const key = placeKey(location.origin);
+    try {
+      const raw = (await chrome.storage.local.get(key))[key] as unknown;
+      if (!raw || this.dead) return;
+      this.drawer.restore(normalizePlace(raw, { mode: this.settings.layout === 'overlay' ? 'float' : 'dock', side: this.settings.dockSide }));
+    } catch {
+      // Storage unreachable: the default place.
+    }
+  }
+
+  private panelView(): PanelView {
+    const p = this.drawer.placement;
+    // Shown inside a course frame alone in fullscreen: that frame's own panel, on its right.
+    if (this.frameHost) return { mode: 'dock', side: 'right', mini: false, pip: false, fullscreen: true, glass: p.glass };
+    return { mode: p.mode, side: p.side, mini: this.drawer.isMini, pip: this.pipWindow !== null, fullscreen: this.drawer.inFullscreen, glass: p.glass };
+  }
+
+  private placeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** The panel moved (or changed): the player fits again, the panels show it; `save`: remembered for the site. */
+  private afterPlacement(save = false): void {
+    if (save) {
+      // Once the gesture settles (a slider sends many values).
+      if (this.placeTimer) clearTimeout(this.placeTimer);
+      this.placeTimer = setTimeout(() => {
+        this.placeTimer = null;
+        if (this.dead) return;
+        try {
+          void chrome.storage.local.set({ [placeKey(location.origin)]: this.drawer.placement }).catch(() => undefined);
+        } catch {
+          // Cut off from the extension.
+        }
+      }, 250);
+    }
+    this.scheduleFit();
+    this.postPanels({ type: 'view', view: this.panelView() });
+  }
+
+  /** The Mini: the line being said and its translation, in a small see-through widget. */
+  private enterMini(): void {
+    if (this.reading) {
+      this.overlay.toast('Le Mini montre les paroles d’une vidéo ou d’un audio : aucun média sur cette page', 'error');
+      return;
+    }
+    if (this.frameHost) {
+      this.overlay.toast('Le Mini n’est pas disponible dans ce plein écran : quittez-le d’abord (Échap)', 'info', 4000);
+      return;
+    }
+    if (this.popoutPort) {
+      // The Mini lives in the page: the notes come back from their window.
+      void this.bg({ type: 'popout:close', tabId: this.tabId }).catch(() => undefined);
+      this.popoutPort = null;
+    }
+    this.drawer.setMini(true);
+    if (!this.drawer.isOpen && !this.pipWindow) this.openDrawer(null);
+    // The keyboard back to the player.
+    this.drawer.blurToPage();
+    this.afterPlacement();
+  }
+
+  /** Out of the Mini (and its window), nothing else. */
+  private leaveMini(): void {
+    this.closePip();
+    if (!this.drawer.isMini) return;
+    this.drawer.setMini(false);
+    this.afterPlacement();
+  }
+
+  /** ⤢ (or a double-click): the full panel back at its place, the cursor at the end of the note. */
+  private expandMini(): void {
+    const fromWindow = this.pipWindow !== null;
+    this.leaveMini();
+    this.openDrawer('end');
+    // From the always-on-top window, Chrome may be behind another application.
+    if (fromWindow) void this.bg({ type: 'tab:focus' }).catch(() => undefined);
+  }
+
+  private closeMini(): void {
+    this.closePip();
+    this.closeDrawer();
+  }
+
+  /**
+   * « Toujours au-dessus »: the Mini in a window of its own (Document
+   * Picture-in-Picture), above every application, while the video plays on
+   * behind. One per tab; closing it brings the Mini back into the page.
+   */
+  private async pinMini(): Promise<void> {
+    if (this.pipWindow) return;
+    const api = (window as Window & { documentPictureInPicture?: { requestWindow(o: { width: number; height: number }): Promise<Window> } }).documentPictureInPicture;
+    if (!api) {
+      this.overlay.toast('« Toujours au-dessus » demande Chrome 116 ou plus récent (image dans l’image des documents)', 'error', 4500);
+      return;
+    }
+    const r = this.drawer.rect();
+    let win: Window;
+    try {
+      win = await api.requestWindow({ width: Math.round(Math.max(300, r?.width ?? MINI_DEFAULT.w)), height: Math.round(Math.max(120, r?.height ?? MINI_DEFAULT.h)) });
+    } catch (e) {
+      this.overlay.toast(`Fenêtre toujours au-dessus refusée : ${errorMessage(e)}`, 'error', 4500);
+      return;
+    }
+    if (this.dead) {
+      win.close();
+      return;
+    }
+    this.pipWindow = win;
+    const doc = win.document;
+    doc.title = 'Boo Notes · Mini';
+    const style = doc.createElement('style');
+    style.textContent = 'html,body{margin:0;height:100%;overflow:hidden;background:#17171e;color-scheme:dark}iframe{display:block;width:100%;height:100%;border:0}';
+    doc.head.append(style);
+    const frame = doc.createElement('iframe');
+    frame.title = 'Boo Notes — Mini';
+    frame.allow = 'translator; language-detector';
+    frame.src = chrome.runtime.getURL(`panel/panel.html?tab=${this.tabId}&mode=pip`);
+    doc.body.append(frame);
+    // Closed by its own ×: the Mini comes back into the page.
+    win.addEventListener(
+      'pagehide',
+      () => {
+        if (this.pipWindow !== win) return;
+        this.pipWindow = null;
+        this.pipPort = null;
+        if (!this.dead && this.drawer.isMini && !this.drawer.isOpen) this.openDrawer(null);
+        if (!this.dead) this.afterPlacement();
+      },
+      { once: true },
+    );
+    // The page's Mini gives way to its window (the panel stays loaded, for ⤢).
+    this.drawer.close();
+    this.afterPlacement();
+  }
+
+  /** « Toujours au-dessus » off: the Mini back in the page. */
+  private unpinMini(): void {
+    this.closePip();
+    if (!this.drawer.isOpen) this.openDrawer(null);
+    this.afterPlacement();
+  }
+
+  private closePip(): void {
+    const win = this.pipWindow;
+    if (!win) return;
+    this.pipWindow = null;
+    this.pipPort = null;
+    try {
+      win.close();
+    } catch {
+      // Already closed.
+    }
   }
 }
 

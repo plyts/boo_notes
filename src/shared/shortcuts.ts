@@ -17,6 +17,7 @@ export const DEFAULT_SHORTCUTS: Readonly<Record<CommandId, string>> = {
   replay: 'Alt+Left',
   'passage-start': 'Alt+I',
   'passage-end': 'Alt+O',
+  'toggle-mini': 'Alt+Shift+M',
 };
 
 export interface KeyCombo {

@@ -16,6 +16,7 @@ const COMMAND_LABELS: Record<CommandId, string> = {
   replay: 'Revoir les dernières secondes',
   'passage-start': 'Début du passage (extrait 02:05 → 06:07)',
   'passage-end': 'Fin du passage : carte, extrait, sous-titres et notes',
+  'toggle-mini': 'Mode Mini : la réplique en cours et sa traduction',
 };
 
 const FORMAT_DESC: Record<string, string> = {
@@ -55,6 +56,8 @@ function renderSettings(s: Settings): void {
   }
   field<HTMLSelectElement>('translateTo')[0].value = s.translateTo;
   checkRadio('layout', s.layout);
+  checkRadio('dockSide', s.dockSide);
+  field('splitRatio')[0].value = String(s.splitRatio);
   checkRadio('theme', s.theme);
   checkRadio('replaySeconds', String(s.replaySeconds));
   checkRadio('captureFormat', s.captureFormat);
@@ -67,6 +70,7 @@ function renderSettings(s: Settings): void {
 
 function renderOutputs(): void {
   (document.getElementById('drawerWidth-out') as HTMLOutputElement).value = `${field('drawerWidth')[0].value} px`;
+  (document.getElementById('splitRatio-out') as HTMLOutputElement).value = `${Math.round(Number(field('splitRatio')[0].value) * 100)} %`;
   (document.getElementById('captureQuality-out') as HTMLOutputElement).value =
     `${Math.round(Number(field('captureQuality')[0].value) * 100)} %`;
   const format = field('captureFormat').find((r) => r.checked)?.value ?? 'image/jpeg';
@@ -89,9 +93,11 @@ function readPatch(target: HTMLInputElement | HTMLSelectElement): Partial<Settin
       return { [name]: (target as HTMLInputElement).checked };
     case 'replaySeconds':
     case 'drawerWidth':
+    case 'splitRatio':
     case 'captureQuality':
       return { [name]: Number(target.value) };
     case 'layout':
+    case 'dockSide':
     case 'theme':
     case 'captureFormat':
     case 'translateTo':

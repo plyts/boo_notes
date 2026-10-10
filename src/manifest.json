@@ -139,6 +139,9 @@
     },
     "passage-end": {
       "description": "Fin du passage : extrait avec ses sous-titres et vos notes (Alt+O dans la page par défaut)"
+    },
+    "toggle-mini": {
+      "description": "Mode Mini : les paroles en cours et leur traduction (Alt+Maj+M dans la page par défaut)"
     }
   },
   "optional_host_permissions": [

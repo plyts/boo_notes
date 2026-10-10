@@ -63,6 +63,23 @@ tableau de votre page.
   les notes **restent affichées** à côté de la vidéo (écran partagé) — tout le lecteur, commandes
   comprises, est réduit dans la place libre. Le bouton **⤢ Plein écran avec les notes** (bas du
   panneau) le fait en un clic, et le plein écran natif d’une vidéo seule est repris par son lecteur.
+- **Le panneau se pose où l’on veut** : sa poignée **⠿** (en haut à gauche) le déplace — il flotte
+  sur la page, ses bords le redimensionnent ; contre un **bord** de la fenêtre, une zone s’allume
+  (« Relâchez : ancré à droite ») et il s’y **ancre** : **droite, gauche, haut ou bas** (bande sur
+  toute la largeur), la page se décale et la vidéo reste entière. Chaque site retient où il a été
+  posé, et sa taille. Menu **Disposition** (icône à côté de « Mini ») pour faire de même au clic.
+- **Mini (paroles)** : le bouton **Mini** (ou `Alt+Maj+M`) réduit le panneau à un petit widget en
+  **verre dépoli** sur la vidéo — la réplique en cours en grand, **sa traduction** en italique, la
+  précédente et la suivante en retrait ; elles défilent avec la vidéo. Poignée, **épingle « toujours
+  au-dessus »** (le Mini part dans sa propre petite fenêtre, au-dessus de toutes les applications,
+  pendant que la vidéo continue derrière), **opacité** du fond, **⤢ Agrandir** (ou double-clic : le
+  panneau complet revient à sa place, curseur en fin de note) et ×.
+- **Plein écran partagé** : la vidéo garde **70 %** de l’écran (réglable : on tire le séparateur, ou
+  options › Panneau), les notes le reste, **du côté où elles sont ancrées** ; en bas des notes, la
+  réplique en cours et sa traduction ; `Échap` quitte le plein écran.
+- **Côte à côte (fenêtres)** : la fenêtre Chrome de la vidéo et la fenêtre des notes se partagent
+  l’**écran** — 2/3 · 1/3, 1/2 · 1/2, notes à gauche, 3/4 · 1/4 — avec une **frontière commune**
+  (redimensionner l’une redimensionne l’autre) ; « Quitter côte à côte » rend à la fenêtre sa taille.
 - **Copier / coller riche** dans les notes ([détails](docs/TRANSCRIPTION.md#copier--coller-dans-les-notes-extension-et-application)) :
   coller (ou glisser) une **capture d’écran**, une **image** du web, une **vidéo** ou un **audio**, du
   **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
@@ -76,6 +93,10 @@ tableau de votre page.
   dit si elle est dans Notion, un bouton **Sync** l’y envoie sinon.
 
 ![Panneau de notes (thème sombre)](docs/screenshots/drawer-dark.png)
+
+| Mini : la réplique en cours et sa traduction, sur la vidéo | Plein écran partagé : la vidéo entière, les notes à côté |
+| --- | --- |
+| ![Mini (paroles)](docs/screenshots/mini.png) | ![Plein écran partagé](docs/screenshots/fullscreen-split.png) |
 
 **Mode lecture** — un article : le passage cité est surligné dans la page et relié à sa note ;
 la bulle « Citer » suit la sélection ; `[[Résistance électrique]]` relie une fiche.
@@ -221,8 +242,10 @@ elle est connectée.
 | **État vide pédagogique** | Une note vide explique quoi faire et montre les 4 raccourcis en touches. |
 | **Retour au bon endroit** | « ✓ Copié » sur la pilule du HUD, vignette dans le toast de capture, snackbar pour les exports, « ✓ Enregistré » dans l’en-tête. |
 | **Infobulles rapides** | Sur le HUD, avec les touches (`⌥ ⇧ S` sur macOS). |
-| **Disposition superposée** | Carte flottante arrondie au-dessus de la page (et en plein écran). Double-clic sur le bord : largeur par défaut. |
-| **Écran partagé** | Côte à côte et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à gauche des notes — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. |
+| **Panneau déplaçable** | Poignée ⠿ : flottant où on le pose (bords et coins pour le redimensionner), ancré à droite, à gauche, en haut ou en bas en le lâchant contre ce bord (zone d’ancrage allumée) ; double-clic sur la poignée : ancré ↔ flottant ; au clavier, flèches sur la poignée. Place, taille et Mini retenus **par site** (`chrome.storage.local`). |
+| **Mini (paroles)** | Widget translucide (verre dépoli, opacité réglable) : réplique en cours, traduction, voisines ; épingle = fenêtre **Document Picture-in-Picture** toujours au-dessus ; ⤢ / double-clic = panneau complet, prêt à écrire. |
+| **Écran partagé** | Ancré et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à côté des notes, quel que soit leur bord — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. En plein écran : 70 / 30 par défaut, séparateur à tirer (double-clic : 70 / 30). |
+| **Côte à côte (fenêtres)** | La fenêtre de la vidéo et celle des notes se partagent la zone de travail de l’écran (`screen.availLeft/Top/Width/Height`), frontière commune suivie par `chrome.windows.onBoundsChanged`, état d’avant rendu à la sortie. |
 | **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
@@ -271,7 +294,12 @@ Les tests E2E couvrent : ouverture du panneau et horodatage automatique, `Alt+Sh
 repli dans la page), Smart Pause (et sa bascule), capture + toast + vignette, `Alt+←`, HUD et copie du
 lien, épinglage, plein écran (notes à côté de la vidéo, lecteur réduit, plein écran natif d’une vidéo
 seule repris par son lecteur, bouton « Plein écran avec les notes »), lecteur large réduit côte à
-côte, **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
+côte, **fenêtrage du panneau** (poignée : posé n’importe où et retrouvé au retour sur le site ; zone
+d’ancrage et ancrage à gauche, la vidéo entière ; carte flottante redimensionnée par ses bords ;
+bande en bas et sa hauteur ; Mini : réplique, traduction, voisines, opacité, déplacement, ⤢ prêt à
+écrire, `Alt+Maj+M` ; épingle « toujours au-dessus » en Picture-in-Picture ; plein écran 70 / 30 et
+son séparateur, notes à gauche ; « Côte à côte » des fenêtres, frontière commune et retour à l’état
+d’avant), **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
 captures et copie du Markdown, persistance après rechargement, double injection du script de contenu, **mise à jour de
@@ -322,9 +350,17 @@ docs/         architecture, protocole, design, transcription, questions, Notion
 - **Sélecteurs Udemy / Coursera** (titre, barre de progression) : écrits d’après le DOM connu de ces
   plateformes mais non vérifiés sur les sites réels depuis cet environnement. Des replis existent
   (plus grande `<video>` visible, `document.title`, marqueur le long du bas de la vidéo).
-- **Mode côte à côte** : la page est décalée via une marge sur `<html>` ; les éléments en
-  `position: fixed` d’un site restent calés sur la fenêtre (le panneau démarre sous l’en-tête fixe de
-  YouTube pour ne pas le masquer).
+- **Panneau ancré** : la page est décalée via une marge sur `<html>` (du côté de l’ancrage) ; les
+  éléments en `position: fixed` d’un site restent calés sur la fenêtre (le panneau démarre sous
+  l’en-tête fixe de YouTube pour ne pas le masquer). Ancré en haut ou en bas, la page défile : un
+  lecteur plus haut que la place laissée est réduit tant qu’il commence dans cette place.
+- **Mini « toujours au-dessus »** : une fenêtre Picture-in-Picture de document (Chrome 116+), une à
+  la fois par onglet, **opaque** (le verre dépoli n’existe que dans la page). Elle se ferme si la
+  page de la vidéo est rechargée ou quittée.
+- **Côte à côte (fenêtres)** : l’extension ne place que des **fenêtres Chrome**. Partager l’écran
+  avec une autre application, ou réserver une zone du bureau (barre d’application), demande
+  **Boo Notes Desktop**. Une vidéo mise en plein écran sort de sa zone (le plein écran du navigateur
+  prend tout l’écran) : dans une zone, le plein écran partagé du panneau fait l’équivalent.
 - **Plein écran** : le HUD et le panneau sont déplacés dans l’élément plein écran (seule façon
   d’être visibles : Chrome rend inerte tout ce qui est hors de lui) puis remis en place à la sortie.
   Une `<video>` ou une iframe mise seule en plein écran ne peut rien afficher d’autre : notes

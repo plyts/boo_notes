@@ -16,6 +16,7 @@ import {
   type NotionStatus,
   type PageTheme,
   type PanelMode,
+  type PanelView,
   type PanelToContent,
   type PlaybackState,
   type ScormState,
@@ -63,6 +64,9 @@ import { TranscriptView } from './transcript-view';
 import { CueTranslator, type TranslateStatus } from './translator';
 import { answerQuestion } from './answers';
 import { ConnectPanel } from './connect';
+import { LayoutMenu } from './layout-menu';
+import { MiniView } from './mini';
+import type { TileId } from '../shared/tiling';
 import type { AskRequest } from './blocks';
 
 /**
@@ -72,7 +76,7 @@ import type { AskRequest } from './blocks';
  */
 const params = new URLSearchParams(location.search);
 const TAB_ID = Number(params.get('tab'));
-const MODE: PanelMode = params.get('mode') === 'popout' ? 'popout' : 'embedded';
+const MODE: PanelMode = params.get('mode') === 'popout' ? 'popout' : params.get('mode') === 'pip' ? 'pip' : 'embedded';
 const CLIENT_ID = crypto.randomUUID();
 const SAVE_DELAY_MS = 400;
 
@@ -105,6 +109,12 @@ function loadAsset(path: string): Promise<string> {
 
 class PanelApp {
   private port: chrome.runtime.Port | null = null;
+  /** Where the panel stands (docked, floating, Mini, fullscreen), as the page says. */
+  private placement: PanelView | null = null;
+  private layoutMenu: LayoutMenu | null = null;
+  private miniButton: HTMLButtonElement | null = null;
+  private mini!: MiniView;
+  private fsHint!: HTMLDivElement;
   private settings!: Settings;
   private ctx: VideoContext | null = null;
   private title = '';
@@ -226,6 +236,7 @@ class PanelApp {
     this.settings = await loadSettings();
     this.autoPause.enabled = this.settings.autoPause;
     document.documentElement.dataset.mode = MODE;
+    document.documentElement.dataset.mini = String(MODE === 'pip');
     this.buildUi();
     this.applyTheme();
     this.editor = new NotesEditor(this.root.querySelector('.editor') as HTMLElement, {
@@ -274,6 +285,7 @@ class PanelApp {
     this.transcriptView.setTarget(this.settings.translateTo);
     this.transcriptView.setTranslate(this.settings.autoTranslate, this.translateStatus);
     if (this.settings.autoTranslate) void this.setTranslate(true, false);
+    if (MODE === 'popout') callBackground({ type: 'tile:status', tabId: TAB_ID }).then((id) => this.layoutMenu?.setTiled(id), () => undefined);
     setInterval(() => this.tick(), 250);
     this.watchExtension();
   }
@@ -443,6 +455,10 @@ class PanelApp {
       case 'media-ended':
         void this.loading.then(() => this.pinTranscript(false));
         break;
+      case 'view':
+        this.placement = msg.view;
+        this.renderPlacement();
+        break;
     }
   }
 
@@ -494,6 +510,7 @@ class PanelApp {
       return;
     }
     const t = this.hasVideo ? this.now() : null;
+    this.renderMini();
     const duration = this.playback.duration;
     this.clockEl.textContent = t === null ? '--:--' : formatTimecode(t);
     this.clockEl.dataset.playing = String(this.hasVideo && this.playback.playing);
@@ -671,10 +688,32 @@ class PanelApp {
     // Where the notes go: one button, its small window (Notion, the Desktop app).
     this.connectUi = new ConnectPanel({ notify: (text, kind) => this.notify(text, kind) });
 
+    // Where the panel stands: docked, floating, the Mini, « Côte à côte ».
+    if (MODE !== 'pip') {
+      this.layoutMenu = new LayoutMenu(MODE, {
+        place: (to) => this.post({ type: 'place', to }),
+        mini: () => this.post({ type: 'mini', action: 'enter' }),
+        tile: (id) => void this.tile(id),
+        untile: () => void this.untile(),
+      });
+    }
+    this.mini = new MiniView(MODE, {
+      pin: (on) => this.post({ type: 'mini', action: on ? 'pin' : 'unpin' }),
+      glass: (value) => this.post({ type: 'glass', value }),
+      expand: () => this.post({ type: 'mini', action: 'expand' }),
+      close: () => this.post({ type: 'mini', action: 'close' }),
+      seek: (seconds) => this.post({ type: 'seek', seconds }),
+    });
+    this.fsHint = h('div', { class: 'fs-hint', hidden: true }, 'Échap : quitter le plein écran');
+
     const actions: HTMLElement[] = [];
     if (MODE === 'embedded') {
+      this.miniButton = h('button', { type: 'button', class: 'mini-chip', title: 'Mode Mini : les paroles en direct (Alt+Maj+M)', 'aria-label': 'Mode Mini' }, icon('mini', 15), h('span', {}, 'Mini'));
+      this.miniButton.addEventListener('click', () => this.post({ type: 'mini', action: 'enter' }));
+      actions.push(this.miniButton, this.layoutMenu!.button);
       actions.push(iconButton('popout', 'Détacher dans une fenêtre', () => void this.popout()));
     } else {
+      if (this.layoutMenu) actions.push(this.layoutMenu.button);
       actions.push(iconButton('dock', 'Rattacher au lecteur (panneau latéral)', () => void this.dock()));
     }
     this.exportButton = iconButton('share', 'Exporter la note', () => this.toggleMenu(), {
@@ -774,6 +813,7 @@ class PanelApp {
         'header',
         { class: 'header' },
         h('div', { class: 'toolbar' }, this.connectUi.button, this.recPill, h('span', { class: 'spacer' }), ...actions),
+        this.fsHint,
         // Course › chapter of the library, as a breadcrumb above the title.
         this.placeButton,
         this.titleEl,
@@ -784,6 +824,7 @@ class PanelApp {
         this.menu,
         this.placeMenu,
         this.connectUi.pop,
+        this.layoutMenu?.menu,
       ),
       this.banner,
       editorHost,
@@ -797,6 +838,7 @@ class PanelApp {
         h('div', { class: 'scrubber' }, this.clockEl, this.stopwatchEl, this.timeline.el, this.readingBar, this.durationEl),
         h('div', { class: 'controls' }, timestamp, capture, this.passageButton, this.chronoButton, h('span', { class: 'spacer' }), link, replay, fullscreen, help),
       ),
+      this.mini.el,
       this.noticeEl,
       this.sheet.el,
     );
@@ -920,6 +962,10 @@ class PanelApp {
     this.readingBar.hidden = !page;
     this.tabs.hidden = page || !this.ctx;
     this.passageButton.hidden = page || !this.hasVideo;
+    // The Mini shows the lines of a video or an audio.
+    if (this.miniButton) this.miniButton.hidden = page || !this.ctx;
+    const miniItem = this.layoutMenu?.menu.querySelector<HTMLElement>('.layout-mini');
+    if (miniItem) miniItem.hidden = page || !this.ctx;
     if (page && this.view !== 'notes') this.setView('notes');
     this.renderLive();
     this.clockEl.title = page ? 'Lu jusqu’ici' : 'Position de la vidéo';
@@ -1084,6 +1130,7 @@ class PanelApp {
 
   private renderLive(): void {
     if (!this.liveEl) return;
+    this.renderMini();
     const cue = this.caption.cue;
     const show = Boolean(cue) && this.settings.transcribe && this.view === 'notes' && this.kind !== 'page' && Boolean(this.note);
     this.liveEl.hidden = !show;
@@ -1602,7 +1649,68 @@ class PanelApp {
 
   private async dock(): Promise<void> {
     await this.flush();
+    // Side by side with the video window: it gets its size back.
+    await callBackground({ type: 'tile:clear', tabId: TAB_ID }).catch(() => undefined);
     this.post({ type: 'dock' });
+  }
+
+  // --- Where the panel stands ------------------------------------------------------------------
+
+  private get isMini(): boolean {
+    return MODE === 'pip' || Boolean(this.placement?.mini);
+  }
+
+  private renderPlacement(): void {
+    const v = this.placement;
+    if (!v) return;
+    const root = document.documentElement;
+    root.dataset.mini = String(this.isMini);
+    root.dataset.fullscreen = String(v.fullscreen);
+    root.dataset.place = v.mode === 'float' ? 'float' : `dock-${v.side}`;
+    this.mini.el.hidden = !this.isMini;
+    this.mini.setView(v);
+    this.layoutMenu?.setView(v);
+    // In fullscreen, the notes say how to leave it (Échap leaves the browser's fullscreen).
+    this.fsHint.hidden = !v.fullscreen || this.isMini || MODE !== 'embedded';
+    if (this.isMini) {
+      this.closeMenu(false);
+      this.layoutMenu?.close(false);
+    }
+    this.renderMini();
+  }
+
+  /** The Mini's lines: the one being said, its translation, the ones around it. */
+  private renderMini(): void {
+    if (!this.mini || !this.isMini) return;
+    this.mini.render({
+      cue: this.caption.cue,
+      caption: this.caption.state,
+      cues: this.transcript?.cues ?? [],
+      now: this.hasVideo ? this.now() : null,
+      transcribe: this.settings.transcribe,
+    });
+  }
+
+  /**
+   * « Côte à côte »: the video's Chrome window and the notes' window share
+   * the screen this panel is on (its work area: taskbar, Dock left out).
+   */
+  private async tile(id: TileId): Promise<void> {
+    await this.flush();
+    const s = screen as Screen & { availLeft?: number; availTop?: number };
+    const area = { left: s.availLeft ?? 0, top: s.availTop ?? 0, width: s.availWidth, height: s.availHeight };
+    try {
+      await callBackground({ type: 'tile:set', tabId: TAB_ID, tile: id, area });
+      this.layoutMenu?.setTiled(id);
+    } catch (e) {
+      this.notify(`Côte à côte impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+
+  private async untile(): Promise<void> {
+    await callBackground({ type: 'tile:clear', tabId: TAB_ID }).catch(() => undefined);
+    this.layoutMenu?.setTiled(null);
+    if (MODE === 'popout') void this.dock();
   }
 
   private async close(): Promise<void> {
@@ -1893,7 +2001,7 @@ class PanelApp {
           e.preventDefault();
           return;
         }
-        if (e.key === 'Escape' && !e.defaultPrevented && this.menu.hidden && !this.connectUi.isOpen) {
+        if (e.key === 'Escape' && !e.defaultPrevented && this.menu.hidden && !this.connectUi.isOpen && !this.layoutMenu?.isOpen) {
           e.preventDefault();
           this.post({ type: 'escape' });
         }
@@ -1904,6 +2012,8 @@ class PanelApp {
       const target = e.target as Node;
       if (!this.placeMenu.hidden && !this.placeMenu.contains(target) && !this.placeButton.contains(target)) this.closePlaceMenu(false);
       if (this.connectUi.isOpen && !this.connectUi.pop.contains(target) && !this.connectUi.button.contains(target)) this.connectUi.close(false);
+      const layout = this.layoutMenu;
+      if (layout?.isOpen && !layout.menu.contains(target) && !layout.button.contains(target)) layout.close(false);
       if (!this.menu.hidden && !this.menu.contains(e.target as Node) && e.target !== this.exportButton) {
         this.closeMenu(false);
       }

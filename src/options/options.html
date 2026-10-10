@@ -197,17 +197,39 @@
                 <label class="tile">
                   <input type="radio" name="layout" value="side-by-side" />
                   <span class="mini" aria-hidden="true"><span class="mini-page"><span class="mini-video"></span></span><span class="mini-panel"></span></span>
-                  <span class="tile-label">Côte à côte</span>
+                  <span class="tile-label">Ancré à un bord</span>
                   <span class="tile-desc">La page se décale : le lecteur reste entièrement visible.</span>
                 </label>
                 <label class="tile">
                   <input type="radio" name="layout" value="overlay" />
                   <span class="mini overlay" aria-hidden="true"><span class="mini-page"><span class="mini-video"></span></span><span class="mini-panel"></span></span>
-                  <span class="tile-label">Superposé</span>
-                  <span class="tile-desc">Une carte flottante par-dessus la page.</span>
+                  <span class="tile-label">Flottant</span>
+                  <span class="tile-desc">Une carte par-dessus la page, posée où vous voulez.</span>
                 </label>
               </div>
             </div>
+            <div class="row">
+              <span class="row-text">
+                <span class="row-label" id="l-dockSide">Bord d’ancrage</span>
+                <span class="row-desc">Par défaut. Chaque site retient ensuite la place où vous posez le panneau : attrapez sa poignée ⠿ (en haut à gauche) et glissez-le, contre un bord pour l’y ancrer.</span>
+              </span>
+              <div class="segmented" role="radiogroup" aria-labelledby="l-dockSide">
+                <label><input type="radio" name="dockSide" value="right" /><span>Droite</span></label>
+                <label><input type="radio" name="dockSide" value="left" /><span>Gauche</span></label>
+                <label><input type="radio" name="dockSide" value="top" /><span>Haut</span></label>
+                <label><input type="radio" name="dockSide" value="bottom" /><span>Bas</span></label>
+              </div>
+            </div>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-label">Plein écran : part de la vidéo</span>
+                <span class="row-desc">La vidéo garde cette part de l’écran, entière ; les notes prennent le reste, du côté où elles sont ancrées. Le séparateur se tire aussi en plein écran (double-clic : 70 %).</span>
+              </span>
+              <span class="slider">
+                <input type="range" name="splitRatio" min="0.4" max="0.85" step="0.05" />
+                <output id="splitRatio-out"></output>
+              </span>
+            </label>
             <label class="row">
               <span class="row-text">
                 <span class="row-label">Largeur par défaut</span>

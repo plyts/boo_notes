@@ -1,5 +1,7 @@
 import type { MediaKind, VideoContext } from './platforms';
+import type { DockSide } from './placement';
 import type { DrawerLayout } from './settings';
+import type { Bounds, TileId } from './tiling';
 import type { InPageBinding } from './shortcuts';
 import type { AssetRecord, CourseOption, Note, NoteMeta, NoteSummary } from './store';
 import type { CourseText } from './course-text';
@@ -15,6 +17,7 @@ export const COMMANDS = [
   'replay',
   'passage-start',
   'passage-end',
+  'toggle-mini',
 ] as const;
 export type CommandId = (typeof COMMANDS)[number];
 
@@ -219,6 +222,16 @@ export type BackgroundRequest =
   | { type: 'media:stored'; path: string }
   | { type: 'popout:open'; noteId: string }
   | { type: 'popout:close'; tabId: number }
+  /**
+   * « Côte à côte »: the video tab's window and the notes' window share the
+   * screen's work area `area` (as the panel sees it), split as `tile` says.
+   */
+  | { type: 'tile:set'; tabId: number; tile: TileId; area: Bounds }
+  /** Back to the video window as it was (the notes return to the page). */
+  | { type: 'tile:clear'; tabId: number }
+  | { type: 'tile:status'; tabId: number }
+  /** The video tab brought to the front (« Agrandir » from the always-on-top Mini). */
+  | { type: 'tab:focus' }
   | { type: 'options:open' }
   | { type: 'shortcuts:list' }
   | { type: 'sync:status' }
@@ -322,6 +335,10 @@ export interface BackgroundResponses {
   'media:stored': void;
   'popout:open': { windowId: number };
   'popout:close': void;
+  'tile:set': void;
+  'tile:clear': void;
+  'tile:status': TileId | null;
+  'tab:focus': void;
   'options:open': void;
   'shortcuts:list': Array<{ name: string; shortcut: string; description: string }>;
   'sync:status': SyncStatus;
@@ -403,7 +420,21 @@ export type TabMessage =
 
 export const PANEL_PORT = 'boo-notes-panel';
 
-export type PanelMode = 'embedded' | 'popout';
+/** `pip`: the Mini alone, in an always-on-top window (Document Picture-in-Picture). */
+export type PanelMode = 'embedded' | 'popout' | 'pip';
+
+/** Where the panel stands (see PanelPlace), as the panels show it. */
+export interface PanelView {
+  mode: 'dock' | 'float';
+  side: DockSide;
+  /** Reduced to the Mini widget. */
+  mini: boolean;
+  /** The Mini is in its always-on-top window. */
+  pip: boolean;
+  /** The video is fullscreen: the notes share the screen with it. */
+  fullscreen: boolean;
+  glass: number;
+}
 
 export interface PlaybackState {
   /** Video position when the state was sampled. */
@@ -461,7 +492,9 @@ export type ContentToPanel =
   /** The extract of the passage starting at `start` was recorded. */
   | { type: 'passage-media'; start: number; media: string }
   /** The media reached its end: the transcript gets pinned to the note. */
-  | { type: 'media-ended' };
+  | { type: 'media-ended' }
+  /** Where the panel stands: docked, floating, Mini, fullscreen. */
+  | { type: 'view'; view: PanelView };
 
 export type PanelToContent =
   | { type: 'hello'; mode: PanelMode }
@@ -497,4 +530,13 @@ export type PanelToContent =
   /** « Afficher les sous-titres »: the player's captions are switched on (then collected). */
   | { type: 'captions:show' }
   /** « Plein écran avec les notes »: the player fullscreen, the notes beside it (a second click leaves). */
-  | { type: 'fullscreen' };
+  | { type: 'fullscreen' }
+  /**
+   * The Mini: `enter` (from the full panel), `expand` (back to it), `pin`
+   * (always on top, in a window of its own), `unpin`, `close`.
+   */
+  | { type: 'mini'; action: 'enter' | 'expand' | 'pin' | 'unpin' | 'close' }
+  /** Tint of the Mini's glass (0.15–0.9). */
+  | { type: 'glass'; value: number }
+  /** Docks the panel to a side, or lets it float. */
+  | { type: 'place'; to: DockSide | 'float' };

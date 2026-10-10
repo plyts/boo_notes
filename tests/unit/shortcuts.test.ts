@@ -35,17 +35,18 @@ describe('inPageBindings', () => {
       { name: 'passage-start', shortcut: '' },
       { name: 'passage-end', shortcut: 'Ctrl+Shift+9' }, // bound by the user
     ];
-    expect(inPageBindings(registered).map((b) => b.command)).toEqual(['insert-timestamp', 'replay', 'passage-start']);
+    expect(inPageBindings(registered).map((b) => b.command)).toEqual(['insert-timestamp', 'replay', 'passage-start', 'toggle-mini']);
   });
 
   it('leaves re-bound commands to Chrome', () => {
     expect(inPageBindings([{ name: 'replay', shortcut: 'Ctrl+Shift+Left' }]).map((b) => b.command)).not.toContain('replay');
   });
 
-  it('covers every command of the spec, passages included', () => {
-    expect(Object.keys(DEFAULT_SHORTCUTS)).toHaveLength(7);
+  it('covers every command of the spec, passages and the Mini included', () => {
+    expect(Object.keys(DEFAULT_SHORTCUTS)).toHaveLength(8);
     expect(DEFAULT_SHORTCUTS['passage-start']).toBe('Alt+I');
     expect(DEFAULT_SHORTCUTS['passage-end']).toBe('Alt+O');
+    expect(DEFAULT_SHORTCUTS['toggle-mini']).toBe('Alt+Shift+M');
   });
 });
 

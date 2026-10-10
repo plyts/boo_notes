@@ -1,10 +1,12 @@
 /**
  * Keeps the whole picture visible next to the notes.
  *
- * - Side by side: the page is narrowed by the notes' width, but many players
- *   size themselves from the window (YouTube), or take `100vw`: they stay as
- *   wide as before and slide under the notes. The player is then scaled down
- *   to end where the notes begin (its top-left corner stays put).
+ * - Side by side: the page is narrowed by the notes' width (or shortened by
+ *   their height, docked at the top or bottom), but many players size
+ *   themselves from the window (YouTube), or take `100vw`: they stay as wide
+ *   as before and slide under the notes, or past the window's edge. The
+ *   player is then scaled down to end where the notes begin (its top-left
+ *   corner stays put, or moves just out of the notes' way).
  * - Fullscreen: the notes stay beside the video, which is scaled to fill the
  *   rest of the screen, centred (split screen). When the page put its whole
  *   player fullscreen, all of it is scaled — its controls too — while the
@@ -15,6 +17,8 @@
  * fullscreen element (whose `transform` the browser forces to none). Content,
  * controls and events are untouched.
  */
+
+import type { Area } from '../shared/placement';
 
 /** False for the elements whose children are never drawn (a fullscreen <video> or frame shows nothing else). */
 export function hostsChildren(el: Element): boolean {
@@ -70,12 +74,13 @@ export class PlayerFit {
   private readonly kept = new Map<HTMLElement, Saved>();
 
   /**
-   * Fits `el` into `area`. `mode`: `shrink` (side by side: only scaled down,
-   * anchored at its corner) or `fill` (fullscreen: scaled to fill, centred).
-   * `keep`: fixed boxes inside `el` that must stay as they are.
+   * Fits `el` into `area` (its unbounded sides far out, see areaBeside).
+   * `mode`: `shrink` (side by side: only scaled down, anchored at its
+   * corner) or `fill` (fullscreen: scaled to fill, centred). `keep`: fixed
+   * boxes inside `el` that must stay as they are.
    */
-  apply(el: HTMLElement | null, area: DOMRect | null, mode: 'shrink' | 'fill', keep: HTMLElement[] = []): void {
-    if (!el || !area || area.width < 80 || area.height < 60) {
+  apply(el: HTMLElement | null, area: Area | null, mode: 'shrink' | 'fill', keep: HTMLElement[] = []): void {
+    if (!el || !area || area.right - area.left < 80 || area.bottom - area.top < 60) {
       this.clear();
       return;
     }
@@ -95,18 +100,35 @@ export class PlayerFit {
     let ax: number;
     let ay: number;
     if (mode === 'shrink') {
-      // Nothing under the notes: nothing to do.
-      if (left + width <= area.right + 1 || left >= area.right) {
+      // Wholly beside the free area (under the notes): not the player beside them.
+      if (left >= area.right || left + width <= area.left) {
         this.clear();
         return;
       }
-      s = Math.max(0.3, (area.right - left) / width);
-      ax = (1 - s) * left;
-      ay = (1 - s) * top;
+      // Out of the notes' way: a box fixed on the window moves down past notes docked at the top;
+      // a box of the page scrolled up past them stays where the page put it.
+      const fixed = getComputedStyle(el).position === 'fixed';
+      const x0 = Math.max(left, area.left);
+      const y0 = fixed ? Math.max(top, area.top) : top;
+      const fitsX = x0 - left < 1 && left + width <= area.right + 1;
+      // Its height counts only when it starts in the free area.
+      const bounded = y0 >= area.top - 1;
+      const fitsY = y0 - top < 1 && (!bounded || top + height <= area.bottom + 1);
+      // Nothing under the notes: nothing to do.
+      if (fitsX && fitsY) {
+        this.clear();
+        return;
+      }
+      const fit = Math.min((area.right - x0) / width, bounded ? (area.bottom - y0) / height : 1, 1);
+      s = Math.max(0.3, fit);
+      ax = x0 - s * left;
+      ay = y0 - s * top;
     } else {
-      s = Math.min(area.width / width, area.height / height);
-      ax = area.left + (area.width - width * s) / 2 - s * left;
-      ay = area.top + (area.height - height * s) / 2 - s * top;
+      const aw = area.right - area.left;
+      const ah = area.bottom - area.top;
+      s = Math.min(aw / width, ah / height);
+      ax = area.left + (aw - width * s) / 2 - s * left;
+      ay = area.top + (ah - height * s) / 2 - s * top;
     }
     const next = { ax: round(ax, 1), ay: round(ay, 1), s: round(s, 4) };
     // Where its corner would go: nowhere, at the same size.

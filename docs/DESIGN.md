@@ -74,9 +74,22 @@ grandit (`--tracking-*`, de +0,01 em à −0,024 em), chiffres tabulaires pour l
 | Snackbar | Pilule sombre `#26262c` au-dessus du pied, icône verte (succès) / ambre (erreur), 3 s (5 s pour une erreur). |
 | Feuille des raccourcis | Feuille qui monte du bas (iOS), fond flouté, groupes Vidéo / Éditeur / Markdown, piège de focus, `Échap` ferme sans fermer le panneau. |
 
-**Disposition** : *côte à côte* (défaut, la page est décalée, le lecteur reste entièrement visible)
-ou *superposé* : carte flottante (marges 10 px, rayon 14 px, ombre portée). En plein écran, le panneau
-épinglé est toujours une carte flottante.
+**Disposition** : *ancré* (défaut, à droite : la page est décalée, le lecteur reste entièrement
+visible) ou *flottant* : carte (rayon 14 px, ombre portée) posée où l’utilisateur la lâche.
+
+| Élément | Spécification |
+| --- | --- |
+| Poignée ⠿ | 22×28 px en haut à gauche du panneau (dessinée par la page, au-dessus de l’iframe ; la barre d’outils lui laisse 14 px), gris neutre, accent au survol, curseur `grab` / `grabbing`. Clic + glisser (4 px de seuil) : le panneau devient flottant sous le pointeur, 3/4 de la hauteur ; double-clic : ancré ↔ flottant ; clavier : flèches (déplacer, ou ancrer à ce bord), `Entrée`. |
+| Zone d’ancrage | À moins de 40 px d’un bord de la fenêtre : la place que prendra le panneau, pointillés accent 2 px, fond `rgba(109,94,240,.16)`, rayon 12 px, pilule « Relâchez : ancré à droite » (`#5143c9`, blanc 13 px). En plein écran, seulement gauche et droite. |
+| Ancré | Droite / gauche : pleine hauteur sous l’en-tête du site, 300–960 px ; haut / bas : bande pleine largeur, 200–720 px (300 par défaut), l’en-tête du panneau en colonne à gauche (300–400 px). Séparateur = bord intérieur, pastille 6×44 px visible en permanence. |
+| Flottant | Bords (6 px) et coins (12 px) à tirer, 300×240 px minimum, toujours entier dans la fenêtre. |
+| Mini | 480×184 px par défaut, bas de la vidéo au-dessus de ses commandes ; verre `rgba(24,24,32,α)` (α 0,15–0,9, 0,55 par défaut) + flou 20 px saturé 1,4, rayon 16 px, filet blanc 22 %. Barre : « EN DIRECT · 04:12 » (10 px, 650, espacé), épingle (accent plein quand active), curseur d’opacité, ⤢, ×. Lignes : précédente / suivante 12,5 px blanc 50 %, en cours 17 px 650 blanc (ombre 1 px), traduction 15 px italique `#cfc8ff` ; à court de place, les voisines se replient d’abord. Redimensionnable, 260×104 px minimum. |
+| Mini épinglé | Fenêtre Picture-in-Picture de document, fond `#17171e` (opaque : pas de curseur d’opacité), épingle active. |
+| Plein écran partagé | Vidéo 70 % / notes 30 % (40–85 % pour la vidéo), notes du côté de l’ancrage (haut / bas → droite) ; ligne « Échap : quitter le plein écran » (12 px, `--faint`) sous la barre d’outils. |
+| Côte à côte (fenêtres) | Puce « Côte à côte » dans la fenêtre des notes (pleine accent quand active) ; menu « Répartition » : 4 vignettes 34 px (vidéo `--surface-2`, notes accent 75 %) + libellé 10 px, la choisie bordée 2 px accent ; « Quitter côte à côte ». |
+
+Panneau étroit (≤ 460 px) : « Mini » et « Côte à côte » gardent leur icône (nom en infobulle), les
+boutons d’icône passent à 28 px, « Se connecter à… » reste lisible.
 
 **Thème** : automatique d’après le fond de la page (YouTube sombre → panneau sombre), ou forcé.
 
@@ -150,4 +163,5 @@ Typographie : `system-ui` (SF Pro sur macOS, Segoe UI Variable sous Windows) ; �
 | ![Note vide](screenshots/panel-empty.png) | ![Raccourcis clavier](screenshots/panel-shortcuts.png) |
 | ![Menu Exporter](screenshots/panel-export.png) | ![HUD, infobulle et panneau flottant](screenshots/hud-floating.png) |
 | ![Toast de capture](screenshots/capture-toast.png) | ![Réglages](screenshots/options.png) |
-| ![Réglages, thème sombre](screenshots/options-dark.png) | |
+| ![Réglages, thème sombre](screenshots/options-dark.png) | ![Menu Disposition](screenshots/panel-layout.png) |
+| ![Mini (paroles)](screenshots/mini.png) | ![Plein écran partagé](screenshots/fullscreen-split.png) |

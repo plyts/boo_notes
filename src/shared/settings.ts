@@ -1,3 +1,5 @@
+import { isDockSide, SPLIT_DEFAULT, SPLIT_MAX, SPLIT_MIN, type DockSide } from './placement';
+
 export type DrawerLayout = 'side-by-side' | 'overlay';
 export type Theme = 'auto' | 'dark' | 'light';
 export type CaptureFormat = 'image/jpeg' | 'image/png' | 'image/webp';
@@ -7,6 +9,12 @@ export interface Settings {
   drawerWidth: number;
   /** `side-by-side` shrinks the page so the drawer never covers the player. */
   layout: DrawerLayout;
+  /** Side the notes dock to (by default; each site remembers where they were put). */
+  dockSide: DockSide;
+  /** Height of the notes docked at the top or bottom of the page, in px. */
+  stripHeight: number;
+  /** Fullscreen split: the share of the screen the video keeps (0.4–0.85). */
+  splitRatio: number;
   theme: Theme;
   /** Prefix new note lines with the current timecode. */
   autoTimestamp: boolean;
@@ -43,11 +51,16 @@ export interface Settings {
 export const DRAWER_MIN_WIDTH = 300;
 /** As wide as the window allows (see Drawer): long titles, notes beside a small video. */
 export const DRAWER_MAX_WIDTH = 960;
+export const STRIP_MIN_HEIGHT = 200;
+export const STRIP_MAX_HEIGHT = 720;
 export const DEFAULT_DESKTOP_URL = 'ws://localhost:43117';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   drawerWidth: 360,
   layout: 'side-by-side',
+  dockSide: 'right',
+  stripHeight: 300,
+  splitRatio: SPLIT_DEFAULT,
   theme: 'auto',
   autoTimestamp: true,
   autoPause: false,
@@ -99,6 +112,9 @@ export function normalizeSettings(raw: unknown): Settings {
   return {
     drawerWidth: Math.round(clamp(num(r.drawerWidth, d.drawerWidth), DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH)),
     layout: pick(r.layout, ['side-by-side', 'overlay'], d.layout),
+    dockSide: isDockSide(r.dockSide) ? r.dockSide : d.dockSide,
+    stripHeight: Math.round(clamp(num(r.stripHeight, d.stripHeight), STRIP_MIN_HEIGHT, STRIP_MAX_HEIGHT)),
+    splitRatio: Math.round(clamp(num(r.splitRatio, d.splitRatio), SPLIT_MIN, SPLIT_MAX) * 1000) / 1000,
     theme: pick(r.theme, ['auto', 'dark', 'light'], d.theme),
     autoTimestamp: bool(r.autoTimestamp, d.autoTimestamp),
     autoPause: bool(r.autoPause, d.autoPause),

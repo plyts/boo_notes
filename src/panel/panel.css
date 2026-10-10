@@ -1423,3 +1423,305 @@ button {
   gap: 8px;
   margin-top: 4px;
 }
+
+/* --- Where the panel stands: grip room, Mini, layout menu, « Côte à côte » ------------------- */
+
+/* The page draws the grip ⠿ over the top-left of the panel (see Drawer): room for it. */
+html[data-mode='embedded'] .toolbar {
+  padding-left: 14px;
+}
+
+.mini-chip,
+.tile-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-s);
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mini-chip:hover,
+.tile-chip:hover,
+.tile-chip[aria-expanded='true'] {
+  background: var(--accent-soft);
+}
+
+.tile-chip.on {
+  border-color: transparent;
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.fs-hint {
+  margin: 2px 0 -2px;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+/* A narrow panel: the chips keep their icon (their name stays in the tooltip), « Se connecter à… » its words. */
+@media (max-width: 460px) {
+  .mini-chip span,
+  .tile-chip span {
+    display: none;
+  }
+
+  .mini-chip,
+  .tile-chip {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .toolbar .icon-btn {
+    width: 28px;
+  }
+
+  .toolbar .connect-btn {
+    padding: 0 8px 0 7px;
+  }
+}
+
+.layout-menu {
+  width: 300px;
+}
+
+.menu button.layout-place[aria-checked='true'] {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.layout-place .radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+}
+
+.layout-place[aria-checked='true'] .radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--elevated), inset 0 0 0 8px var(--accent);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 2px 4px 4px;
+}
+
+.menu button.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 0;
+  padding: 4px;
+}
+
+.tile-vis {
+  display: flex;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.tile[aria-checked='true'] .tile-vis {
+  border: 2px solid var(--accent);
+}
+
+.tile-video {
+  background: var(--surface-2);
+}
+
+.tile-notes {
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+.tile-label {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tile[aria-checked='true'] .tile-label {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.menu-note {
+  margin: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+/* Docked at the top or bottom: a wide strip, the header beside the note. */
+html[data-mode='embedded']:is([data-place='dock-top'], [data-place='dock-bottom']):not([data-mini='true']):not([data-fullscreen='true']) .app {
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'header banner' 'header editor' 'header live' 'footer footer';
+}
+
+html[data-mode='embedded']:is([data-place='dock-top'], [data-place='dock-bottom']) .mini-chip span {
+  display: none;
+}
+
+html[data-mode='embedded']:is([data-place='dock-top'], [data-place='dock-bottom']) .mini-chip {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
+html[data-mode='embedded']:is([data-place='dock-top'], [data-place='dock-bottom']):not([data-mini='true']):not([data-fullscreen='true']) .header {
+  border-right: 1px solid var(--hairline);
+  border-bottom: 0;
+}
+
+/* The Mini: only the lines, on the page's frosted glass (or its own window). */
+html[data-mini='true'],
+html[data-mini='true'] body {
+  background: transparent;
+  color-scheme: dark;
+}
+
+html[data-mini='true'] .app {
+  display: block;
+}
+
+html[data-mini='true'] .app > :not(.mini):not(.notice) {
+  display: none !important;
+}
+
+.mini {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 6px 12px 12px;
+  color: #fff;
+  user-select: none;
+}
+
+.mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding-left: 26px;
+}
+
+html[data-mode='pip'] .mini-bar {
+  padding-left: 2px;
+}
+
+.mini-clock {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mini-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.mini-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.mini-btn[aria-pressed='true'] {
+  background: #5143c9;
+  color: #fff;
+}
+
+.mini-btn:focus-visible,
+.mini-now:focus-visible {
+  outline: 2px solid #a497ff;
+  outline-offset: 1px;
+}
+
+.mini-glass {
+  width: 64px;
+  margin: 0 4px;
+  accent-color: #a497ff;
+}
+
+.mini-lines {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: safe center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+/* Short of room, the lines around give way first: the one being said and its translation stay whole. */
+.mini-now,
+.mini-tr {
+  flex: none;
+}
+
+.mini-prev,
+.mini-next {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mini-now {
+  all: unset;
+  display: block;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.mini-now.idle {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.mini-tr {
+  margin: 0;
+  color: #cfc8ff;
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.35;
+}

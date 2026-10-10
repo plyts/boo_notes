@@ -64,10 +64,10 @@ test('plein écran du lecteur : les notes restent à côté de la vidéo', async
     const { video, notes } = await boxes(page);
     return video!.right <= notes!.left + 1 && video!.left >= -1;
   }).toBe(true);
-  // The picture fills the free part of the screen (width or height); the notes keep their size, at the edge.
+  // The picture fills the free part of the screen (width or height); the notes take their 30 %, at the edge.
   const { video, notes, w, h } = await boxes(page);
   expect(Math.max(video!.width / notes!.left, video!.height / h)).toBeGreaterThan(0.98);
-  expect(notes!.width).toBeCloseTo(360, 0);
+  expect(Math.abs(notes!.width - w * 0.3)).toBeLessThanOrEqual(1);
   expect(notes!.right).toBeCloseTo(w, 0);
   expect(await page.evaluate(() => document.querySelector('.ytp-progress-bar')!.getBoundingClientRect().right)).toBeLessThanOrEqual(notes!.left + 1);
   // Still usable.
