@@ -1,7 +1,7 @@
 import { h, icon } from '../shared/icons';
 import type { PanelMode, PanelView } from '../shared/messages';
 import { SIDE_LABELS, type DockSide } from '../shared/placement';
-import { TILES, type TileId } from '../shared/tiling';
+import { TILES, TILING_ENABLED, type TileId } from '../shared/tiling';
 
 export interface LayoutActions {
   place(to: DockSide | 'float'): void;
@@ -13,8 +13,8 @@ export interface LayoutActions {
 /**
  * Where the panel stands, from the panel: docked to a side or floating, the
  * Mini, and « Côte à côte » (the video's Chrome window and the notes' window
- * sharing the screen). In the notes' own window, the « Côte à côte » chip
- * offers the splits only.
+ * sharing the screen — switched off for now, see TILING_ENABLED). In the
+ * notes' own window, the « Côte à côte » chip offers the splits only.
  */
 export class LayoutMenu {
   readonly button: HTMLButtonElement;
@@ -38,8 +38,17 @@ export class LayoutMenu {
         this.close(false);
         this.actions.mini();
       });
-      children.push(h('div', { class: 'menu-sep', role: 'separator' }), mini, h('div', { class: 'menu-sep', role: 'separator' }));
+      children.push(h('div', { class: 'menu-sep', role: 'separator' }), mini);
     }
+    if (TILING_ENABLED) children.push(...this.tileItems(popout));
+    this.menu = h('div', { class: 'menu layout-menu', role: 'menu', hidden: true, 'aria-label': popout ? 'Côte à côte' : 'Disposition du panneau' }, ...children);
+    this.menu.addEventListener('keydown', (e) => this.onKey(e));
+  }
+
+  /** « Côte à côte »: the splits, « Quitter côte à côte » (switched off for now, see TILING_ENABLED). */
+  private tileItems(popout: boolean): Node[] {
+    const children: Node[] = [];
+    if (!popout) children.push(h('div', { class: 'menu-sep', role: 'separator' }));
     children.push(h('div', { class: 'menu-label', 'aria-hidden': 'true' }, popout ? 'Répartition' : 'Côte à côte (fenêtres)'));
     const grid = h('div', { class: 'tiles', role: 'group', 'aria-label': 'Répartition de l’écran' });
     for (const t of TILES) {
@@ -73,8 +82,7 @@ export class LayoutMenu {
       this.actions.untile();
     });
     children.push(quit, h('p', { class: 'menu-note' }, 'Chrome et la fenêtre des notes se partagent l’écran ; tirez la frontière pour changer la part de chacune. Les autres applications : avec l’app Desktop.'));
-    this.menu = h('div', { class: 'menu layout-menu', role: 'menu', hidden: true, 'aria-label': popout ? 'Côte à côte' : 'Disposition du panneau' }, ...children);
-    this.menu.addEventListener('keydown', (e) => this.onKey(e));
+    return children;
   }
 
   private placeItem(to: DockSide | 'float', label: string): HTMLButtonElement {
@@ -106,7 +114,8 @@ export class LayoutMenu {
     const current = v ? (v.mode === 'float' ? 'float' : v.side) : null;
     for (const b of this.menu.querySelectorAll<HTMLButtonElement>('.layout-place')) b.setAttribute('aria-checked', String(b.dataset.place === current));
     for (const b of this.menu.querySelectorAll<HTMLButtonElement>('.tile')) b.setAttribute('aria-checked', String(b.dataset.tile === this.tiled));
-    (this.menu.querySelector('.tile-quit') as HTMLElement).hidden = this.tiled === null;
+    const quit = this.menu.querySelector<HTMLElement>('.tile-quit');
+    if (quit) quit.hidden = this.tiled === null;
   }
 
   toggle(): void {

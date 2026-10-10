@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fulfillMedia, sampleVideo } from './fixtures';
+import { TILING_ENABLED } from '../../src/shared/tiling';
 
 /**
  * « Côte à côte » in a real, headed Chrome under a window manager — the
@@ -130,6 +131,7 @@ const ids = (sw: Worker) =>
 const fmt = (e: Entry) => `  ${String(e.t).padStart(5)}ms ${e.kind.padEnd(6)} #${e.id} ${e.b ? e.b.join(',') : e.info}`;
 
 test.skip(!process.env.TILING_WM || !process.env.DISPLAY, 'TILING_WM=1 and a display with a window manager (see above)');
+test.skip(!TILING_ENABLED, '« Côte à côte » switched off (TILING_ENABLED)');
 
 test('A: the video window dragged aside (room for another app): the notes window stays put, Boo Notes lets go', async ({ context, page, sw }) => {
   test.setTimeout(120_000);

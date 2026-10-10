@@ -289,6 +289,12 @@ deux leçons du même module ne partagent jamais une note (ni son classement cou
   pointeur est capturé (`setPointerCapture`) et l’iframe ignore la souris pendant le geste. Les marges
   posées sur `<html>` (un côté à la fois) sont gardées et rendues telles quelles. Une place retenue
   est ramenée dans la fenêtre si celle-ci a rétréci.
+- **Côte à côte désactivé** (`TILING_ENABLED = false`, `src/shared/tiling.ts`) : sous Windows 11,
+  la fenêtre de la vidéo aimantée par le système bougeait encore malgré les garde-fous ci-dessous. Ni
+  le menu « Disposition du panneau » ni la fenêtre des notes ne le proposent, le service worker
+  n’écoute plus `chrome.windows.onBoundsChanged` et refuse `tile:set` : aucune fenêtre n’est
+  surveillée ni déplacée. Le `Tiler` et ses tests (unitaires) restent ; les tests de bout en bout du
+  côte à côte sont sautés tant que l’interrupteur est à `false`.
 - **Côte à côte** : Chrome refuse une fenêtre à moins de 50 % sur un écran ; rendue à sa taille
   d’avant hors de l’écran actuel, la fenêtre de la vidéo y est ramenée (`within`).
 - **Côte à côte sans tremblement** : Boo Notes ne se bat jamais avec l’utilisateur ni avec le système

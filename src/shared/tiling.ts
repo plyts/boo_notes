@@ -5,6 +5,14 @@
  * pixels (chrome.windows bounds).
  */
 
+/**
+ * « Côte à côte » is switched off: on Windows, a window snapped by the system
+ * kept moving between its half of the screen and the zone Boo Notes gave it.
+ * Nothing offers it any more (menu, chip) and the service worker no longer
+ * watches the windows; the code and its tests stay — `true` brings it back.
+ */
+export const TILING_ENABLED = false;
+
 export interface Bounds {
   left: number;
   top: number;

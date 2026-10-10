@@ -1,5 +1,6 @@
 import type { BrowserContext, Locator, Page, Worker } from '@playwright/test';
 import { expect, NOTE_ID, openNotes, openWatch, panel, runCommand, setVideo, storedNote, test } from './fixtures';
+import { TILING_ENABLED } from '../../src/shared/tiling';
 
 /**
  * Where the notes stand: moved freely by their grip ⠿, docked to any edge of
@@ -384,7 +385,35 @@ test.describe('Partage de l’écran', () => {
     await page.evaluate(() => document.exitFullscreen());
   });
 
+  test('« Côte à côte » désactivé : ni dans « Disposition du panneau », ni dans la fenêtre des notes ; aucune fenêtre n’est surveillée ni déplacée', async ({ context, page, sw }) => {
+    test.skip(TILING_ENABLED, '« Côte à côte » activé');
+    await openWatch(page);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await p.getByRole('button', { name: 'Disposition du panneau' }).click();
+    const menu = p.getByRole('menu', { name: 'Disposition du panneau' });
+    // The panel's places and the Mini, nothing else.
+    await expect(menu.getByRole('menuitemradio')).toHaveText(['Ancré à droite', 'Ancré à gauche', 'Ancré en haut', 'Ancré en bas', 'Flottant, où vous le posez']);
+    await expect(menu.getByRole('menuitem', { name: /Mode Mini/ })).toBeVisible();
+    await expect(menu).not.toContainText('Côte à côte');
+    await page.keyboard.press('Escape');
+    // The service worker no longer watches the windows' bounds.
+    expect(await sw.evaluate(() => chrome.windows.onBoundsChanged.hasListeners())).toBe(false);
+    // Detached, the notes' window has no « Côte à côte » chip; the video window keeps its size.
+    const windows = () => sw.evaluate(async () => (await chrome.windows.getAll()).filter((w) => w.type === 'normal').map((w) => [w.id, w.left, w.top, w.width, w.height]));
+    const before = await windows();
+    const opened = context.waitForEvent('page', { predicate: (w) => w.url().includes('mode=popout') });
+    await p.getByRole('button', { name: 'Détacher dans une fenêtre' }).click();
+    const popup = await opened;
+    await expect(popup.locator('.cm-content')).toBeVisible();
+    await expect(popup.getByRole('button', { name: 'Rattacher au lecteur (panneau latéral)' })).toBeVisible();
+    await expect(popup.getByRole('button', { name: 'Côte à côte' })).toHaveCount(0);
+    await popup.waitForTimeout(1500);
+    expect(await windows()).toEqual(before);
+  });
+
   test('« Côte à côte » : la fenêtre de la vidéo et celle des notes se partagent l’écran, frontière commune, retour à l’état d’avant', async ({ context, page, sw }) => {
+    test.skip(!TILING_ENABLED, '« Côte à côte » désactivé (TILING_ENABLED)');
     await openWatch(page);
     await openNotes(sw, page);
     const windows = () =>

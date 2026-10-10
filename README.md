@@ -83,9 +83,9 @@ tableau de votre page.
   réplique en cours et sa traduction ; `Échap` quitte le plein écran. Même résultat avec le bouton
   plein écran du site (même quand il met toute la page en plein écran, comme Udemy) et avec le
   bouton ⤢ du panneau : la vidéo remplit la place libre, centrée, sur fond noir.
-- **Côte à côte (fenêtres)** : la fenêtre Chrome de la vidéo et la fenêtre des notes se partagent
-  l’**écran** — 2/3 · 1/3, 1/2 · 1/2, notes à gauche, 3/4 · 1/4 — avec une **frontière commune**
-  (redimensionner l’une redimensionne l’autre) ; « Quitter côte à côte » rend à la fenêtre sa taille.
+- ~~**Côte à côte (fenêtres)**~~ — **désactivé pour l’instant** (`TILING_ENABLED = false` dans `src/shared/tiling.ts`) : sous Windows, une fenêtre aimantée par le système continuait de bouger. Le code et ses tests restent, prêts à être réactivés. Pour travailler à
+  côté de la vidéo : le panneau **ancré** (à gauche, à droite, en haut, en bas), **flottant**, le
+  **Mini**, ou la fenêtre détachée placée à la main.
 - **Copier / coller riche** dans les notes ([détails](docs/TRANSCRIPTION.md#copier--coller-dans-les-notes-extension-et-application)) :
   coller (ou glisser) une **capture d’écran**, une **image** du web, une **vidéo** ou un **audio**, du
   **texte mis en forme** (Notion, Docs, Word, pages web) avec ses images, ou une partie d’une autre
@@ -251,7 +251,7 @@ elle est connectée.
 | **Panneau déplaçable** | Poignée ⠿ : flottant où on le pose (bords et coins pour le redimensionner), ancré à droite, à gauche, en haut ou en bas en le lâchant contre ce bord (zone d’ancrage allumée) ; double-clic sur la poignée : ancré ↔ flottant ; au clavier, flèches sur la poignée. Place, taille et Mini retenus **par site** (`chrome.storage.local`). |
 | **Mini (paroles)** | Widget translucide (verre dépoli, opacité réglable) : réplique en cours, traduction, voisines ; épingle = fenêtre **Document Picture-in-Picture** toujours au-dessus ; ⤢ / double-clic = panneau complet, prêt à écrire. |
 | **Écran partagé** | Ancré et en plein écran, la vidéo (tout le lecteur en plein écran) est réduite pour tenir à côté des notes, quel que soit leur bord — seules les propriétés CSS `scale` / `translate` du lecteur sont posées, puis retirées. En plein écran : 70 / 30 par défaut, séparateur à tirer (double-clic : 70 / 30). |
-| **Côte à côte (fenêtres)** | La fenêtre de la vidéo et celle des notes se partagent la zone de travail de l’écran (`screen.availLeft/Top/Width/Height`), frontière commune suivie par `chrome.windows.onBoundsChanged`, état d’avant rendu à la sortie. |
+| **Côte à côte (fenêtres)** | *Désactivé (`TILING_ENABLED = false`).* La fenêtre de la vidéo et celle des notes se partagent la zone de travail de l’écran (`screen.availLeft/Top/Width/Height`), frontière commune suivie par `chrome.windows.onBoundsChanged`, état d’avant rendu à la sortie. |
 | **Réglages** | Façon « Réglages système » : navigation latérale, interrupteurs, contrôles segmentés, choix visuel de la disposition, écran de bienvenue en 3 étapes. |
 
 Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design & contrastes : [docs/DESIGN.md](docs/DESIGN.md).
@@ -292,7 +292,7 @@ npm run mock:notion-oauth                     # échange du code « Connecter No
 | `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown et repères qualifiés, cartes de révision, auto-stamp, auto-pause, raccourcis, stockage (dont le classement), synchronisation Desktop, passages d’une page, synchronisation Notion directe (API simulée), **contrastes WCAG des tokens** |
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
-| `TILING_WM=1 npx playwright test tiling-wm` | « Côte à côte » dans un vrai Chrome sous un gestionnaire de fenêtres (Xvfb + openbox, voir l’en-tête du fichier) : aucune fenêtre ne bouge seule |
+| `TILING_WM=1 npx playwright test tiling-wm` | « Côte à côte » dans un vrai Chrome sous un gestionnaire de fenêtres (Xvfb + openbox, voir l’en-tête du fichier) : aucune fenêtre ne bouge seule — sautés tant que la fonction est désactivée |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
 | `npm run mock:desktop` / `npm run mock:notion` | Serveurs simulant Boo Notes Desktop et l’API Notion |
 | `npm run mock:notion-oauth` | Serveur d’échange de « Connecter Notion » en local (à déployer en Cloudflare Worker : `tools/notion-oauth/README.md`) |
@@ -305,8 +305,8 @@ côte, **fenêtrage du panneau** (poignée : posé n’importe où et retrouvé 
 d’ancrage et ancrage à gauche, la vidéo entière ; carte flottante redimensionnée par ses bords ;
 bande en bas et sa hauteur ; Mini : réplique, traduction, voisines, opacité, déplacement, ⤢ prêt à
 écrire, `Alt+Maj+M` ; épingle « toujours au-dessus » en Picture-in-Picture ; plein écran 70 / 30 et
-son séparateur, notes à gauche ; « Côte à côte » des fenêtres, frontière commune et retour à l’état
-d’avant ; taille du texte du Mini et répliques suivantes ; **page façon Udemy** : colonne fixée au
+son séparateur, notes à gauche ; « Côte à côte » désactivé (ni dans le menu, ni dans la fenêtre des
+notes, aucune fenêtre surveillée) ; taille du texte du Mini et répliques suivantes ; **page façon Udemy** : colonne fixée au
 bord rangée à côté des notes, plein écran du site et du panneau identiques), **export PDF** (note, cours — ses leçons seules, leurs transcriptions — et toutes les notes : images, liens, sommaire), liens `#t=`, marqueur de prévisualisation et clic sur un horodatage,
 chronologie (clic, aimantation, clavier), état vide et statistiques, feuille des raccourcis,
 disposition flottante, largeur par défaut au double-clic, pop-out puis rattachement, export `.md` +
@@ -366,7 +366,7 @@ docs/         architecture, protocole, design, transcription, questions, Notion
 - **Mini « toujours au-dessus »** : une fenêtre Picture-in-Picture de document (Chrome 116+), une à
   la fois par onglet, **opaque** (le verre dépoli n’existe que dans la page). Elle se ferme si la
   page de la vidéo est rechargée ou quittée.
-- **Côte à côte (fenêtres)** : Boo Notes suit la **frontière commune** quand on la tire ; déplacer
+- **Côte à côte (fenêtres)** — désactivé pour l’instant ; quand il est réactivé : Boo Notes suit la **frontière commune** quand on la tire ; déplacer
   une fenêtre, l’aimanter avec une autre application ou l’agrandir arrête le côte à côte (les
   fenêtres restent où on les met, rien ne bouge tout seul — la fenêtre des notes le signale). Une
   fenêtre **aimantée par Windows** (Win + ←, dispositions d’ancrage) y reste : les notes se rangent

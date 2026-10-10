@@ -27,6 +27,7 @@ import { downloadPdf } from './pdf';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
 import { Tiler } from './tiling';
+import { TILING_ENABLED } from '../shared/tiling';
 import type { Bounds } from '../shared/tiling';
 
 /**
@@ -350,7 +351,8 @@ const tiler = new Tiler({
   },
 });
 
-chrome.windows.onBoundsChanged.addListener((win) => void tiler.onBoundsChanged(win).catch(noop));
+// « Côte à côte » switched off (see TILING_ENABLED): no window is watched, none moves.
+if (TILING_ENABLED) chrome.windows.onBoundsChanged.addListener((win) => void tiler.onBoundsChanged(win).catch(noop));
 
 // --- Keyboard commands ------------------------------------------------------
 
@@ -552,6 +554,7 @@ const handlers: Handlers = {
   },
 
   'tile:set': async (msg) => {
+    if (!TILING_ENABLED) throw new Error('« Côte à côte » est désactivé');
     await tiler.set(msg.tabId, msg.tile, msg.area);
   },
 

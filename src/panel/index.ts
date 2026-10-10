@@ -66,7 +66,7 @@ import { answerQuestion } from './answers';
 import { ConnectPanel } from './connect';
 import { LayoutMenu } from './layout-menu';
 import { MiniView } from './mini';
-import type { TileId } from '../shared/tiling';
+import { TILING_ENABLED, type TileId } from '../shared/tiling';
 import type { AskRequest } from './blocks';
 
 /**
@@ -688,8 +688,9 @@ class PanelApp {
     // Where the notes go: one button, its small window (Notion, the Desktop app).
     this.connectUi = new ConnectPanel({ notify: (text, kind) => this.notify(text, kind) });
 
-    // Where the panel stands: docked, floating, the Mini, « Côte à côte ».
-    if (MODE !== 'pip') {
+    // Where the panel stands: docked, floating, the Mini (« Côte à côte » too, when switched on: the notes'
+    // window offers nothing else).
+    if (MODE === 'embedded' || (MODE === 'popout' && TILING_ENABLED)) {
       this.layoutMenu = new LayoutMenu(MODE, {
         place: (to) => this.post({ type: 'place', to }),
         mini: () => this.post({ type: 'mini', action: 'enter' }),
