@@ -286,6 +286,7 @@ npm run mock:notion-oauth                     # échange du code « Connecter No
 | `npm test` | Tests unitaires (Vitest) : horodatage, plateformes, Markdown et repères qualifiés, cartes de révision, auto-stamp, auto-pause, raccourcis, stockage (dont le classement), synchronisation Desktop, passages d’une page, synchronisation Notion directe (API simulée), **contrastes WCAG des tokens** |
 | `npm run test:e2e` | Tests de bout en bout (Playwright + Chromium avec l’extension chargée) sur une page « YouTube » locale |
 | `npm run screenshots` | Régénère `docs/screenshots/` |
+| `TILING_WM=1 npx playwright test tiling-wm` | « Côte à côte » dans un vrai Chrome sous un gestionnaire de fenêtres (Xvfb + openbox, voir l’en-tête du fichier) : aucune fenêtre ne bouge seule |
 | `npm run fixtures` | Régénère la vidéo de test `tests/e2e/fixtures/sample.webm` |
 | `npm run mock:desktop` / `npm run mock:notion` | Serveurs simulant Boo Notes Desktop et l’API Notion |
 | `npm run mock:notion-oauth` | Serveur d’échange de « Connecter Notion » en local (à déployer en Cloudflare Worker : `tools/notion-oauth/README.md`) |
@@ -357,7 +358,10 @@ docs/         architecture, protocole, design, transcription, questions, Notion
 - **Mini « toujours au-dessus »** : une fenêtre Picture-in-Picture de document (Chrome 116+), une à
   la fois par onglet, **opaque** (le verre dépoli n’existe que dans la page). Elle se ferme si la
   page de la vidéo est rechargée ou quittée.
-- **Côte à côte (fenêtres)** : l’extension ne place que des **fenêtres Chrome**. Partager l’écran
+- **Côte à côte (fenêtres)** : Boo Notes suit la **frontière commune** quand on la tire ; déplacer
+  une fenêtre, l’aimanter avec une autre application ou l’agrandir arrête le côte à côte (les
+  fenêtres restent où on les met, rien ne bouge tout seul — la fenêtre des notes le signale). Chrome
+  garde une fenêtre de navigation à au moins ≈ 510 px de large. L’extension ne place que des **fenêtres Chrome**. Partager l’écran
   avec une autre application, ou réserver une zone du bureau (barre d’application), demande
   **Boo Notes Desktop**. Une vidéo mise en plein écran sort de sa zone (le plein écran du navigateur
   prend tout l’écran) : dans une zone, le plein écran partagé du panneau fait l’équivalent.

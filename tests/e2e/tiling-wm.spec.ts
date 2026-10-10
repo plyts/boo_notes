@@ -1,0 +1,203 @@
+import { test as base, chromium, expect, type BrowserContext, type Page, type Route, type Worker } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { fulfillMedia, sampleVideo } from './fixtures';
+
+/**
+ * « Côte à côte » in a real, headed Chrome under a window manager — the
+ * windows must never shake or move on their own. Needs a display and a window
+ * manager, so it only runs on demand:
+ *
+ *   Xvfb :99 -screen 0 1920x1080x24 & DISPLAY=:99 openbox &
+ *   DISPLAY=:99 TILING_WM=1 npx playwright test tiling-wm
+ *
+ * (apt: xvfb openbox xdotool wmctrl x11-apps imagemagick). The emulated
+ * system snap (B) is what Windows does with snapped windows: their visible
+ * edges touch, their rects overlapping by the 2 × 7 px invisible borders.
+ */
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const OUT = process.env.REPRO_OUT ?? '';
+
+async function serve(route: Route): Promise<void> {
+  const url = new URL(route.request().url());
+  if (url.pathname === '/watch') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: await readFile(`${ROOT}tests/e2e/fixtures/watch.html`) });
+  if (url.pathname === '/__fixtures/sample.webm') return fulfillMedia(route, await sampleVideo(), 'video/webm');
+  return route.fulfill({ status: 404, body: '' });
+}
+
+const test = base.extend<{ context: BrowserContext; sw: Worker; page: Page }>({
+  context: async ({}, use) => {
+    const context = await chromium.launchPersistentContext('', {
+      channel: 'chromium',
+      headless: false,
+      viewport: null,
+      args: [`--disable-extensions-except=${ROOT}dist`, `--load-extension=${ROOT}dist`, '--autoplay-policy=no-user-gesture-required', '--window-size=1400,900', '--window-position=60,60'],
+    });
+    await context.route(/^https:\/\/www\.youtube\.com\//, serve);
+    await use(context);
+    await context.close();
+  },
+  sw: async ({ context }, use) => {
+    let [sw] = context.serviceWorkers();
+    sw ??= await context.waitForEvent('serviceworker');
+    for (let i = 0; i < 200; i++) {
+      if (await sw.evaluate(() => Boolean((globalThis as { booNotes?: unknown }).booNotes)).catch(() => false)) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await use(sw);
+  },
+  page: async ({ context, sw }, use) => {
+    void sw;
+    await use(await context.newPage());
+  },
+});
+
+type Entry = { t: number; kind: string; id: number; b?: number[]; info?: string };
+
+async function instrument(sw: Worker): Promise<void> {
+  await sw.evaluate(() => {
+    const g = globalThis as unknown as { __log: unknown[]; __t0: number; __wrapped?: boolean };
+    g.__log = [];
+    g.__t0 = Date.now();
+    if (g.__wrapped) return;
+    g.__wrapped = true;
+    const w = chrome.windows as unknown as Record<string, unknown>;
+    const orig = chrome.windows.update.bind(chrome.windows);
+    (globalThis as unknown as { __osUpdate: typeof orig }).__osUpdate = orig;
+    Object.defineProperty(w, 'update', {
+      configurable: true,
+      writable: true,
+      value: (id: number, info: chrome.windows.UpdateInfo) => {
+        g.__log.push({ t: Date.now() - g.__t0, kind: 'update', id, info: JSON.stringify(info) });
+        return orig(id, info);
+      },
+    });
+    chrome.windows.onBoundsChanged.addListener((win) => g.__log.push({ t: Date.now() - g.__t0, kind: 'bounds', id: win.id, b: [win.left, win.top, win.width, win.height] }));
+  });
+}
+
+const log = (sw: Worker) => sw.evaluate(() => (globalThis as unknown as { __log: Entry[] }).__log) as Promise<Entry[]>;
+const wm = () => execSync('wmctrl -lG', { env: { ...process.env } }).toString().trim().split('\n').map((l) => l.replace(/\s+/g, ' '));
+
+async function watch(sw: Worker, label: string, ms: number): Promise<{ updates: number; bounds: number; lastAt: number; samples: string[] }> {
+  const samples: string[] = [];
+  const end = Date.now() + ms;
+  let shot = 0;
+  while (Date.now() < end) {
+    samples.push(`${Date.now() % 100000} ${wm().filter((l) => /YouTube|Boo Notes|Vidéo/.test(l)).join(' | ')}`);
+    if (OUT && shot < 3 && samples.length % 6 === 1) execSync(`import -window root ${OUT}/${label}-${shot++}.png`);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const entries = await log(sw);
+  const lastAt = entries.length ? entries[entries.length - 1].t : 0;
+  return { updates: entries.filter((e) => e.kind === 'update').length, bounds: entries.filter((e) => e.kind === 'bounds').length, lastAt, samples };
+}
+
+
+async function tiled(context: BrowserContext, page: Page, sw: Worker, tile: RegExp): Promise<Page> {
+  await page.goto('https://www.youtube.com/watch?v=e2eTest0001');
+  await page.bringToFront();
+  await page.locator('#boo-notes-overlay').waitFor({ state: 'attached' });
+  await sw.evaluate(async (url) => {
+    const [tab] = (await chrome.tabs.query({})).filter((t) => t.url === url);
+    await (globalThis as unknown as { booNotes: { runCommand(c: string, id?: number): Promise<void> } }).booNotes.runCommand('toggle-sidebar', tab?.id);
+  }, page.url());
+  const panel = page.frameLocator('#boo-notes-drawer iframe:not(.retired)');
+  await panel.locator('.cm-content').waitFor();
+  const opened = context.waitForEvent('page', { predicate: (p) => p.url().includes('mode=popout') });
+  await panel.getByRole('button', { name: 'Disposition du panneau' }).click();
+  await panel.getByRole('menuitemradio', { name: tile }).click();
+  const popup = await opened;
+  await new Promise((r) => setTimeout(r, 1500));
+  return popup;
+}
+
+const ids = (sw: Worker) =>
+  sw.evaluate(async () => Object.values(((await chrome.storage.session.get('tiles')).tiles ?? {}) as Record<string, { videoWindow: number; notesWindow: number }>)[0]);
+
+const fmt = (e: Entry) => `  ${String(e.t).padStart(5)}ms ${e.kind.padEnd(6)} #${e.id} ${e.b ? e.b.join(',') : e.info}`;
+
+test.skip(!process.env.TILING_WM || !process.env.DISPLAY, 'TILING_WM=1 and a display with a window manager (see above)');
+
+test('A: the video window dragged aside (room for another app): the notes window stays put, Boo Notes lets go', async ({ context, page, sw }) => {
+  test.setTimeout(120_000);
+  execSync('(command -v xclock >/dev/null && xclock -geometry 300x300+1550+600 >/dev/null 2>&1 &) || true');
+  const popup = await tiled(context, page, sw, /^2\/3 · 1\/3/);
+  const t = await ids(sw);
+  const notesBefore = await sw.evaluate((id) => chrome.windows.get(id), t.notesWindow);
+  await instrument(sw);
+  // A title-bar drag through the window manager (Alt+drag), 400 px to the right, in steps.
+  execSync('xdotool mousemove --sync 400 300 keydown alt mousedown 1');
+  for (let i = 1; i <= 20; i++) execSync(`xdotool mousemove --sync ${400 + i * 20} 300 && sleep 0.03`);
+  execSync('xdotool mouseup 1 keyup alt');
+  // Said in the notes' window.
+  await expect(popup.locator('.notice')).toContainText('Côte à côte arrêté');
+  const r = await watch(sw, 'drag-video', 3000);
+  console.log(`A) video window dragged 400 px: ${r.updates} move(s) by Boo Notes, ${r.bounds} bounds events`);
+  expect(r.updates).toBe(0);
+  const notesAfter = await sw.evaluate((id) => chrome.windows.get(id), t.notesWindow);
+  expect([notesAfter.left, notesAfter.width]).toEqual([notesBefore.left, notesBefore.width]);
+  expect(await ids(sw)).toBeUndefined();
+});
+
+test('B: the system snaps the windows too (Windows-like invisible borders): no ping-pong', async ({ context, page, sw }) => {
+  test.setTimeout(120_000);
+  await tiled(context, page, sw, /^1\/2 · 1\/2/);
+  const t = await ids(sw);
+  await instrument(sw);
+  const agent = setInterval(() => {
+    void sw.evaluate(async ({ v, n }) => {
+      const g = globalThis as unknown as { __osUpdate: typeof chrome.windows.update; __log: unknown[]; __t0: number };
+      const [vb, nb] = [await chrome.windows.get(v), await chrome.windows.get(n)];
+      const want = nb.left! + 14 - vb.left!;
+      if (Math.abs(vb.width! - want) > 1) {
+        g.__log.push({ t: Date.now() - g.__t0, kind: 'OS', id: v, info: `snap group: video width ${vb.width} -> ${want}` });
+        await g.__osUpdate(v, { width: want });
+      }
+    }, { v: t.videoWindow, n: t.notesWindow }).catch(() => undefined);
+  }, 120);
+  // The user drags the common border once.
+  await sw.evaluate(async (n) => {
+    const g = globalThis as unknown as { __osUpdate: typeof chrome.windows.update };
+    const b = await chrome.windows.get(n);
+    await g.__osUpdate(n, { left: b.left! + 100, width: b.width! - 100 });
+  }, t.notesWindow);
+  const r = await watch(sw, 'snap-group', 5000);
+  clearInterval(agent);
+  const entries = await log(sw);
+  console.log(`B) one border drag with a system snap: ${r.updates} move(s) by Boo Notes, ${entries.filter((e) => e.kind === 'OS').length} by the system, last at ${r.lastAt} ms`);
+  console.log(entries.map(fmt).join('\n'));
+  expect(r.updates).toBeLessThanOrEqual(6);
+  // Quiet well before the end of the 5 s.
+  expect(r.lastAt).toBeLessThan(2000);
+});
+
+test('C: the common border dragged (notes on the left, then on the right): the other window follows once', async ({ context, page, sw }) => {
+  test.setTimeout(120_000);
+  for (const [tile, left] of [[/^Notes à gauche/, true], [/^2\/3 · 1\/3/, false]] as const) {
+    const popup = await tiled(context, page, sw, tile);
+    const t = await ids(sw);
+    await instrument(sw);
+    // A live resize of the notes window by its inner edge, in steps.
+    await sw.evaluate(async ({ n, left }) => {
+      const g = globalThis as unknown as { __osUpdate: typeof chrome.windows.update };
+      for (let i = 1; i <= 10; i++) {
+        const b = await chrome.windows.get(n);
+        if (left) await g.__osUpdate(n, { width: b.width! + 15 });
+        else await g.__osUpdate(n, { left: b.left! - 15, width: b.width! + 15 });
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    }, { n: t.notesWindow, left });
+    const r = await watch(sw, `border-${left ? 'left' : 'right'}`, 3000);
+    const v = await sw.evaluate((id) => chrome.windows.get(id), t.videoWindow);
+    const n = await sw.evaluate((id) => chrome.windows.get(id), t.notesWindow);
+    console.log(`C) ${left ? 'notes à gauche' : '2/3 · 1/3'}: border dragged 150 px: ${r.updates} move(s) by Boo Notes; video ${v.left},${v.width} notes ${n.left},${n.width}`);
+    expect(r.updates).toBe(1);
+    expect(left ? n.left! + n.width! : v.left! + v.width!).toBe(left ? v.left : n.left);
+    expect(await ids(sw)).toBeTruthy();
+    await popup.getByRole('button', { name: 'Côte à côte' }).click();
+    await popup.getByRole('menuitem', { name: 'Quitter côte à côte' }).click();
+    await expect.poll(() => ids(sw)).toBeUndefined();
+  }
+});

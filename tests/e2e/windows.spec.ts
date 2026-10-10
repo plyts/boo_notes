@@ -363,7 +363,9 @@ test.describe('Partage de l’écran', () => {
     // In the notes' window, « Côte à côte » is on.
     await expect(popup.getByRole('button', { name: 'Côte à côte' })).toHaveClass(/on/);
 
-    // The user narrows the video window: the notes' window follows the common border.
+    // The user narrows the video window by its inner edge (once the windows have settled): the notes' window
+    // follows the common border, once.
+    await page.waitForTimeout(1000);
     await sw.evaluate(async (id) => {
       await chrome.windows.update(id, { width: 420 });
     }, t.videoWindow);

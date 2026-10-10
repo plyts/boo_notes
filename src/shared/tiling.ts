@@ -34,15 +34,25 @@ export function tileChoice(id: unknown): TileChoice | null {
   return TILES.find((t) => t.id === id) ?? null;
 }
 
-/** Narrowest zone either window may get (px). */
-export const TILE_MIN = { video: 400, notes: 340 } as const;
+/** Narrowest zone either window may get (px): Chrome refuses a browser window under ~510 px. */
+export const TILE_MIN = { video: 520, notes: 340 } as const;
+
+/** After Boo Notes places a window, how long its moves are its own settling (window manager, borders), not the user's. */
+export const TILE_SETTLE_MS = 800;
+/** Quiet time before a resize is followed (a drag reports many bounds on its way). */
+export const TILE_DEBOUNCE_MS = 150;
+/** More border follows than this within the window: another arranger is at work (the system's snap): Boo Notes lets go. */
+export const TILE_FOLLOW_LIMIT = { count: 6, ms: 3000 } as const;
 
 /** The two zones, split at `border` (screen x of the line between them). */
 function zones(area: Bounds, side: 'left' | 'right', border: number): { video: Bounds; notes: Bounds } {
   const lo = side === 'right' ? TILE_MIN.video : TILE_MIN.notes;
   const hi = side === 'right' ? TILE_MIN.notes : TILE_MIN.video;
-  // A work area too small for both minima: split it in the middle.
-  const x = area.width >= lo + hi ? Math.round(Math.min(area.left + area.width - hi, Math.max(area.left + lo, border))) : Math.round(area.left + area.width / 2);
+  // A work area too small for both minima: the border stays within the middle third.
+  const fits = area.width >= lo + hi;
+  const min = area.left + (fits ? lo : Math.round(area.width * 0.35));
+  const max = area.left + area.width - (fits ? hi : Math.round(area.width * 0.35));
+  const x = Math.round(Math.min(max, Math.max(min, border)));
   const first: Bounds = { left: area.left, top: area.top, width: x - area.left, height: area.height };
   const second: Bounds = { left: x, top: area.top, width: area.left + area.width - x, height: area.height };
   return side === 'right' ? { video: first, notes: second } : { video: second, notes: first };
@@ -63,6 +73,21 @@ export function followBorder(area: Bounds, side: 'left' | 'right', which: 'video
   const videoFirst = side === 'right';
   const border = which === 'video' ? (videoFirst ? b.left + b.width : b.left) : videoFirst ? b.left : b.left + b.width;
   return zones(area, side, border);
+}
+
+/**
+ * What a window's new bounds mean, against the ones it had: `same` (within
+ * `tolerance`), `border` (only its inner edge moved — the common border was
+ * dragged), `rearranged` (moved, snapped elsewhere, resized by its outer edge
+ * or its height: the user arranges the windows another way).
+ */
+export function judgeChange(side: 'left' | 'right', which: 'video' | 'notes', before: Bounds, now: Bounds, tolerance = 6): 'same' | 'border' | 'rearranged' {
+  if (sameBounds(before, now, tolerance)) return 'same';
+  if (Math.abs(before.top - now.top) > tolerance || Math.abs(before.height - now.height) > tolerance) return 'rearranged';
+  // The outer edge: the video's left and the notes' right when the notes are on the right, the reverse otherwise.
+  const outerIsLeft = (side === 'right') === (which === 'video');
+  const outer = (b: Bounds) => (outerIsLeft ? b.left : b.left + b.width);
+  return Math.abs(outer(before) - outer(now)) <= tolerance ? 'border' : 'rearranged';
 }
 
 /** Share of the work area the notes take in `notes`. */

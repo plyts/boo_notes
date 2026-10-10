@@ -1595,7 +1595,7 @@ class PanelApp {
   }
 
   /** Snackbar above the footer (Material pattern): transient, non-blocking. */
-  private notify(text: string, kind: 'info' | 'success' | 'error' = 'info'): void {
+  private notify(text: string, kind: 'info' | 'success' | 'error' = 'info', ms = kind === 'error' ? 5000 : 3000): void {
     const glyph = kind === 'success' ? icon('check', 14) : kind === 'error' ? icon('alert', 14) : null;
     this.noticeEl.replaceChildren(...(glyph ? [glyph] : []), h('span', {}, text));
     this.noticeEl.dataset.kind = kind;
@@ -1604,7 +1604,7 @@ class PanelApp {
     this.noticeTimer = setTimeout(() => {
       this.noticeEl.classList.remove('show');
       this.noticeTimer = setTimeout(() => this.noticeEl.replaceChildren(), 250);
-    }, kind === 'error' ? 5000 : 3000);
+    }, ms);
   }
 
   private showBanner(text: string): void {
@@ -2033,6 +2033,22 @@ class PanelApp {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'session' && changes['sync:status']) {
         this.renderStatus(changes['sync:status'].newValue as SyncStatus | undefined);
+      }
+      // « Côte à côte » let go (a window moved, maximized, or the system arranging them too): said here.
+      if (area === 'session' && MODE === 'popout' && (changes.tiles || changes['tile:ended'])) {
+        callBackground({ type: 'tile:status', tabId: TAB_ID }).then((id) => this.layoutMenu?.setTiled(id), () => undefined);
+        const ended = changes['tile:ended']?.newValue as { tabId: number; reason: string } | undefined;
+        if (ended?.tabId === TAB_ID) {
+          this.notify(
+            ended.reason === 'fight'
+              ? 'Côte à côte arrêté : le système range aussi ces fenêtres (aimantation) — Boo Notes le laisse faire.'
+              : ended.reason === 'maximized'
+                ? 'Côte à côte arrêté : la fenêtre de la vidéo a été agrandie.'
+                : 'Côte à côte arrêté : une fenêtre a été déplacée — elles restent où vous les mettez.',
+            'info',
+            6000,
+          );
+        }
       }
       if (area === 'session' && changes['notion:status']) {
         this.setNotionStatus((changes['notion:status'].newValue as NotionStatus | undefined) ?? null);

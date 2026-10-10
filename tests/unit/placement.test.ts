@@ -96,6 +96,11 @@ describe('côte à côte (fenêtres)', () => {
     // 3/4 – 1/4 on a small screen: the notes keep their minimum.
     const small = { left: 0, top: 0, width: 1280, height: 800 };
     expect(tileBounds(small, 0.25, 'right').notes.width).toBe(340);
+    // Too small for both: the border stays between 35 % and 65 % of the screen, and can still be dragged there.
+    const tiny = { left: 0, top: 0, width: 800, height: 600 };
+    expect(tileBounds(tiny, 1 / 3, 'right').video.width).toBe(520);
+    expect(followBorder(tiny, 'right', 'video', { left: 0, top: 0, width: 420, height: 600 }).notes).toEqual({ left: 420, top: 0, width: 380, height: 600 });
+    expect(followBorder(tiny, 'right', 'video', { left: 0, top: 0, width: 100, height: 600 }).video.width).toBe(280);
   });
 
   it('une fenêtre redimensionnée par son bord intérieur : l’autre suit la frontière', () => {

@@ -279,6 +279,19 @@ deux leçons du même module ne partagent jamais une note (ni son classement cou
   est ramenée dans la fenêtre si celle-ci a rétréci.
 - **Côte à côte** : Chrome refuse une fenêtre à moins de 50 % sur un écran ; rendue à sa taille
   d’avant hors de l’écran actuel, la fenêtre de la vidéo y est ramenée (`within`).
+- **Côte à côte sans tremblement** : Boo Notes ne se bat jamais avec l’utilisateur ni avec le système
+  pour la place des fenêtres. Les changements d’une fenêtre sont lus une fois la fenêtre immobile
+  (150 ms : un glisser en rapporte des dizaines). Après qu’il a placé une fenêtre, sa mise en place
+  par le système (bordures invisibles, arrondis, largeur minimale d’une fenêtre Chrome ≈ 510 px)
+  est prise telle quelle pendant 800 ms, jamais « suivie ». Seul un glisser de la **frontière
+  commune** (le bord intérieur bouge, le bord extérieur et la hauteur restent) est suivi par l’autre
+  fenêtre ; une fenêtre déplacée, aimantée ailleurs ou agrandie veut dire que l’utilisateur range ses
+  fenêtres autrement : Boo Notes lâche le côte à côte (plus rien ne bouge tout seul) et le dit dans
+  la fenêtre des notes. Si la frontière fait des allers-retours (plus de 6 suivis en 3 s : le système
+  aimante aussi, avec une autre idée de « bord à bord »), il lâche aussi. Décision pure :
+  `judgeChange` (`src/shared/tiling.ts`) ; vérifié contre un gestionnaire de fenêtres simulé
+  (`tests/unit/tiling-stability.test.ts`) et dans un vrai Chrome sous un gestionnaire de fenêtres
+  (`tests/e2e/tiling-wm.spec.ts`, à lancer avec `TILING_WM=1` sous Xvfb + openbox).
 - L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
 
 ## Sécurité
