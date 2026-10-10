@@ -15,6 +15,8 @@ import { fulfillMedia, sampleVideo } from './fixtures';
  * (apt: xvfb openbox xdotool wmctrl x11-apps imagemagick). The emulated
  * system snap (B) is what Windows does with snapped windows: their visible
  * edges touch, their rects overlapping by the 2 × 7 px invisible borders.
+ * D and E are the user's clip (Windows 11): the video window snapped to the
+ * left half, held there by Windows (D), flipping 1/2 ↔ 2/3 on its own (E).
  */
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const OUT = process.env.REPRO_OUT ?? '';
@@ -57,7 +59,7 @@ type Entry = { t: number; kind: string; id: number; b?: number[]; info?: string 
 
 async function instrument(sw: Worker): Promise<void> {
   await sw.evaluate(() => {
-    const g = globalThis as unknown as { __log: unknown[]; __t0: number; __wrapped?: boolean };
+    const g = globalThis as unknown as { __log: unknown[]; __t0: number; __wrapped?: boolean; __hold?: { id: number; b: chrome.windows.UpdateInfo } | null };
     g.__log = [];
     g.__t0 = Date.now();
     if (g.__wrapped) return;
@@ -70,7 +72,15 @@ async function instrument(sw: Worker): Promise<void> {
       writable: true,
       value: (id: number, info: chrome.windows.UpdateInfo) => {
         g.__log.push({ t: Date.now() - g.__t0, kind: 'update', id, info: JSON.stringify(info) });
-        return orig(id, info);
+        const out = orig(id, info);
+        // A window the system holds (Windows' snap): resized by Boo Notes, put back a moment later.
+        const hold = g.__hold;
+        if (hold && hold.id === id && info.width !== undefined)
+          setTimeout(() => {
+            g.__log.push({ t: Date.now() - g.__t0, kind: 'OS', id, info: `held: back to ${JSON.stringify(hold.b)}` });
+            void orig(id, hold.b);
+          }, 40);
+        return out;
       },
     });
     chrome.windows.onBoundsChanged.addListener((win) => g.__log.push({ t: Date.now() - g.__t0, kind: 'bounds', id: win.id, b: [win.left, win.top, win.width, win.height] }));
@@ -95,8 +105,9 @@ async function watch(sw: Worker, label: string, ms: number): Promise<{ updates: 
 }
 
 
-async function tiled(context: BrowserContext, page: Page, sw: Worker, tile: RegExp): Promise<Page> {
+async function tiled(context: BrowserContext, page: Page, sw: Worker, tile: RegExp, before?: () => Promise<void>): Promise<Page> {
   await page.goto('https://www.youtube.com/watch?v=e2eTest0001');
+  await before?.();
   await page.bringToFront();
   await page.locator('#boo-notes-overlay').waitFor({ state: 'attached' });
   await sw.evaluate(async (url) => {
@@ -200,4 +211,67 @@ test('C: the common border dragged (notes on the left, then on the right): the o
     await popup.getByRole('menuitem', { name: 'Quitter côte à côte' }).click();
     await expect.poll(() => ids(sw)).toBeUndefined();
   }
+});
+
+const videoWindowOf = (sw: Worker, url: string) => sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)!.windowId, url);
+const area = { left: 0, top: 0, width: 1920, height: 1080 };
+
+test('D: the video window snapped to the left half and held there (Windows): the notes go beside it, once, then nothing moves', async ({ context, page, sw }) => {
+  test.setTimeout(120_000);
+  const popup = await tiled(context, page, sw, /^2\/3 · 1\/3/, async () => {
+    await instrument(sw);
+    const v = await videoWindowOf(sw, 'https://www.youtube.com/watch?v=e2eTest0001');
+    await sw.evaluate(async ({ v, b }) => {
+      const g = globalThis as unknown as { __osUpdate: typeof chrome.windows.update; __hold: unknown };
+      await g.__osUpdate(v, b);
+      g.__hold = { id: v, b };
+    }, { v, b: { left: area.left, top: area.top, width: area.width / 2, height: area.height } });
+    await new Promise((r) => setTimeout(r, 800));
+  });
+  if (OUT) {
+    // Proof: the screen once settled.
+    await new Promise((r) => setTimeout(r, 2500));
+    execSync(`import -window root ${OUT}/held-settled.png`);
+  }
+  await expect(popup.locator('.notice')).toContainText('aimantée à sa place', { timeout: 5000 });
+  const r = await watch(sw, 'held', 4000);
+  const t = await ids(sw);
+  const v = await sw.evaluate((id) => chrome.windows.get(id), t.videoWindow);
+  const n = await sw.evaluate((id) => chrome.windows.get(id), t.notesWindow);
+  const entries = await log(sw);
+  console.log(`D) video held at 1/2: ${r.updates} move(s) by Boo Notes in all, the last at ${r.lastAt} ms; video ${v.left},${v.width} notes ${n.left},${n.width}`);
+  console.log(entries.map(fmt).join('\n'));
+  // The notes beside the video where Windows kept it: no gap where another window shows through, no overlap.
+  expect(Math.abs(n.left! - (v.left! + v.width!))).toBeLessThanOrEqual(24);
+  expect(v.width).toBe(area.width / 2);
+  // The video (refused), the new notes window placed, the notes beside the video: nothing more.
+  expect(r.updates).toBeLessThanOrEqual(3);
+  // All of it within the placement and its check (≈ 1 s), long before the end of the watch.
+  const lastUpdate = Math.max(...entries.filter((e) => e.kind === 'update').map((e) => e.t));
+  expect(lastUpdate).toBeLessThan(3500);
+  await sw.evaluate(() => ((globalThis as unknown as { __hold: unknown }).__hold = null));
+});
+
+test('E: the video window flips 1/2 ↔ 2/3 on its own (the user\'s clip): the notes no longer follow it, Boo Notes lets go', async ({ context, page, sw }) => {
+  test.setTimeout(120_000);
+  const popup = await tiled(context, page, sw, /^2\/3 · 1\/3/);
+  const t = await ids(sw);
+  await new Promise((r) => setTimeout(r, 1000));
+  await instrument(sw);
+  // 3 s of flips, every 200 to 450 ms, as in the clip.
+  for (const [i, ms] of [300, 250, 400, 200, 450, 300, 250, 350, 300, 200].entries()) {
+    await sw.evaluate(async ({ v, width }) => {
+      const g = globalThis as unknown as { __osUpdate: typeof chrome.windows.update; __log: unknown[]; __t0: number };
+      g.__log.push({ t: Date.now() - g.__t0, kind: 'OS', id: v, info: `flip: video width -> ${width}` });
+      await g.__osUpdate(v, { width });
+    }, { v: t.videoWindow, width: i % 2 === 0 ? area.width / 2 : Math.round((area.width * 2) / 3) });
+    await new Promise((r) => setTimeout(r, ms));
+  }
+  await expect(popup.locator('.notice')).toContainText('Côte à côte arrêté');
+  const r = await watch(sw, 'flip', 2000);
+  const entries = await log(sw);
+  console.log(`E) 10 flips of the video window: ${r.updates} move(s) by Boo Notes`);
+  console.log(entries.map(fmt).join('\n'));
+  expect(r.updates).toBeLessThanOrEqual(1);
+  expect(await ids(sw)).toBeUndefined();
 });

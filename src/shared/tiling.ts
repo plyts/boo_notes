@@ -42,7 +42,11 @@ export const TILE_SETTLE_MS = 800;
 /** Quiet time before a resize is followed (a drag reports many bounds on its way). */
 export const TILE_DEBOUNCE_MS = 150;
 /** More border follows than this within the window: another arranger is at work (the system's snap): Boo Notes lets go. */
-export const TILE_FOLLOW_LIMIT = { count: 6, ms: 3000 } as const;
+export const TILE_FOLLOW_LIMIT = { count: 3, ms: 4000 } as const;
+/** A window's inner edge back where it stood this recently (1/2 → 2/3 → 1/2): the system holds it there, Boo Notes lets go. */
+export const TILE_BOUNCE_MS = 6000;
+/** The two windows' inner edges this close (px) are together: invisible borders, frames, rounding. */
+export const TILE_GAP = 24;
 
 /** The two zones, split at `border` (screen x of the line between them). */
 function zones(area: Bounds, side: 'left' | 'right', border: number): { video: Bounds; notes: Bounds } {
@@ -64,15 +68,24 @@ export function tileBounds(area: Bounds, notesShare: number, side: 'left' | 'rig
   return zones(area, side, side === 'right' ? area.left + area.width - notesWidth : area.left + notesWidth);
 }
 
+/** A window's edge on the common border: the video's right / the notes' left when the notes are on the right, and the reverse. */
+export function innerEdge(side: 'left' | 'right', which: 'video' | 'notes', b: Bounds): number {
+  const innerIsRight = (side === 'right') === (which === 'video');
+  return innerIsRight ? b.left + b.width : b.left;
+}
+
+/** A window's edge against the side of the screen (the video's left when the notes are on the right…). */
+export function outerEdge(side: 'left' | 'right', which: 'video' | 'notes', b: Bounds): number {
+  const innerIsRight = (side === 'right') === (which === 'video');
+  return innerIsRight ? b.left : b.left + b.width;
+}
+
 /**
  * One window was resized by the user (`which`, now at `b`): the border moves
  * with its inner edge and the other window fills the rest.
  */
 export function followBorder(area: Bounds, side: 'left' | 'right', which: 'video' | 'notes', b: Bounds): { video: Bounds; notes: Bounds } {
-  // The inner edge: the video's right / the notes' left when the notes are on the right, and the reverse.
-  const videoFirst = side === 'right';
-  const border = which === 'video' ? (videoFirst ? b.left + b.width : b.left) : videoFirst ? b.left : b.left + b.width;
-  return zones(area, side, border);
+  return zones(area, side, innerEdge(side, which, b));
 }
 
 /**
@@ -84,10 +97,7 @@ export function followBorder(area: Bounds, side: 'left' | 'right', which: 'video
 export function judgeChange(side: 'left' | 'right', which: 'video' | 'notes', before: Bounds, now: Bounds, tolerance = 6): 'same' | 'border' | 'rearranged' {
   if (sameBounds(before, now, tolerance)) return 'same';
   if (Math.abs(before.top - now.top) > tolerance || Math.abs(before.height - now.height) > tolerance) return 'rearranged';
-  // The outer edge: the video's left and the notes' right when the notes are on the right, the reverse otherwise.
-  const outerIsLeft = (side === 'right') === (which === 'video');
-  const outer = (b: Bounds) => (outerIsLeft ? b.left : b.left + b.width);
-  return Math.abs(outer(before) - outer(now)) <= tolerance ? 'border' : 'rearranged';
+  return Math.abs(outerEdge(side, which, before) - outerEdge(side, which, now)) <= tolerance ? 'border' : 'rearranged';
 }
 
 /** Share of the work area the notes take in `notes`. */

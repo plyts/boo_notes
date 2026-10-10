@@ -1,8 +1,12 @@
 import {
   followBorder,
+  innerEdge,
   judgeChange,
+  outerEdge,
+  TILE_BOUNCE_MS,
   TILE_DEBOUNCE_MS,
   TILE_FOLLOW_LIMIT,
+  TILE_GAP,
   TILE_SETTLE_MS,
   tileBounds,
   tileChoice,
@@ -20,8 +24,11 @@ import {
  * moved, snapped elsewhere or maximized means they are arranged another way,
  * and Boo Notes lets go (nothing moves on its own any more). After placing a
  * window, its settling (window manager, borders, minimum sizes) is taken as
- * it comes, never followed; and if the border keeps moving back and forth —
- * another arranger at work —, Boo Notes lets go too.
+ * it comes, never followed; once both have settled, if the system kept the
+ * video window elsewhere (Windows holds a snapped window at its half), the
+ * notes go beside it, once. A window's edge coming back where it stood a
+ * moment ago (1/2 → 2/3 → 1/2), or the border moving again and again: another
+ * arranger is at work, and Boo Notes lets go too.
  *
  * Chrome windows only: another application, or reserving the area for good
  * (an app bar), takes the Desktop app.
@@ -44,6 +51,14 @@ export interface TileState {
   settle: { video: number; notes: number };
   /** When the border was followed lately (to notice two arrangers fighting). */
   follows: number[];
+  /** Where each window's inner edge stood lately (to notice one coming back: the system holding it there). */
+  edges?: Array<{ which: 'video' | 'notes'; x: number; at: number }>;
+  /** When Boo Notes placed the windows (the check once they have settled is for this placement). */
+  placedAt?: number;
+  /** Where Boo Notes put the video window's inner edge. */
+  asked?: number;
+  /** The system kept the video window where it was: Boo Notes no longer asks it to move. */
+  held?: boolean;
 }
 
 /** Why Boo Notes let go of a tiling (shown in the notes' window). */
@@ -51,6 +66,8 @@ export type TileEnd = 'moved' | 'maximized' | 'fight';
 
 const KEY = 'tiles';
 const ENDED_KEY = 'tile:ended';
+/** The system kept the video window where it was: the notes went beside it (shown in the notes' window). */
+const HELD_KEY = 'tile:held';
 
 export interface TilerDeps {
   /** Opens (or moves) the notes' window of the tab at `bounds`; resolves to its window id. */
@@ -111,8 +128,45 @@ export class Tiler {
       const actual = placed ? boundsOf(placed) : zones.video;
       if (actual.width !== zones.video.width || actual.left !== zones.video.left) zones = { ...followBorder(area, choice.side, 'video', actual), video: actual };
       const notesWindow = await this.deps.openNotes(tabId, zones.notes);
-      const until = this.now() + TILE_SETTLE_MS;
-      tiles[tabId] = { tabId, tile: id, side: choice.side, area, videoWindow: win.id, notesWindow, saved, expect: zones, settle: { video: until, notes: until }, follows: [] };
+      const placedAt = this.now();
+      const until = placedAt + TILE_SETTLE_MS;
+      const t: TileState = { tabId, tile: id, side: choice.side, area, videoWindow: win.id, notesWindow, saved, expect: zones, settle: { video: until, notes: until }, follows: [], edges: [], placedAt, asked: innerEdge(choice.side, 'video', zones.video) };
+      note(t, 'video', zones.video, placedAt);
+      note(t, 'notes', zones.notes, placedAt);
+      tiles[tabId] = t;
+      // Once both have settled (and their last bounds handled): where did they really stay?
+      setTimeout(() => void this.check(tabId, placedAt).catch(() => undefined), TILE_SETTLE_MS + TILE_DEBOUNCE_MS + 50);
+    });
+  }
+
+  /**
+   * The windows once settled. The system may have kept the video window
+   * where it was (Windows holds a snapped window at its half): the notes go
+   * beside it, once — the video window is not asked again.
+   */
+  private check(tabId: number, placedAt: number): Promise<void> {
+    return this.update(async (tiles) => {
+      const t = tiles[tabId];
+      if (!t || t.placedAt !== placedAt) return;
+      const [v, n] = await Promise.all([chrome.windows.get(t.videoWindow), chrome.windows.get(t.notesWindow)]);
+      if (v.state !== 'normal' || n.state !== 'normal') return;
+      const video = boundsOf(v);
+      const notes = boundsOf(n);
+      t.expect = { video, notes };
+      if (Math.abs(innerEdge(t.side, 'video', video) - innerEdge(t.side, 'notes', notes)) <= TILE_GAP) return;
+      const now = this.now();
+      // Not against its side of the screen any more: arranged another way.
+      const screenEdge = t.side === 'right' ? t.area.left : t.area.left + t.area.width;
+      if (Math.abs(outerEdge(t.side, 'video', video) - screenEdge) > TILE_GAP) return void (await this.release(tiles, t, 'moved'));
+      const next = followBorder(t.area, t.side, 'video', video);
+      // The video window not where Boo Notes put it: the system holds it (otherwise only the notes strayed).
+      t.held = Math.abs(innerEdge(t.side, 'video', video) - (t.asked ?? innerEdge(t.side, 'video', video))) > TILE_GAP;
+      t.expect.notes = next.notes;
+      t.settle = { ...t.settle, notes: now + TILE_SETTLE_MS };
+      note(t, 'video', video, now);
+      note(t, 'notes', next.notes, now);
+      await chrome.windows.update(t.notesWindow, next.notes).catch(() => undefined);
+      if (t.held) await chrome.storage.session.set({ [HELD_KEY]: { tabId, at: now } }).catch(() => undefined);
     });
   }
 
@@ -165,6 +219,7 @@ export class Tiler {
       // Placed by Boo Notes a moment ago: where it settles is where it is.
       if (now < (t.settle?.[which] ?? 0)) {
         t.expect[which] = b;
+        note(t, which, b, now);
         return;
       }
       const verdict = judgeChange(t.side, which, t.expect[which], b);
@@ -173,12 +228,22 @@ export class Tiler {
         return;
       }
       if (verdict === 'rearranged') return void (await this.release(tiles, t, 'moved'));
-      // The common border was dragged: the other window follows, unless the border keeps going back and forth.
+      // Its edge back where it stood a moment ago (1/2 → 2/3 → 1/2): the system holds this window there.
+      if (cameBack(t, which, b, now)) return void (await this.release(tiles, t, 'fight'));
+      // The notes' edge dragged while the system holds the video window: it is not asked again.
+      if (other === 'video' && t.held) {
+        t.expect.notes = b;
+        note(t, which, b, now);
+        return;
+      }
+      // The common border was dragged: the other window follows, unless the border keeps moving again and again.
       t.follows = [...(t.follows ?? []).filter((at) => now - at < TILE_FOLLOW_LIMIT.ms), now];
       if (t.follows.length > TILE_FOLLOW_LIMIT.count) return void (await this.release(tiles, t, 'fight'));
       const next = followBorder(t.area, t.side, which, b);
       t.expect = { ...t.expect, [which]: b, [other]: next[other] } as TileState['expect'];
       t.settle = { ...(t.settle ?? { video: 0, notes: 0 }), [other]: now + TILE_SETTLE_MS };
+      note(t, which, b, now);
+      note(t, other, next[other], now);
       await chrome.windows.update(other === 'video' ? t.videoWindow : t.notesWindow, next[other]).catch(() => undefined);
     });
   }
@@ -200,6 +265,18 @@ export class Tiler {
       }
     });
   }
+}
+
+/** Remembers where a window's inner edge stood (forgotten after TILE_BOUNCE_MS). */
+function note(t: TileState, which: 'video' | 'notes', b: Bounds, now: number): void {
+  const x = innerEdge(t.side, which, b);
+  t.edges = [...(t.edges ?? []).filter((e) => now - e.at < TILE_BOUNCE_MS), { which, x, at: now }];
+}
+
+/** True when the window's inner edge is back where it stood lately (another arranger undoing Boo Notes' move). */
+function cameBack(t: TileState, which: 'video' | 'notes', b: Bounds, now: number, tolerance = 6): boolean {
+  const x = innerEdge(t.side, which, b);
+  return (t.edges ?? []).some((e) => e.which === which && now - e.at < TILE_BOUNCE_MS && Math.abs(e.x - x) <= tolerance);
 }
 
 /** `b` moved and narrowed into `area` (a window must stay mostly on a screen). */

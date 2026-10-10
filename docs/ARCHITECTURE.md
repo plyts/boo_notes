@@ -299,11 +299,19 @@ deux leçons du même module ne partagent jamais une note (ni son classement cou
   commune** (le bord intérieur bouge, le bord extérieur et la hauteur restent) est suivi par l’autre
   fenêtre ; une fenêtre déplacée, aimantée ailleurs ou agrandie veut dire que l’utilisateur range ses
   fenêtres autrement : Boo Notes lâche le côte à côte (plus rien ne bouge tout seul) et le dit dans
-  la fenêtre des notes. Si la frontière fait des allers-retours (plus de 6 suivis en 3 s : le système
-  aimante aussi, avec une autre idée de « bord à bord »), il lâche aussi. Décision pure :
-  `judgeChange` (`src/shared/tiling.ts`) ; vérifié contre un gestionnaire de fenêtres simulé
-  (`tests/unit/tiling-stability.test.ts`) et dans un vrai Chrome sous un gestionnaire de fenêtres
-  (`tests/e2e/tiling-wm.spec.ts`, à lancer avec `TILING_WM=1` sous Xvfb + openbox).
+  la fenêtre des notes. Si le bord d’une fenêtre **revient là où il était** il y a moins de 6 s
+  (1/2 → 2/3 → 1/2 : le système la tient à cette place), ou si la frontière bouge encore et encore
+  (plus de 3 suivis en 4 s : le système aimante aussi, avec une autre idée de « bord à bord »), il
+  lâche aussi, sans rien déplacer. Une fois les deux fenêtres posées (≈ 1 s), Boo Notes regarde où
+  elles sont **vraiment** : si le système a gardé la fenêtre de la vidéo ailleurs (Windows tient une
+  fenêtre aimantée à sa moitié), les notes se rangent à côté d’elle, **une fois** — plus de trou où
+  l’on voit une autre fenêtre — et la vidéo n’est plus jamais redimensionnée par Boo Notes ; la
+  fenêtre des notes l’explique (détacher la vidéo de l’aimantation avant de choisir une autre
+  répartition). Décision pure : `judgeChange`, `innerEdge` (`src/shared/tiling.ts`) ; vérifié
+  contre un gestionnaire de fenêtres simulé (`tests/unit/tiling-stability.test.ts`, et
+  `tests/unit/tiling-held.test.ts` : la vidéo tenue à 1/2, la vidéo qui bascule seule 1/2 ↔ 2/3)
+  et dans un vrai Chrome sous un gestionnaire de fenêtres (`tests/e2e/tiling-wm.spec.ts`, à lancer
+  avec `TILING_WM=1` sous Xvfb + openbox).
 - L’éditeur n’est jamais bloqué par la synchronisation : sauvegarde locale d’abord, envoi ensuite.
 
 ## Sécurité

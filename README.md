@@ -368,7 +368,10 @@ docs/         architecture, protocole, design, transcription, questions, Notion
   page de la vidéo est rechargée ou quittée.
 - **Côte à côte (fenêtres)** : Boo Notes suit la **frontière commune** quand on la tire ; déplacer
   une fenêtre, l’aimanter avec une autre application ou l’agrandir arrête le côte à côte (les
-  fenêtres restent où on les met, rien ne bouge tout seul — la fenêtre des notes le signale). Chrome
+  fenêtres restent où on les met, rien ne bouge tout seul — la fenêtre des notes le signale). Une
+  fenêtre **aimantée par Windows** (Win + ←, dispositions d’ancrage) y reste : les notes se rangent
+  à côté d’elle ; pour une autre répartition, détacher d’abord la vidéo (glisser sa barre de titre),
+  puis choisir la répartition. Chrome
   garde une fenêtre de navigation à au moins ≈ 510 px de large. L’extension ne place que des **fenêtres Chrome**. Partager l’écran
   avec une autre application, ou réserver une zone du bureau (barre d’application), demande
   **Boo Notes Desktop**. Une vidéo mise en plein écran sort de sa zone (le plein écran du navigateur

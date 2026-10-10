@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Tiler } from '../../src/background/tiling';
-import { judgeChange, type Bounds } from '../../src/shared/tiling';
+import { judgeChange, TILE_FOLLOW_LIMIT, type Bounds } from '../../src/shared/tiling';
 import { MemoryArea } from './helpers';
 
 /**
@@ -126,7 +126,7 @@ describe('côte à côte stable', () => {
       await vi.advanceTimersByTimeAsync(10_000);
       clearInterval(agent);
       // Before the fix: the two kept correcting each other, the windows crawling 14 px at a time, forever.
-      expect(after(t0)).toBeLessThanOrEqual(TILE_FOLLOW_LIMIT_COUNT);
+      expect(after(t0)).toBeLessThanOrEqual(TILE_FOLLOW_LIMIT.count);
       const late = [...fake.byTiler, ...fake.bySystem].filter((m) => m.at > t0 + 4000).length;
       expect(late).toBe(0);
     });
@@ -163,8 +163,6 @@ describe('côte à côte stable', () => {
     expect(fake.byTiler.length).toBe(2);
   });
 });
-
-const TILE_FOLLOW_LIMIT_COUNT = 6;
 
 describe('lecture d’un changement de fenêtre', () => {
   const video: Bounds = { left: 0, top: 0, width: 1280, height: 1080 };

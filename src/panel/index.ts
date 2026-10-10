@@ -2041,20 +2041,26 @@ class PanelApp {
       if (area === 'session' && changes['sync:status']) {
         this.renderStatus(changes['sync:status'].newValue as SyncStatus | undefined);
       }
-      // « Côte à côte » let go (a window moved, maximized, or the system arranging them too): said here.
-      if (area === 'session' && MODE === 'popout' && (changes.tiles || changes['tile:ended'])) {
+      // « Côte à côte » let go (a window moved, maximized, or the system arranging them too), or the system
+      // holding the video window where it was: said here.
+      if (area === 'session' && MODE === 'popout' && (changes.tiles || changes['tile:ended'] || changes['tile:held'])) {
         callBackground({ type: 'tile:status', tabId: TAB_ID }).then((id) => this.layoutMenu?.setTiled(id), () => undefined);
         const ended = changes['tile:ended']?.newValue as { tabId: number; reason: string } | undefined;
+        const held = changes['tile:held']?.newValue as { tabId: number } | undefined;
+        const system = /Win/i.test(navigator.platform) ? 'Windows' : 'Le système';
+        const unsnap = 'détachez d’abord la vidéo (glissez sa barre de titre), puis choisissez la répartition ici.';
         if (ended?.tabId === TAB_ID) {
           this.notify(
             ended.reason === 'fight'
-              ? 'Côte à côte arrêté : le système range aussi ces fenêtres (aimantation) — Boo Notes le laisse faire.'
+              ? `Côte à côte arrêté : ${system} range aussi ces fenêtres (aimantation) — Boo Notes le laisse faire, plus rien ne bouge. Pour un côte à côte, ${unsnap}`
               : ended.reason === 'maximized'
                 ? 'Côte à côte arrêté : la fenêtre de la vidéo a été agrandie.'
                 : 'Côte à côte arrêté : une fenêtre a été déplacée — elles restent où vous les mettez.',
             'info',
-            6000,
+            ended.reason === 'fight' ? 9000 : 6000,
           );
+        } else if (held?.tabId === TAB_ID) {
+          this.notify(`${system} garde la fenêtre de la vidéo aimantée à sa place : les notes se sont rangées à côté. Pour une autre répartition, ${unsnap}`, 'info', 9000);
         }
       }
       if (area === 'session' && changes['notion:status']) {
