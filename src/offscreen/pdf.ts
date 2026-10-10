@@ -33,7 +33,7 @@ async function build(job: PdfJob): Promise<string> {
       },
       timeUrl: (note, seconds) => (/^https?:\/\//.test(note.url) && timed.has(note.id) ? timestampUrl(note.url, seconds) : null),
     },
-    { title: job.title, date: new Date(job.date), course: job.course },
+    { title: job.title, date: new Date(job.date), course: job.course, ...(job.cover === false ? { cover: false as const } : {}) },
   );
   return bytesToBase64(bytes);
 }

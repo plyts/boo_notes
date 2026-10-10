@@ -17,6 +17,20 @@ import { expect, NOTE_ID, openNotes, openWatch, panel, setVideo, test } from './
 const SHOTS = process.env.SUMMARY_SHOTS ?? '';
 test.skip(!SHOTS, 'SUMMARY_SHOTS=<folder> to photograph the summary screens');
 
+/** The PDF just downloaded (since `chrome.downloads.erase`), its first pages as pictures. */
+async function pdfShots(sw: Worker, name: string, pages = 2): Promise<void> {
+  const file = await sw.evaluate(async () => {
+    for (let i = 0; i < 150; i++) {
+      const [d] = await chrome.downloads.search({ mime: 'application/pdf' });
+      if (d?.state === 'complete') return d.filename;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return null;
+  });
+  expect(file).toBeTruthy();
+  execSync(`gs -q -dNOPAUSE -dBATCH -sDEVICE=png16m -r90 -dFirstPage=1 -dLastPage=${pages} -sOutputFile=${SHOTS}/${name}-%d.png "${file}"`);
+}
+
 /** The panel alone (the drawer at the page's edge). */
 async function panelShot(page: Page, name: string): Promise<void> {
   // A notice (« Résumé prêt ») gone first: it would hide the buttons under it.
@@ -81,6 +95,10 @@ test('rendus : l’onglet Résumé d’une leçon, tous ses états', async ({ pa
     await panelShot(page, '05-lecon-attente-palier-gratuit');
     await expect(panel(page).getByRole('region', { name: 'Problématique' })).toBeVisible({ timeout: 15_000 });
     await panelShot(page, '06-lecon-resultat');
+    // « PDF »: the summary alone.
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await panel(page).getByRole('button', { name: 'PDF', exact: true }).click();
+    await pdfShots(sw, '06b-pdf-resume-lecon', 1);
     // The plan, the part being watched lit.
     await setVideo(page, 16);
     await panel(page).getByRole('region', { name: 'Plan du cours' }).scrollIntoViewIfNeeded();
@@ -184,20 +202,16 @@ test('rendus : le résumé du cours (panneau, page en grand, PDF)', async ({ con
     await big.screenshot({ path: `${SHOTS}/15b-cours-page-mise-a-jour.png` });
     await expect(big.getByRole('button', { name: 'Régénérer' })).toBeVisible({ timeout: 20_000 });
 
-    // Its PDF: the summary first, then the lessons — its first pages as pictures.
+    // « PDF du résumé »: the course's summary alone.
     await sw.evaluate(() => chrome.downloads.erase({}));
-    await big.getByRole('button', { name: 'PDF' }).click();
+    await big.getByRole('button', { name: 'PDF du résumé' }).click();
     await expect(big.locator('#toast')).toContainText('téléchargé', { timeout: 30_000 });
-    const file = await sw.evaluate(async () => {
-      for (let i = 0; i < 100; i++) {
-        const [d] = await chrome.downloads.search({ mime: 'application/pdf' });
-        if (d?.state === 'complete') return d.filename;
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return null;
-    });
-    expect(file).toBeTruthy();
-    execSync(`gs -q -dNOPAUSE -dBATCH -sDEVICE=png16m -r90 -dFirstPage=1 -dLastPage=4 -sOutputFile=${SHOTS}/17-pdf-page-%d.png "${file}"`);
+    await pdfShots(sw, '17r-pdf-resume-cours', 2);
+    // « PDF du cours »: the summary first, then the lessons — its first pages as pictures.
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await big.getByRole('button', { name: 'PDF du cours' }).click();
+    await expect(big.locator('#toast')).toContainText('téléchargé', { timeout: 30_000 });
+    await pdfShots(sw, '17-pdf-page', 4);
   } finally {
     await ai.close();
   }

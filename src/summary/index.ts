@@ -101,15 +101,16 @@ function renderActions(): void {
     const update = button(pending ? `Mettre à jour (${pending})` : 'Régénérer', 'refresh', () => void generate(), pending ? 'sum-btn primary' : 'sum-btn');
     list.push(update);
   }
-  list.push(
-    button('PDF', 'file', () => {
-      say(`PDF du cours « ${content!.course} » en préparation…`);
-      callBackground({ type: 'course:pdf', course: content!.course }).then(
-        (r) => say(r.message),
-        (e: unknown) => say(`PDF impossible : ${e instanceof Error ? e.message : String(e)}`),
-      );
-    }),
-  );
+  const pdf = (request: { type: 'course:pdf' | 'course:summary-pdf'; course: string }, label: string) => {
+    say(`${label} « ${content!.course} » en préparation…`);
+    callBackground(request).then(
+      (r) => say(r.message),
+      (e: unknown) => say(`PDF impossible : ${e instanceof Error ? e.message : String(e)}`),
+    );
+  };
+  // The summary alone (a few pages), or the whole course: its summary, then every lesson with its notes and transcript.
+  if (summary) list.push(button('PDF du résumé', 'download', () => pdf({ type: 'course:summary-pdf', course: content!.course }, 'PDF du résumé du cours')));
+  list.push(button('PDF du cours', 'file', () => pdf({ type: 'course:pdf', course: content!.course }, 'PDF du cours')));
   if (summary) {
     const s = summary;
     list.push(

@@ -23,7 +23,7 @@ import { TranscriptStore } from '../shared/transcript-store';
 import { asciiFileName, base64ToBytes, blobToDataUrl, safeFileName, textToDataUrl } from '../shared/encoding';
 import { ExtensionNotion } from './notion';
 import { DIAGNOSTIC_MENU, runDiagnostic } from './diagnostic';
-import { downloadPdf } from './pdf';
+import { downloadCourseSummaryPdf, downloadLessonSummaryPdf, downloadPdf } from './pdf';
 import { SessionState } from './session';
 import { DesktopSync } from './sync';
 import { Tiler } from './tiling';
@@ -793,6 +793,10 @@ const handlers: Handlers = {
   'notes:pdf': async () => ({ message: await downloadPdf(store, null) }),
 
   'course:pdf': async (msg) => ({ message: await downloadPdf(store, null, new Date(), { course: msg.course }) }),
+
+  'summary:pdf': async (msg) => ({ message: await downloadLessonSummaryPdf(store, msg.noteId) }),
+
+  'course:summary-pdf': async (msg) => ({ message: await downloadCourseSummaryPdf(msg.course) }),
 
   'diagnostic:run': (msg) => diagnose(msg.tabId),
 

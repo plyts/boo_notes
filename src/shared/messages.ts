@@ -243,6 +243,10 @@ export type BackgroundRequest =
   | { type: 'notes:pdf' }
   /** Every lesson of a course in one PDF: notes, pictures, passages, transcripts. */
   | { type: 'course:pdf'; course: string }
+  /** A lesson's summary alone, as a PDF (its problem, goals, solution and detailed plan; each moment a link). */
+  | { type: 'summary:pdf'; noteId: string }
+  /** A course's summary alone, as a PDF (each lesson's parts and points; each moment a link to its lesson). */
+  | { type: 'course:summary-pdf'; course: string }
   /** « Diagnostic de cette page »: probes the tab and opens the report. */
   | { type: 'diagnostic:run'; tabId: number }
   /** The text of the course in the tab (its page, its frames): sources of the answers to questions. */
@@ -349,6 +353,8 @@ export interface BackgroundResponses {
   'notes:list': Record<string, NoteSummary>;
   'notes:pdf': { message: string };
   'course:pdf': { message: string };
+  'summary:pdf': { message: string };
+  'course:summary-pdf': { message: string };
   'diagnostic:run': void;
   'course:text': CourseText[];
   'notes:clear': void;

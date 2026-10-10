@@ -1,5 +1,6 @@
 import { providerLabel, PROVIDERS, isRemote } from '../shared/ai-providers';
 import { h, icon } from '../shared/icons';
+import { callBackground } from '../shared/messages';
 import { loadQa } from '../shared/qa-config';
 import { coverage, courseSummaryKey, isStale, lessonMarkdown, summaryKey, type CourseSummary, type LessonSummary, type PartDigest, type PlanNode } from '../shared/summary';
 import {
@@ -223,6 +224,17 @@ export class SummaryView {
     this.run?.ctrl.abort();
     this.run = null;
     this.render();
+  }
+
+  /** The summary alone as a PDF (the lesson's, or the course's), saved in « Boo Notes ». */
+  private async pdf(request: { type: 'summary:pdf'; noteId: string } | { type: 'course:summary-pdf'; course: string }): Promise<void> {
+    this.hooks.notify('PDF du résumé en préparation…');
+    try {
+      const r = await callBackground(request);
+      this.hooks.notify(r.message, 'success');
+    } catch (e) {
+      this.hooks.notify(`PDF impossible : ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
   }
 
   private async copy(text: string): Promise<void> {
@@ -491,11 +503,14 @@ export class SummaryView {
         this.hooks.insert(lessonMarkdown(s));
         this.hooks.notify('Résumé inséré en tête de la note', 'success');
       });
-      const copy = h('button', { type: 'button', class: 'sum-btn' }, icon('copy', 15), 'Copier');
+      const copy = h('button', { type: 'button', class: 'sum-btn icon-only', title: 'Copier le résumé (Markdown)', 'aria-label': 'Copier' }, icon('copy', 15));
       copy.addEventListener('click', () => void this.copy(lessonMarkdown(s).replace(/^> ?/gm, '')));
+      const noteId = this.ctx?.noteId ?? '';
+      const pdf = h('button', { type: 'button', class: 'sum-btn', title: 'Télécharger le résumé en PDF' }, icon('download', 15), 'PDF');
+      pdf.addEventListener('click', () => void this.pdf({ type: 'summary:pdf', noteId }));
       const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé', 'aria-label': 'Régénérer' }, icon('refresh', 15));
       again.addEventListener('click', () => void this.generateLesson());
-      buttons.push(insert, copy, h('span', { class: 'spacer' }), again);
+      buttons.push(insert, copy, pdf, h('span', { class: 'spacer' }), again);
     }
     if (!this.run && this.scope === 'course' && this.course && this.content && this.ctx?.course) {
       const course = this.ctx.course;
@@ -503,11 +518,13 @@ export class SummaryView {
       open.addEventListener('click', () => this.hooks.openCourse(course));
       const s = this.course;
       const content = this.content;
-      const copy = h('button', { type: 'button', class: 'sum-btn' }, icon('copy', 15), 'Copier');
+      const copy = h('button', { type: 'button', class: 'sum-btn icon-only', title: 'Copier le résumé du cours (Markdown)', 'aria-label': 'Copier' }, icon('copy', 15));
       copy.addEventListener('click', () => void this.copy(courseText(s, content)));
+      const pdf = h('button', { type: 'button', class: 'sum-btn', title: 'Télécharger le résumé du cours en PDF' }, icon('download', 15), 'PDF');
+      pdf.addEventListener('click', () => void this.pdf({ type: 'course:summary-pdf', course }));
       const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé du cours', 'aria-label': 'Régénérer' }, icon('refresh', 15));
       again.addEventListener('click', () => void this.generateCourse());
-      buttons.push(open, copy, h('span', { class: 'spacer' }), again);
+      buttons.push(open, copy, pdf, h('span', { class: 'spacer' }), again);
     }
     this.foot.replaceChildren(...buttons);
     this.foot.hidden = !buttons.length;

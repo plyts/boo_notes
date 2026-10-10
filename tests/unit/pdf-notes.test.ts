@@ -1,7 +1,9 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
+import { inflateSync } from 'node:zlib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFString } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { buildNotesPdf, type PdfNote } from '../../src/shared/pdf-notes';
 import { timestampUrl } from '../../src/shared/platforms';
+import { lessonDocument } from '../../src/shared/summary';
 
 /** A 2×2 PNG. */
 const PNG = Uint8Array.from(
@@ -164,5 +166,73 @@ describe('the PDF of one course', () => {
     let images = 0;
     for (const page of doc.getPages()) images += page.node.Resources()?.lookupMaybe(PDFName.of('XObject'), PDFDict)?.keys().length ?? 0;
     expect(images).toBe(3);
+  });
+});
+
+/** The text a PDF draws (its content streams, standard fonts: WinAnsi). */
+function textOf(doc: PDFDocument): string {
+  const WIN: Record<number, string> = { 0x80: '€', 0x85: '…', 0x91: '‘', 0x92: '’', 0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—' };
+  let out = '';
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFRawStream)) continue;
+    const raw = obj.dict.get(PDFName.of('Filter')) === PDFName.of('FlateDecode') ? inflateSync(obj.contents) : Buffer.from(obj.contents);
+    for (const m of raw.toString('latin1').matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)) {
+      const bytes = m[1].match(/../g) ?? [];
+      out += `${bytes.map((b) => WIN[parseInt(b, 16)] ?? String.fromCharCode(parseInt(b, 16))).join('')}\n`;
+    }
+  }
+  return out;
+}
+
+describe('a summary as a PDF of its own', () => {
+  const summary = {
+    problem: { text: 'Un data lake ne garantit rien : comment écrire sans corrompre ?', at: [3] },
+    goals: [{ text: 'Expliquer le journal de transactions', at: [130] }],
+    solution: { text: 'Un journal ordonné de commits JSON.', at: [160] },
+    plan: [
+      {
+        title: 'Les limites d’un data lake',
+        at: 0,
+        intro: 'Pourquoi de simples fichiers ne suffisent pas.',
+        children: [
+          { title: 'Pas d’atomicité', at: 48, children: [], detail: 'Un job qui échoue laisse des fichiers à moitié écrits.', kind: 'key' as const },
+          { title: 'Fichiers modifiés à la main', at: 112, children: [], detail: 'Réécrire un fichier Parquet casse les lectures.', kind: 'warning' as const },
+        ],
+      },
+      {
+        title: 'Le journal de transactions',
+        at: 130,
+        intro: 'Un registre ordonné de toutes les écritures.',
+        children: [
+          { title: 'Un commit = un fichier JSON', at: 160, children: [], detail: 'Chaque écriture ajoute un fichier numéroté.', kind: 'key' as const },
+          { title: 'Source de vérité', at: 200, children: [], detail: 'La table est l’état obtenu en rejouant ses commits.', kind: 'definition' as const },
+          { title: 'Relire l’historique', at: 280, children: [], detail: 'Chaque version reste lisible.', kind: 'example' as const, code: 'DESCRIBE HISTORY ventes;' },
+          { title: 'Checkpoint', at: 245, children: [], detail: 'Tous les 10 commits, un Parquet résume l’état.', kind: 'point' as const },
+        ],
+      },
+    ],
+  };
+
+  it('has no cover; problem, goals, solution and the plan — each point labelled, every moment a link to the video', async () => {
+    const markdown = lessonDocument(summary);
+    expect(markdown).toContain('## Plan du cours\n\n1. Les limites d’un data lake [00:00]\n   *Pourquoi de simples fichiers ne suffisent pas.*\n   - ★ **Essentiel — Pas d’atomicité :**');
+    const bytes = await buildNotesPdf(
+      [{ id: 'boo:summary:youtube:abcdefghijk', title: 'Résumé — Delta Lake', url: URL1, source: 'Boo Notes · résumé par IA, à vérifier', place: null, updatedAt: Date.UTC(2026, 9, 9), markdown }],
+      { picture: async () => null, timeUrl: (note, s) => timestampUrl(note.url, s) },
+      { title: 'Résumé — Delta Lake', date: new Date(Date.UTC(2026, 9, 9)), cover: false },
+    );
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+    const { uris, internal } = linksOf(doc);
+    expect(internal).toBe(0);
+    for (const s of [3, 130, 160, 0, 48, 112, 200, 280, 245]) expect(uris).toContain(`${URL1}#t=${s}`);
+    const text = textOf(doc);
+    // Labels in words (the marks ★ 📘 💡 ⚠️ are not in the PDF's fonts: never a « ? » in their place).
+    for (const label of ['ESSENTIEL', 'DÉFINITION', 'EXEMPLE', 'ATTENTION']) expect(text).toContain(label);
+    expect(text).not.toMatch(/\?\s*\n?\s*ESSENTIEL|★|📘/u);
+    expect(text).toContain('Pourquoi de simples fichiers ne suffisent pas.');
+    expect(text).toContain('DESCRIBE HISTORY ventes;');
+    // No list marker written out as text.
+    expect(text).not.toMatch(/^\s*- /m);
   });
 });

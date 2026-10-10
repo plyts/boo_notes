@@ -56,6 +56,8 @@ export interface PdfOptions {
   date: Date;
   /** The PDF of one course: its lessons, contents by chapter. */
   course?: boolean;
+  /** No cover nor contents (a summary: a page or two of its own). */
+  cover?: false;
 }
 
 /** The course's summary, written first in its PDF (not one of its lessons). */
@@ -352,6 +354,23 @@ class Layout {
 
 const LIST = /^(\s*)([-*+]|\d+[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
 
+/** A point of a summary's plan (« ★ **Essentiel — titre :** … »): its label in colour, then its text. */
+const POINT = /^(?:★|📘|💡|⚠\uFE0F?)\s*\*\*(Essentiel|Définition|Exemple|Attention) — (.+?) :\*\*\s*(.*)$/u;
+const POINT_COLORS: Record<string, ReturnType<typeof rgb>> = {
+  Essentiel: rgb(0.6, 0.44, 0),
+  Définition: rgb(0, 0.35, 0.72),
+  Exemple: rgb(0.09, 0.44, 0.18),
+  Attention: rgb(0.71, 0.33, 0.04),
+};
+/** Behind the essential point of each part. */
+const KEY_BG = rgb(1, 0.965, 0.82);
+
+function itemRuns(text: string, note: PdfNote, src: PdfSources): { runs: Run[]; key: boolean } {
+  const m = POINT.exec(text);
+  if (!m) return { runs: inlineRuns(text, note, src), key: false };
+  return { runs: [{ text: `${m[1].toUpperCase()}  `, bold: true, color: POINT_COLORS[m[1]] }, ...inlineRuns(`**${m[2]}** — ${m[3]}`, note, src)], key: m[1] === 'Essentiel' };
+}
+
 async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Map<string, PDFImage | null>): Promise<void> {
   const picture = async (path: string): Promise<PDFImage | null> => {
     if (!pictures.has(path)) {
@@ -378,6 +397,30 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
   const blocks = new Map<number, { kind: Callout['kind']; header: boolean }>();
   for (const c of findCallouts(lines)) for (let i = c.from; i <= c.to; i++) blocks.set(i, { kind: c.kind, header: i === c.from });
   let fence: string | null = null;
+  // The open list items (the column their text starts at): a line indented under one belongs to it.
+  let items: number[] = [];
+  let inBlock = false;
+  /** A list item: its marker, nested under the items its indent falls in; `offset`: inside a block. */
+  const listItem = (li: RegExpExecArray, offset: number, bar?: (y: number, h: number) => void) => {
+    const spaces = li[1].replace(/\t/g, '  ').length;
+    while (items.length && items[items.length - 1] > spaces) items.pop();
+    const depth = items.length;
+    items.push(spaces + li[2].length + 1);
+    const box = li[3] !== undefined ? (li[3].trim() ? '[x] ' : '[ ] ') : '';
+    const marker = /\d/.test(li[2]) ? li[2] : '•';
+    const { runs, key } = box ? { runs: inlineRuns(`${box}${li[4]}`, note, src), key: false } : itemRuns(li[4], note, src);
+    const indent = offset + 14 + depth * 14;
+    const back = key ? (y: number, h: number) => l.page.drawRectangle({ x: MARGIN.left + indent - 12, y: y - 3.5, width: WIDTH - indent + 12, height: h, color: KEY_BG }) : null;
+    l.paragraph(runs, { indent, first: marker, ...(back || bar ? { before: (y: number, h: number) => (back?.(y, h), bar?.(y, h)) } : {}) });
+  };
+  /** A line indented under a list item: its text, at the item's indent. */
+  const continued = (text: string, offset: number, bar?: (y: number, h: number) => void): boolean => {
+    const spaces = /^\s*/.exec(text)![0].replace(/\t/g, '  ').length;
+    if (!items.length || !spaces) return false;
+    while (items.length > 1 && items[items.length - 1] > spaces) items.pop();
+    l.paragraph(inlineRuns(text.trim(), note, src), { indent: offset + 14 + (items.length - 1) * 14, ...(bar ? { before: bar } : {}) });
+    return true;
+  };
   for (const [i, raw] of lines.entries()) {
     let line = raw.replace(/\s+$/, '');
     // Code blocks: monospace, grey background.
@@ -397,6 +440,8 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
     }
 
     const block = blocks.get(i);
+    if (Boolean(block) !== inBlock) items = [];
+    inBlock = Boolean(block);
     if (block) {
       const color = block.kind === 'question' ? ACCENT : block.kind === 'free' ? FREE : MUTED;
       const bar = (y: number, h: number) => l.page.drawRectangle({ x: MARGIN.left + 2, y: y - 3.5, width: 2.2, height: h, color });
@@ -414,6 +459,13 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
       }
       if (!/!\[[^\]\n]*\]\(assets\//.test(inner)) {
         const nested = /^>\s?(.*)$/.exec(inner);
+        const li = nested ? null : LIST.exec(inner);
+        if (li) {
+          listItem(li, 12, bar);
+          continue;
+        }
+        if (!nested && continued(inner, 12, bar)) continue;
+        items = [];
         l.paragraph(inlineRuns(nested ? nested[1] : inner, note, src, nested ? { italic: true } : {}), {
           indent: nested ? 22 : 12,
           before: bar,
@@ -424,6 +476,9 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
       // A picture in the block: drawn as any picture.
       line = inner;
     }
+
+    // A line at the margin (not an item) ends the lists above it.
+    if (!block && !/^\s/.test(line) && !LIST.test(line)) items = [];
 
     // A passage (clip): its card, a link replaying it at the source, its extract.
     const passage = PASSAGE_LINE.exec(line);
@@ -495,10 +550,9 @@ async function writeNote(l: Layout, note: PdfNote, src: PdfSources, pictures: Ma
         before: (y, h) => l.page.drawRectangle({ x: MARGIN.left + 2, y: y - 3.5, width: 2.2, height: h, color: ACCENT }),
       });
     } else if (list) {
-      const depth = Math.floor(list[1].replace(/\t/g, '  ').length / 2);
-      const box = list[3] !== undefined ? (list[3].trim() ? '[x] ' : '[ ] ') : '';
-      const marker = /\d/.test(list[2]) ? list[2] : '•';
-      l.paragraph(inlineRuns(`${box}${list[4]}`, note, src), { indent: 14 + depth * 14, first: marker });
+      listItem(list, 0);
+    } else if (!images.length && continued(line, 0)) {
+      // Under the list item above.
     } else if (rest && !(images.length && /^\[[^\]]+\]$/.test(rest))) {
       l.paragraph(inlineRuns(images.length ? line.replace(/!\[([^\]\n]*)\]\((assets\/[^)\s]+)\)/g, '').trim() : line, note, src));
     }
@@ -573,6 +627,7 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
 
   // Cover: title, date, counts; then the table of contents, by course › chapter.
   const noteLinks = l.links.splice(0);
+  if (opts.cover === false) return finish(doc, fonts, l, noteLinks, null);
   l.footer = '';
   l.newPage();
   const cover = l.page;
@@ -638,7 +693,12 @@ export async function buildNotesPdf(notes: PdfNote[], src: PdfSources, opts: Pdf
     noteLinks.push({ page: t.page, rect: [MARGIN.left + 12, t.y - size * 1.3, A4[0] - MARGIN.right, t.y + 1], dest: { page: t.target, y: A4[1] - MARGIN.top + 10 } });
   }
   noteLinks.push(...l.links);
+  return finish(doc, fonts, l, noteLinks, cover);
+}
 
+/** Running footers, clickable links, and the bytes. */
+async function finish(doc: PDFDocument, fonts: Fonts, l: Layout, noteLinks: LinkBox[], cover: PDFPage | null): Promise<Uint8Array> {
+  const pages = doc.getPages();
   // Running footer: the note, the page.
   for (const [i, page] of pages.entries()) {
     if (page === cover) continue;

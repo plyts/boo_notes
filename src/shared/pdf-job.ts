@@ -18,6 +18,8 @@ export interface PdfJob {
   date: number;
   /** The PDF of one course (its contents by chapter). */
   course?: boolean;
+  /** No cover nor contents (a summary: a page or two of its own). */
+  cover?: false;
 }
 
 export type PdfJobReply = { ok: true; base64: string } | { ok: false; error: string };

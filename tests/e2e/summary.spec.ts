@@ -1,4 +1,6 @@
-import type { Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import type { Page, Worker } from '@playwright/test';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { chats, CUES, mockOpenAi, seedCourse, transcriptOf, useGroq } from './ai-mock';
 import { expect, NOTE_ID, openNotes, openWatch, panel, storedNote, test, videoTime } from './fixtures';
 
@@ -10,6 +12,29 @@ import { expect, NOTE_ID, openNotes, openWatch, panel, storedNote, test, videoTi
  * as a hierarchy, each moment clickable; inserted at the top of the note;
  * the course's page, large.
  */
+
+/** The PDF downloaded since `chrome.downloads.erase`: its title and the links it holds. */
+async function lastPdf(sw: Worker): Promise<{ title: string; pages: number; uris: string[] }> {
+  const file = await sw.evaluate(async () => {
+    for (let i = 0; i < 150; i++) {
+      const [d] = await chrome.downloads.search({ mime: 'application/pdf' });
+      if (d?.state === 'complete') return d.filename;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return null;
+  });
+  expect(file).toBeTruthy();
+  const doc = await PDFDocument.load(await readFile(file!));
+  const uris: string[] = [];
+  for (const page of doc.getPages()) {
+    const annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+    for (let i = 0; i < (annots?.size() ?? 0); i++) {
+      const action = annots!.lookup(i, PDFDict).lookupMaybe(PDFName.of('A'), PDFDict);
+      if (action) uris.push((action.lookup(PDFName.of('URI'), PDFString) as PDFString).decodeText());
+    }
+  }
+  return { title: doc.getTitle() ?? '', pages: doc.getPageCount(), uris };
+}
 
 test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (compatible OpenAI) — problématique, objectifs, solution, plan ; un instant cliqué ; inséré en tête de la note', async ({ page, sw }) => {
   const ai = await mockOpenAi({ limitFirst: true });
@@ -70,6 +95,15 @@ test('Résumé d’une leçon : toute la transcription lue par une IA gratuite (
     await expect.poll(() => videoTime(page)).toBeGreaterThanOrEqual(22.5);
     // Kept: shown again with the note.
     expect(await sw.evaluate(async (k) => Boolean((await chrome.storage.local.get(k))[k]), `summary:${NOTE_ID}`)).toBe(true);
+
+    // « PDF »: the summary alone (no cover), each moment a link to the video there.
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await p.getByRole('button', { name: 'PDF', exact: true }).click();
+    await expect(p.locator('.notice')).toContainText('PDF du résumé de « Vidéo de test E2E » téléchargé', { timeout: 15_000 });
+    const lessonPdf = await lastPdf(sw);
+    expect(lessonPdf.title).toBe('Boo Notes — Résumé — Vidéo de test E2E');
+    expect(lessonPdf.pages).toBe(1);
+    for (const t of [0, 7, 15, 23]) expect(lessonPdf.uris).toContain(`https://www.youtube.com/watch?v=e2eTest0001#t=${t}`);
 
     // « Insérer dans la note »: a block at the top, the notes after it; inserted again, replaced.
     await p.getByRole('button', { name: 'Insérer dans la note' }).click();
@@ -141,8 +175,15 @@ test('Résumé du cours : chaque leçon lue en entier, puis le cours d’après 
     await expect(big.locator('.side .progress')).toHaveText('2 leçons résumées sur 3', { timeout: 15_000 });
     await expect(big.getByRole('button', { name: 'Régénérer' })).toBeVisible();
     expect(chats(ai.requests)).toHaveLength(5);
+    // « PDF du résumé »: the course's summary alone, each lesson's moments links to it.
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await big.getByRole('button', { name: 'PDF du résumé' }).click();
+    await expect(big.locator('#toast')).toContainText('PDF du résumé du cours « Databricks — Data Engineer » téléchargé', { timeout: 20_000 });
+    const summaryPdf = await lastPdf(sw);
+    expect(summaryPdf.title).toBe('Boo Notes — Résumé du cours — Databricks — Data Engineer');
+    expect(summaryPdf.uris).toContain('https://www.youtube.com/watch?v=e2eTest0001#t=23');
     // The course's PDF opens with its summary (then its lessons with something in them: the empty one without a transcript is left out).
-    await big.getByRole('button', { name: 'PDF' }).click();
+    await big.getByRole('button', { name: 'PDF du cours' }).click();
     await expect(big.locator('#toast')).toContainText('PDF du cours « Databricks — Data Engineer » téléchargé : son résumé, 2 leçons, 2 transcriptions', { timeout: 20_000 });
   } finally {
     await ai.close();

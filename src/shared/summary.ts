@@ -632,6 +632,24 @@ export function lessonMarkdown(s: Pick<LessonSummary, 'problem' | 'goals' | 'sol
   return out.join('\n');
 }
 
+/**
+ * A lesson's summary as a document of its own (its PDF): problem, goals,
+ * solution and the detailed plan under headings, each moment a link to the
+ * video (the PDF turns `[mm:ss]` into one).
+ */
+export function lessonDocument(s: Pick<LessonSummary, 'problem' | 'goals' | 'solution' | 'plan'>): string {
+  const out = ['*Généré par IA d’après la transcription — à vérifier.*', ''];
+  if (s.problem.text) out.push('## Problématique', '', `${s.problem.text}${stamps(s.problem.at.slice(0, 1))}`, '');
+  if (s.goals.length) {
+    out.push('## Objectifs', '');
+    for (const g of s.goals) out.push(`- ${g.text}${stamps(g.at.slice(0, 1))}`);
+    out.push('');
+  }
+  if (s.solution.text) out.push('## Solution', '', `${s.solution.text}${stamps(s.solution.at.slice(0, 1))}`, '');
+  if (s.plan.length) out.push('## Plan du cours', '', ...planMarkdown(s.plan, (at) => timestampToken(at)));
+  return out.join('\n').trimEnd() + '\n';
+}
+
 /** A point as one line: its mark and label (★ **Essentiel — titre :**), its explanation, its moment. */
 export function pointLine(n: PlanNode, stamp: (at: number) => string): string {
   const when = n.at !== null ? ` ${stamp(n.at)}` : '';

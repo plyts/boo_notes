@@ -1,8 +1,9 @@
+import { providerLabel, type AiProviderId } from '../shared/ai-providers';
 import { asciiFileName, safeFileName } from '../shared/encoding';
 import { normalizeTitle } from '../shared/markdown';
 import { PDF_DOCUMENT, PDF_JOB, picturePaths, type PdfJob, type PdfJobReply } from '../shared/pdf-job';
 import { SUMMARY_NOTE_ID, type PdfNote, type PdfTranscript } from '../shared/pdf-notes';
-import { courseMarkdown, courseSummaryKey, summaryKey, type CourseSummary, type LessonSummary } from '../shared/summary';
+import { courseMarkdown, courseSummaryKey, lessonDocument, summaryKey, type CourseSummary, type LessonSummary } from '../shared/summary';
 import { isTimeKind, noteSlug, PLATFORM_LABELS } from '../shared/platforms';
 import type { NoteStore } from '../shared/store';
 import { TranscriptStore } from '../shared/transcript-store';
@@ -96,6 +97,19 @@ async function courseSummaryOf(course: string): Promise<(PdfNote & { timed: bool
   };
 }
 
+/** Saves the PDF in « Boo Notes/ ». */
+async function saveAs(base64: string, name: string): Promise<void> {
+  const url = `data:application/pdf;base64,${base64}`;
+  const save = (n: string) => chrome.downloads.download({ url, filename: `Boo Notes/${n}.pdf`, conflictAction: 'uniquify', saveAs: false });
+  try {
+    await save(name);
+  } catch (e) {
+    // Some platforms / locales refuse non-ASCII file names.
+    if (!/invalid filename/i.test(String(e))) throw e;
+    await save(asciiFileName(name, 'boo-notes'));
+  }
+}
+
 let opening: Promise<void> | null = null;
 let jobs = 0;
 
@@ -154,15 +168,7 @@ export async function downloadPdf(store: NoteStore, ids: string[] | null, now = 
     : one
       ? safeFileName(title, noteSlug(notes[0].id))
       : `Boo Notes — toutes les notes (${day})`;
-  const url = `data:application/pdf;base64,${base64}`;
-  const save = (n: string) => chrome.downloads.download({ url, filename: `Boo Notes/${n}.pdf`, conflictAction: 'uniquify', saveAs: false });
-  try {
-    await save(name);
-  } catch (e) {
-    // Some platforms / locales refuse non-ASCII file names.
-    if (!/invalid filename/i.test(String(e))) throw e;
-    await save(asciiFileName(name, 'boo-notes'));
-  }
+  await saveAs(base64, name);
   if (opts.course) {
     const spoken = notes.filter((n) => n.transcript).length;
     const count = notes.length - (summary ? 1 : 0);
@@ -170,4 +176,43 @@ export async function downloadPdf(store: NoteStore, ids: string[] | null, now = 
   }
   const pages = notes.length > 1 ? `${notes.length} notes` : `« ${title} »`;
   return `PDF téléchargé : ${pages} dans « Boo Notes »`;
+}
+
+/**
+ * « PDF » of the Résumé tab: the lesson's summary alone — its problem, goals,
+ * solution and detailed plan, each moment a link to the video there.
+ */
+export async function downloadLessonSummaryPdf(store: NoteStore, noteId: string, now = new Date()): Promise<string> {
+  const s = (await chrome.storage.local.get(summaryKey(noteId)))[summaryKey(noteId)] as LessonSummary | undefined;
+  if (!s) throw new Error('Cette leçon n’a pas encore de résumé');
+  const note = await store.getNote(noteId);
+  const title = note?.title || s.title || noteId;
+  const course = note?.course ?? null;
+  const summary: PdfNote & { timed: boolean } = {
+    id: `boo:summary:${noteId}`,
+    title: `Résumé — ${title}`,
+    url: note?.url ?? '',
+    source: `Boo Notes · résumé par IA (${providerLabel(s.provider as AiProviderId) || s.provider}${s.model ? ` · ${s.model}` : ''}), à vérifier`,
+    place: course ? `${course} › ${note?.chapter || 'Chapitre 1'}` : null,
+    chapter: null,
+    updatedAt: s.createdAt,
+    markdown: lessonDocument(s),
+    timed: isTimeKind(note?.kind ?? 'video'),
+  };
+  const base64 = await layOut({ target: PDF_JOB, notes: [summary], pictures: {}, title: summary.title, date: now.getTime(), cover: false });
+  await saveAs(base64, safeFileName(`Résumé — ${title}`, 'resume'));
+  return `PDF du résumé de « ${title} » téléchargé dans « Boo Notes »`;
+}
+
+/**
+ * « PDF du résumé » of a course: its summary alone — problem, goals,
+ * solution, then by chapter each lesson with its parts and points, each
+ * moment a link that opens the lesson there.
+ */
+export async function downloadCourseSummaryPdf(course: string, now = new Date()): Promise<string> {
+  const summary = await courseSummaryOf(course);
+  if (!summary) throw new Error(`Le cours « ${course} » n’a pas encore de résumé`);
+  const base64 = await layOut({ target: PDF_JOB, notes: [summary], pictures: {}, title: summary.title, date: now.getTime(), cover: false });
+  await saveAs(base64, safeFileName(`${course} — résumé du cours (${now.toISOString().slice(0, 10)})`, 'resume-du-cours'));
+  return `PDF du résumé du cours « ${course} » téléchargé dans « Boo Notes »`;
 }
