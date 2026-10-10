@@ -48,7 +48,15 @@ export interface SummaryContext {
   timed: boolean;
 }
 
-type Run = { scope: 'lesson' | 'course'; ctrl: AbortController; step: SummaryStep | null; outline: PartDigest[]; partsTotal: number };
+type Run = {
+  scope: 'lesson' | 'course';
+  ctrl: AbortController;
+  step: SummaryStep | null;
+  /** The lesson being read (a course): kept while its parts are read. */
+  lesson: { k: number; n: number; title: string } | null;
+  outline: PartDigest[];
+  partsTotal: number;
+};
 
 const minutes = (s: number) => (s >= 60 ? `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, '0')}` : `${Math.round(s)} s`);
 
@@ -152,7 +160,7 @@ export class SummaryView {
     const ctx = this.ctx;
     const t = this.transcript;
     if (!ctx || !t?.cues.length || this.run) return;
-    const run: Run = { scope: 'lesson', ctrl: new AbortController(), step: null, outline: [], partsTotal: 0 };
+    const run: Run = { scope: 'lesson', ctrl: new AbortController(), step: null, lesson: null, outline: [], partsTotal: 0 };
     this.run = run;
     this.error = null;
     this.render();
@@ -182,7 +190,7 @@ export class SummaryView {
   private async generateCourse(): Promise<void> {
     const course = this.ctx?.course;
     if (!course || this.run) return;
-    const run: Run = { scope: 'course', ctrl: new AbortController(), step: null, outline: [], partsTotal: 0 };
+    const run: Run = { scope: 'course', ctrl: new AbortController(), step: null, lesson: null, outline: [], partsTotal: 0 };
     this.run = run;
     this.error = null;
     this.render();
@@ -204,6 +212,8 @@ export class SummaryView {
   private progress(run: Run, step: SummaryStep): void {
     if (this.run !== run) return;
     run.step = step;
+    if (step.phase === 'lesson') run.lesson = { k: step.k, n: step.n, title: step.title };
+    if (step.phase === 'course') run.lesson = null;
     this.render();
   }
 
@@ -290,12 +300,20 @@ export class SummaryView {
     } else if (step?.phase === 'wait') {
       label = `Limite du palier gratuit atteinte : reprise dans ${step.seconds} s`;
     }
+    // A course: the lesson being read stays said, its step under it.
+    let detail: string | null = null;
+    if (run.scope === 'course' && run.lesson && step?.phase !== 'lesson' && step?.phase !== 'course') {
+      detail = step?.phase === 'read' && step.n > 1 ? `partie ${step.k} sur ${step.n} de sa transcription` : step?.phase === 'merge' ? 'ses parties réunies' : step?.phase === 'wait' ? label : 'toute sa transcription';
+      label = `Leçon ${run.lesson.k} sur ${run.lesson.n} — « ${run.lesson.title} », lue en entier`;
+      ratio = (run.lesson.k - 0.5) / (run.lesson.n + 1);
+    }
     return h(
       'div',
       { class: 'sum-progress', role: 'status' },
       h('div', { class: 'sum-row spread' }, h('b', {}, run.scope === 'course' ? 'Résumé du cours en cours…' : 'Résumé en cours…'), stop),
       h('div', { class: 'sum-bar-track' }, h('i', { style: `width:${Math.round(ratio * 100)}%` })),
       h('p', { class: 'sum-step' }, label),
+      detail ? h('p', { class: 'sum-hint' }, `En ce moment : ${detail}`) : null,
       h('p', { class: 'sum-hint' }, 'Vous pouvez continuer vos notes : le résumé arrive ici.'),
     );
   }
@@ -355,7 +373,7 @@ export class SummaryView {
           'div',
           { class: 'sum-warn', role: 'note' },
           icon('alert', 16),
-          h('p', {}, h('b', {}, `La transcription ne couvre que ${minutes(cov.covered)} sur ${formatTimecode(cov.duration)}.`), ' Les sous-titres ont été captés pendant la lecture : le résumé ne porterait que sur ces passages. Pour tout couvrir, activez les sous-titres du lecteur ou importez un .vtt / .srt.'),
+          h('p', {}, h('b', {}, `La transcription ne couvre que ${minutes(cov.covered)} sur ${minutes(cov.duration)}.`), ' Les sous-titres ont été captés pendant la lecture : le résumé ne porterait que sur ces passages. Pour tout couvrir, activez les sous-titres du lecteur ou importez un .vtt / .srt.'),
         ),
       );
     } else {

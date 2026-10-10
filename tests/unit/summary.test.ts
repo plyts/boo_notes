@@ -53,7 +53,7 @@ function fakeWriter(budget: number, opts: { tooLargeOver?: number } = {}): Write
           goals: [{ text: 'Comprendre le journal', chapter: '1' }],
           solution: 'Un journal de transactions.',
           chapters: [{ id: '1', synthesis: 'Les bases.' }],
-          lessons: [{ id: 'L1', synthesis: 'La première leçon.' }],
+          lessons: [{ id: 'L1', synthesis: 'La première leçon.' }, { id: 'L3', synthesis: 'Inventé : la leçon sans transcription.' }],
         });
       }
       const ids = [...prompt.user.matchAll(/\b(c\d+)\b/g)].map((m) => m[1]);
@@ -242,6 +242,8 @@ describe('résumé : le cours entier', () => {
       ['Delta Lake', [['ACID', 'done'], ['OPTIMIZE', 'none']]],
     ]);
     expect(s.chapters[0].lessons[0].synthesis).toBe('La première leçon.');
+    // OPTIMIZE has no transcript: no synthesis for it, whatever the AI wrote.
+    expect(s.chapters[1].lessons[1]).toMatchObject({ title: 'OPTIMIZE', state: 'none', synthesis: '' });
     // Kept: the lessons' summaries and the course's.
     expect(area.data.has('summary:a')).toBe(true);
     expect(area.data.has('course-summary:databricks')).toBe(true);

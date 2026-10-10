@@ -37,7 +37,7 @@ const toast = document.getElementById('toast') as HTMLElement;
 
 let content: CourseContent | null = null;
 let summary: CourseSummary | null = null;
-let running: { ctrl: AbortController; step: SummaryStep | null } | null = null;
+let running: { ctrl: AbortController; step: SummaryStep | null; lesson: { k: number; n: number; title: string } | null } | null = null;
 let error: { text: string; setup: boolean } | null = null;
 let provider = '';
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -148,13 +148,24 @@ function partsList(nodes: readonly PlanNode[], url: string): HTMLElement {
 
 function progressCard(): HTMLElement {
   const step = running?.step;
+  const lesson = running?.lesson;
   let label = 'Préparation…';
-  if (step?.phase === 'lesson') label = `Leçon ${step.k} sur ${step.n} — « ${step.title} », lue en entier`;
-  else if (step?.phase === 'read') label = step.n > 1 ? `« ${step.title ?? ''} » : partie ${step.k} sur ${step.n} de la transcription` : `« ${step.title ?? ''} » : toute la transcription`;
-  else if (step?.phase === 'merge') label = `« ${step.title ?? ''} » : les parties réunies`;
-  else if (step?.phase === 'course') label = 'Synthèse du cours entier…';
-  else if (step?.phase === 'wait') label = `Limite du palier gratuit atteinte : reprise dans ${step.seconds} s`;
-  return h('div', { class: 'sum-progress', role: 'status' }, h('b', {}, 'Résumé du cours en cours…'), h('p', { class: 'sum-step' }, label), h('p', { class: 'sum-hint' }, 'Chaque leçon est lue en entier — toute sa transcription —, puis le cours.'));
+  let detail: string | null = null;
+  if (step?.phase === 'course') label = 'Synthèse du cours entier…';
+  else if (lesson) {
+    label = `Leçon ${lesson.k} sur ${lesson.n} — « ${lesson.title} », lue en entier`;
+    detail = step?.phase === 'read' && step.n > 1 ? `partie ${step.k} sur ${step.n} de sa transcription` : step?.phase === 'merge' ? 'ses parties réunies' : step?.phase === 'wait' ? `limite du palier gratuit atteinte : reprise dans ${step.seconds} s` : 'toute sa transcription';
+  } else if (step?.phase === 'wait') label = `Limite du palier gratuit atteinte : reprise dans ${step.seconds} s`;
+  const ratio = step?.phase === 'course' ? 0.94 : lesson ? (lesson.k - 0.5) / (lesson.n + 1) : 0.05;
+  return h(
+    'div',
+    { class: 'sum-progress', role: 'status' },
+    h('b', {}, 'Résumé du cours en cours…'),
+    h('div', { class: 'sum-bar-track' }, h('i', { style: `width:${Math.round(ratio * 100)}%` })),
+    h('p', { class: 'sum-step' }, label),
+    detail ? h('p', { class: 'sum-hint' }, `En ce moment : ${detail}`) : null,
+    h('p', { class: 'sum-hint' }, 'Chaque leçon est lue en entier — toute sa transcription —, puis le cours.'),
+  );
 }
 
 function renderMain(): void {
@@ -270,7 +281,7 @@ async function load(): Promise<void> {
 
 async function generate(): Promise<void> {
   if (running) return;
-  running = { ctrl: new AbortController(), step: null };
+  running = { ctrl: new AbortController(), step: null, lesson: null };
   error = null;
   render();
   const run = running;
@@ -280,6 +291,8 @@ async function generate(): Promise<void> {
       signal: run.ctrl.signal,
       onStep: (step) => {
         run.step = step;
+        if (step.phase === 'lesson') run.lesson = { k: step.k, n: step.n, title: step.title };
+        if (step.phase === 'course') run.lesson = null;
         renderMain();
       },
     });

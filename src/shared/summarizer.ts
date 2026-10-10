@@ -342,7 +342,8 @@ export async function summarizeCourse(course: string, w: Writer, hooks: RunHooks
         .map((x) => {
           const l = content.lessons.find((y) => y.noteId === x.noteId)!;
           const state: 'done' | 'none' | 'partial' = !l.summary ? 'none' : coverage(l.transcript).state === 'partial' ? 'partial' : 'done';
-          return { noteId: l.noteId, title: l.title, url: l.url, chapter: l.chapter, duration: l.duration, synthesis: draft.lessons.get(x.id) ?? '', state };
+          // A lesson without a transcript has nothing to sum up: whatever the AI wrote for it is left out.
+          return { noteId: l.noteId, title: l.title, url: l.url, chapter: l.chapter, duration: l.duration, synthesis: state === 'none' ? '' : (draft.lessons.get(x.id) ?? ''), state };
         }),
     })),
     read: Object.fromEntries(content.lessons.filter((l) => l.transcript?.cues.length).map((l) => [l.noteId, basisKey(basisOf(l.transcript!))])),
