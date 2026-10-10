@@ -251,6 +251,8 @@ const ICONS = {
   outline: [['path', { d: 'M4 5h7M8 12h8M8 19h8M6 5v14h2M6 12h2' }]],
   stop: [['rect', { x: '6.5', y: '6.5', width: '11', height: '11', rx: '2' }]],
   arrowLeft: [['path', { d: 'M19 12H5M11 6l-6 6 6 6' }]],
+  arrowUp: [['path', { d: 'M12 19V5M6 11l6-6 6 6' }]],
+  arrowDown: [['path', { d: 'M12 5v14M6 13l6 6 6-6' }]],
   arrowRight: [['path', { d: 'M5 12h14M13 6l6 6-6 6' }]],
   command: [['path', { d: 'M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z' }]],
   broadcast: [

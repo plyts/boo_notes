@@ -28,7 +28,7 @@ import { SessionState } from './session';
 import { DesktopSync } from './sync';
 import { Tiler } from './tiling';
 import { TILING_ENABLED } from '../shared/tiling';
-import { COURSE_SUMMARY_PREFIX, SUMMARY_PREFIX } from '../shared/summary';
+import { COURSE_SUMMARY_PREFIX, lessonMarkdown, SUMMARY_PREFIX, summaryKey, withoutSummary, withSummary, type LessonSummary } from '../shared/summary';
 import type { Bounds } from '../shared/tiling';
 
 /**
@@ -576,7 +576,20 @@ const handlers: Handlers = {
   },
 
   'summary:open': async (msg) => {
-    await chrome.tabs.create({ url: chrome.runtime.getURL(`summary/summary.html?course=${encodeURIComponent(msg.course)}`) });
+    const query = msg.noteId ? `note=${encodeURIComponent(msg.noteId)}` : `course=${encodeURIComponent(msg.course ?? '')}`;
+    await chrome.tabs.create({ url: chrome.runtime.getURL(`summary/summary.html?${query}`) });
+  },
+
+  'summary:note': async (msg) => {
+    const [note, stored] = await Promise.all([store.getNote(msg.noteId), chrome.storage.local.get(summaryKey(msg.noteId))]);
+    const summary = stored[summaryKey(msg.noteId)] as LessonSummary | undefined;
+    if (!note || !summary || withoutSummary(note.markdown) === note.markdown) return { updated: false };
+    const markdown = withSummary(note.markdown, lessonMarkdown(summary));
+    if (markdown === note.markdown) return { updated: false };
+    await store.saveNote(msg.noteId, { platform: note.platform, url: note.url, title: note.title, kind: note.kind }, markdown, 'summary');
+    void sync.notifyChanged();
+    void notion.enqueue(msg.noteId);
+    return { updated: true };
   },
 
   'shortcuts:list': async () => {

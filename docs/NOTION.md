@@ -152,9 +152,11 @@ Le coffre range trois sortes de contenus, chacune reconnaissable à son titre :
 | 🎙️ **Transcription** | à la fin de la page de la leçon, repliée | les sous-titres, chaque réplique liée à son instant |
 
 Le tableau « Toutes les notes » les relie : ses colonnes **Résumé IA** et **Transcription** disent
-ce que chaque leçon a ; un filtre sur « Résumé IA » liste tous les résumés. Un résumé fait (ou
-refait) dans Boo Notes — onglet Résumé, page du cours — réécrit la page de sa leçon, ou celle de son
-cours, à la synchronisation suivante (rien n’est réécrit s’il n’a pas changé). Quand la transcription
+ce que chaque leçon a ; un filtre sur « Résumé IA » liste tous les résumés. Un résumé fait, refait
+ou **modifié à la main** dans Boo Notes — onglet Résumé, page en grand (« Modifier » puis
+« Enregistrer ») — réécrit la page de sa leçon, ou celle de son cours, à la synchronisation
+suivante (rien n’est réécrit s’il n’a pas changé) ; un résumé modifié y est dit « modifié par vous
+le … » plutôt que « à vérifier ». Quand la transcription
 a changé depuis, la page et le tableau disent « ↻ À mettre à jour ».
 
 ![Le coffre Notion](screenshots/notion-vault.png)

@@ -57,7 +57,7 @@ const LONG = Array.from({ length: 280 }, (_, i) => ({
   ][i % 4],
 }));
 
-test('rendus : l’onglet Résumé d’une leçon, tous ses états', async ({ page, sw }) => {
+test('rendus : l’onglet Résumé d’une leçon, tous ses états', async ({ context, page, sw }) => {
   test.setTimeout(180_000);
   const ai = await mockOpenAi({ limitFirst: true });
   try {
@@ -99,6 +99,29 @@ test('rendus : l’onglet Résumé d’une leçon, tous ses états', async ({ pa
     await sw.evaluate(() => chrome.downloads.erase({}));
     await panel(page).getByRole('button', { name: 'PDF', exact: true }).click();
     await pdfShots(sw, '06b-pdf-resume-lecon', 1);
+    // The small button: the summary large, then « Modifier ».
+    const opened = context.waitForEvent('page', { predicate: (x) => x.url().includes('/summary/summary.html?note=') });
+    await panel(page).getByRole('button', { name: 'En grand : modifier, PDF' }).click();
+    const big = await opened;
+    await big.setViewportSize({ width: 1400, height: 900 });
+    await expect(big.getByRole('region', { name: 'Plan du cours' })).toBeVisible();
+    await big.screenshot({ path: `${SHOTS}/06c-lecon-en-grand.png`, fullPage: true });
+    await big.getByRole('button', { name: 'Modifier' }).click();
+    await big.locator('.ed-pt', { hasText: 'Aucune garantie' }).locator('.ed-kind').selectOption('definition');
+    const travel = big.locator('.ed-part').nth(2);
+    await travel.getByRole('button', { name: 'Ajouter un point' }).click();
+    await travel.locator('.ed-pt').last().locator('.ed-pt-title').fill('VACUUM');
+    await travel.locator('.ed-pt').last().locator('.ed-detail').fill('Efface les vieux fichiers : le time travel ne remonte plus avant.');
+    await travel.locator('.ed-pt').last().locator('.ed-kind').selectOption('warning');
+    await travel.locator('.ed-pt').last().locator('.ed-time').fill('00:19');
+    await big.locator('.ed-pt').last().locator('.ed-detail').click();
+    // The sticky bar at the top of a full-page picture.
+    await big.evaluate(() => scrollTo(0, 0));
+    await big.screenshot({ path: `${SHOTS}/06d-lecon-modifier.png`, fullPage: true });
+    await big.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(big.locator('#toast')).toContainText('Résumé enregistré');
+    await big.screenshot({ path: `${SHOTS}/06e-lecon-enregistree.png`, fullPage: true });
+    await big.close();
     // The plan, the part being watched lit.
     await setVideo(page, 16);
     await panel(page).getByRole('region', { name: 'Plan du cours' }).scrollIntoViewIfNeeded();
@@ -194,6 +217,12 @@ test('rendus : le résumé du cours (panneau, page en grand, PDF)', async ({ con
     await big.waitForTimeout(300);
     await big.screenshot({ path: `${SHOTS}/16-cours-page-sombre.png`, fullPage: true });
     await big.emulateMedia({ colorScheme: 'light' });
+    // « Modifier »: the course's texts and each lesson's plan, in place.
+    await big.getByRole('button', { name: 'Modifier' }).click();
+    await big.getByRole('textbox', { name: 'Problématique du cours' }).click();
+    await big.evaluate(() => scrollTo(0, 0));
+    await big.screenshot({ path: `${SHOTS}/15c-cours-page-modifier.png`, fullPage: true });
+    await big.getByRole('button', { name: 'Annuler' }).click();
 
     // A lesson's transcript grows: « Mettre à jour (1) », only it read again (in progress).
     await sw.evaluate(async (t) => chrome.storage.local.set({ 'transcript:youtube:lessonIntro1': t }), transcriptOf([{ start: 0, text: 'A lakehouse keeps files in object storage.' }, { start: 4, text: 'And adds warehouse features.' }, { start: 9, text: 'Like transactions.' }], 12));

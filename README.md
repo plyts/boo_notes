@@ -45,7 +45,12 @@ tableau de votre page.
   « **Insérer dans la note** » l’écrit en tête de la note (bloc repliable `> [!summary]`, plan
   détaillé compris, qui part avec elle vers l’app Desktop et le PDF) ; « **PDF** » télécharge le
   résumé seul (chaque instant est un lien vers la vidéo) ; copier, régénérer ; « à mettre à jour »
-  quand la transcription a grandi. **Tout le cours** : chaque leçon rangée dans le cours est lue en
+  quand la transcription a grandi. Un **petit bouton ⤢** (en haut de l’onglet) ouvre le résumé
+  **en grand**, où « **Modifier** » le change à votre convenance : chaque texte se modifie d’un clic,
+  la sorte de chaque point se choisit (Essentiel, Définition, Exemple, Attention), points, parties
+  et objectifs s’ajoutent, se déplacent ou se suppriment, un instant se tape (02:40) ;
+  « **Enregistrer** » le garde — marqué « IA · modifié » —, met à jour le bloc inséré dans la note,
+  le **PDF** et la page **Notion**. **Tout le cours** : chaque leçon rangée dans le cours est lue en
   entier, puis le cours entier — d’après **toutes ses transcriptions lues ensemble** quand elles
   tiennent dans une requête (Gemini, Claude, OpenRouter…), sinon d’après les résumés des leçons ;
   sa **page en grand** (chapitres › leçons › parties › points, chaque instant ouvre la leçon à ce
@@ -139,6 +144,11 @@ entier, en grand ; le résumé en PDF :
 | Onglet Résumé d’une leçon | Résumé du cours (page en grand) | Le résumé en PDF |
 | --- | --- | --- |
 | ![Onglet Résumé](docs/screenshots/panel-summary.png) | ![Résumé du cours](docs/screenshots/course-summary.png) | ![Résumé en PDF](docs/screenshots/summary-pdf.png) |
+
+**Modifier le résumé** — en grand, chaque texte, chaque point et sa sorte, ses instants ; enregistré,
+il suit dans la note, le PDF et Notion :
+
+![Modifier le résumé](docs/screenshots/summary-edit.png)
 
 **Le coffre Notion** — vos notes, les résumés IA et les transcriptions, chacun à sa place (pages
 réelles écrites par Boo Notes) :
@@ -375,10 +385,12 @@ vidéo qui continue de jouer ; section IA des options), et le **résumé** (un s
 OpenAI simulé, palier gratuit : sa limite attendue, toute la transcription envoyée, problématique,
 objectifs, solution, plan détaillé — un point Essentiel par partie, définition, piège, exemple et sa
 commande, « Titres | Détaillé » retenu —, instant inventé écarté, instant cliqué, insertion en tête
-de note (plan détaillé compris) puis remplacement, PDF du résumé seul et ses liens ; le cours entier
+de note (plan détaillé compris) puis remplacement, PDF du résumé seul et ses liens ; le petit bouton
+« en grand », « Modifier » — un texte, la sorte d’un point, un point supprimé, un autre ajouté avec
+son instant, un objectif —, « Enregistrer » : la note, le PDF et la page Notion suivent ; le cours entier
 — chaque leçon lue, toutes les transcriptions ensemble, leçon sans transcription signalée, page en
 grand, mise à jour de la seule leçon changée, PDF du résumé, PDF du cours qui commence par le
-résumé ; options › IA : les paliers gratuits et leur lien « Créer une clé
+résumé, le cours modifié (sa problématique, la phrase d’une leçon, une partie d’une leçon) ; options › IA : les paliers gratuits et leur lien « Créer une clé
 gratuite », une adresse compatible OpenAI vérifiée, ses modèles listés).
 
 ```

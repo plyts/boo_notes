@@ -218,6 +218,7 @@ class PanelApp {
     insert: (block) => this.insertSummary(block),
     notify: (text, kind) => this.notify(text, kind),
     openCourse: (course) => void callBackground({ type: 'summary:open', course }).catch((e: unknown) => this.notify(`Page du résumé impossible : ${e instanceof Error ? e.message : String(e)}`, 'error')),
+    openLesson: (noteId) => void callBackground({ type: 'summary:open', noteId }).catch((e: unknown) => this.notify(`Page du résumé impossible : ${e instanceof Error ? e.message : String(e)}`, 'error')),
     openOptions: () => void callBackground({ type: 'options:open', section: 'questions' }).catch(() => undefined),
   });
 

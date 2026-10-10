@@ -234,7 +234,10 @@ export type BackgroundRequest =
   | { type: 'tab:focus' }
   | { type: 'options:open'; section?: string }
   /** The large page of a course's summary (a tab). */
-  | { type: 'summary:open'; course: string }
+  /** The summary's large page: a course's, or one lesson's (`noteId`). */
+  | { type: 'summary:open'; course?: string; noteId?: string }
+  /** A lesson's summary changed by hand: the summary block inserted in its note follows (none inserted: nothing written). */
+  | { type: 'summary:note'; noteId: string }
   | { type: 'shortcuts:list' }
   | { type: 'sync:status' }
   | { type: 'sync:retry' }
@@ -347,6 +350,7 @@ export interface BackgroundResponses {
   'tab:focus': void;
   'options:open': void;
   'summary:open': void;
+  'summary:note': { updated: boolean };
   'shortcuts:list': Array<{ name: string; shortcut: string; description: string }>;
   'sync:status': SyncStatus;
   'sync:retry': SyncStatus;

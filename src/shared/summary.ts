@@ -83,6 +83,8 @@ export interface LessonSummary {
   createdAt: number;
   /** Read in this many parts (1: in one go). */
   parts: number;
+  /** Changed by hand since (the large page, « Modifier »): when. */
+  edited?: number;
 }
 
 export interface CourseLessonRef {
@@ -110,6 +112,8 @@ export interface CourseSummary {
   provider: string;
   model: string;
   createdAt: number;
+  /** Changed by hand since (the large page, « Modifier »): when. */
+  edited?: number;
 }
 
 export const SUMMARY_PREFIX = 'summary:';
@@ -617,8 +621,8 @@ const stamps = (at: readonly number[]) => at.map((s) => ` ${timestampToken(s)}`)
  * quotes), put at the top of the note: its timestamps are clickable there,
  * and it goes with the note to Notion, the Desktop app, a copy, the PDF.
  */
-export function lessonMarkdown(s: Pick<LessonSummary, 'problem' | 'goals' | 'solution' | 'plan'>): string {
-  const out = [`> [!${SUMMARY_TYPE}] ${SUMMARY_TITLE} · IA d’après la transcription, à vérifier`];
+export function lessonMarkdown(s: Pick<LessonSummary, 'problem' | 'goals' | 'solution' | 'plan' | 'edited'>): string {
+  const out = [`> [!${SUMMARY_TYPE}] ${SUMMARY_TITLE} · IA d’après la transcription, ${s.edited ? 'modifié par vous' : 'à vérifier'}`];
   if (s.problem.text) out.push(`> **Problématique —** ${s.problem.text}${stamps(s.problem.at.slice(0, 1))}`, '>');
   if (s.goals.length) {
     out.push('> **Objectifs**');
@@ -639,8 +643,8 @@ export function lessonMarkdown(s: Pick<LessonSummary, 'problem' | 'goals' | 'sol
  * solution and the detailed plan under headings, each moment a link to the
  * video (the PDF turns `[mm:ss]` into one).
  */
-export function lessonDocument(s: Pick<LessonSummary, 'problem' | 'goals' | 'solution' | 'plan'>): string {
-  const out = ['*Généré par IA d’après la transcription — à vérifier.*', ''];
+export function lessonDocument(s: Pick<LessonSummary, 'problem' | 'goals' | 'solution' | 'plan' | 'edited'>): string {
+  const out = [s.edited ? '*Généré par IA d’après la transcription, puis modifié par vous.*' : '*Généré par IA d’après la transcription — à vérifier.*', ''];
   if (s.problem.text) out.push('## Problématique', '', `${s.problem.text}${stamps(s.problem.at.slice(0, 1))}`, '');
   if (s.goals.length) {
     out.push('## Objectifs', '');
@@ -714,7 +718,7 @@ const lessonStamp = (url: string, at: number) => (url ? `[${formatTimecode(at)}]
  * lesson there.
  */
 export function courseMarkdown(s: CourseSummary, plans: ReadonlyMap<string, LessonSummary>, opts: { heading?: boolean } = {}): string {
-  const out = [...(opts.heading === false ? [] : [`# ${s.course} — résumé du cours`, '']), '*Généré par IA d’après les transcriptions — à vérifier.*', ''];
+  const out = [...(opts.heading === false ? [] : [`# ${s.course} — résumé du cours`, '']), s.edited ? '*Généré par IA d’après les transcriptions, puis modifié par vous.*' : '*Généré par IA d’après les transcriptions — à vérifier.*', ''];
   if (s.problem) out.push('## Problématique', '', s.problem, '');
   if (s.goals.length) {
     out.push('## Objectifs', '');

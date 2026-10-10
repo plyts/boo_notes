@@ -487,4 +487,12 @@ describe('Le coffre Notion : résumés IA, notes et transcription, chacun à sa 
     const t = { ...info, target: 'fr', covered: [[0, 300]], cues, rev: 1 } as unknown as Transcript;
     for (const b of lessonSummaryBlocks(summaryOf(t), () => null)) expect(depth(b)).toBeLessThanOrEqual(2);
   });
+
+  it('un résumé modifié à la main le dit (plus « à vérifier »)', () => {
+    const t = { ...info, target: 'fr', covered: [[0, 300]], cues, rev: 1 } as unknown as Transcript;
+    const about = lessonSummaryBlocks({ ...summaryOf(t), edited: Date.UTC(2026, 9, 10, 12) }, () => null)[1];
+    expect('rich' in about ? about.rich.map((r) => (r.type === 'text' ? r.text.content : '')).join('') : '').toBe(
+      'Généré par IA (Groq · llama-3.3-70b-versatile) d’après la transcription, le 9 octobre 2026, modifié par vous le 10 octobre 2026.',
+    );
+  });
 });

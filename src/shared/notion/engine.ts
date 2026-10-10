@@ -429,7 +429,7 @@ export function lessonSummaryBlocks(s: LessonSummary, timeUrl: (seconds: number)
       type: 'paragraph',
       color: 'gray',
       rich: [
-        ...plainRichText(`Généré par IA (${by}) d’après la transcription, le ${dateOf(s.createdAt)} — à vérifier.`, { italic: true }),
+        ...plainRichText(`Généré par IA (${by}) d’après la transcription, le ${dateOf(s.createdAt)}${s.edited ? `, modifié par vous le ${dateOf(s.edited)}.` : ' — à vérifier.'}`, { italic: true }),
         ...(opts.stale ? plainRichText(' ↻ La transcription a changé depuis : régénérez le résumé dans Boo Notes.', { italic: true, bold: true }) : []),
       ],
     },
@@ -470,7 +470,7 @@ function courseSummaryBlocks(s: CourseSummary): BlockSpec[] {
     {
       type: 'paragraph',
       color: 'gray',
-      rich: plainRichText(`Généré par IA d’après ${plural(read, 'transcription')}${s.full ? ' lues ensemble' : ''}, le ${dateOf(s.createdAt)} — à vérifier. Le plan détaillé de chaque leçon est dans sa page.`, { italic: true }),
+      rich: plainRichText(`Généré par IA d’après ${plural(read, 'transcription')}${s.full ? ' lues ensemble' : ''}, le ${dateOf(s.createdAt)}${s.edited ? `, modifié par vous le ${dateOf(s.edited)}.` : ' — à vérifier.'} Le plan détaillé de chaque leçon est dans sa page.`, { italic: true }),
     },
   ];
   if (s.problem) out.push({ type: 'callout', emoji: '🎯', color: 'red_background', rich: [...plainRichText('Problématique du cours — ', { bold: true }), ...plainRichText(s.problem)] });

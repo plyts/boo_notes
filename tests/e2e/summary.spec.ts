@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { Page, Worker } from '@playwright/test';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib';
+import { PARENT_PAGE_ID, startMockNotion } from '../../tools/mock-notion/server.mjs';
 import { chats, CUES, mockOpenAi, seedCourse, transcriptOf, useGroq } from './ai-mock';
 import { expect, NOTE_ID, openNotes, openWatch, panel, storedNote, test, videoTime } from './fixtures';
 
@@ -185,8 +186,125 @@ test('Résumé du cours : chaque leçon lue en entier, puis le cours d’après 
     // The course's PDF opens with its summary (then its lessons with something in them: the empty one without a transcript is left out).
     await big.getByRole('button', { name: 'PDF du cours' }).click();
     await expect(big.locator('#toast')).toContainText('PDF du cours « Databricks — Data Engineer » téléchargé : son résumé, 2 leçons, 2 transcriptions', { timeout: 20_000 });
+
+    // « Modifier » the course: its problem, a lesson's sentence, a point of a lesson's plan; « Annuler » drops nothing saved.
+    await big.getByRole('button', { name: 'Modifier' }).click();
+    await big.getByRole('textbox', { name: 'Problématique du cours' }).fill('Comment bâtir des pipelines fiables sur un lakehouse ?');
+    await big.getByRole('textbox', { name: 'Phrase de la leçon « Les transactions ACID »' }).fill('Le journal rend chaque écriture atomique.');
+    const acidPlan = big.locator(`#lesson-${NOTE_ID.replace(':', '\\:')} + .parts`);
+    await acidPlan.locator('.ed-part-title').first().fill('Pourquoi un data lake ne suffit pas');
+    await big.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(big.locator('#toast')).toContainText('Résumé enregistré');
+    const courseKept = await sw.evaluate(async () => Object.entries(await chrome.storage.local.get(null)).find(([k]) => k.startsWith('course-summary:'))![1]) as { edited?: number; problem: string; chapters: Array<{ lessons: Array<{ synthesis: string }> }> };
+    expect(courseKept.edited).toBeGreaterThan(0);
+    expect(courseKept.problem).toBe('Comment bâtir des pipelines fiables sur un lakehouse ?');
+    expect(courseKept.chapters[1].lessons[0].synthesis).toBe('Le journal rend chaque écriture atomique.');
+    expect(((await sw.evaluate(async (k) => (await chrome.storage.local.get(k))[k], `summary:${NOTE_ID}`)) as { plan: Array<{ title: string }> }).plan[0].title).toBe('Pourquoi un data lake ne suffit pas');
+    await expect(big.getByRole('region', { name: 'Problématique du cours' })).toContainText('Comment bâtir des pipelines fiables');
+    await expect(big.locator('.meta .sum-ai')).toHaveText('IA · modifié');
   } finally {
     await ai.close();
+  }
+});
+
+test('« En grand » : le résumé modifié à ma convenance — textes, sortes de points, ajouts, suppressions —, enregistré : la note, le PDF et Notion suivent', async ({ context, page, sw }) => {
+  const ai = await mockOpenAi();
+  const notion = startMockNotion();
+  await notion.ready;
+  try {
+    // Notion connected (the extension writes there itself).
+    await sw.evaluate((url) => {
+      (globalThis as unknown as { booNotes: { notion: { apiBase?: string } } }).booNotes.notion.apiBase = url;
+    }, notion.url);
+    const options = await context.newPage();
+    await options.goto(`chrome-extension://${new URL(sw.url()).host}/options/options.html#notion`);
+    await options.locator('#notion-token').fill('secret_test');
+    await options.locator('#notion-page').fill(`https://www.notion.so/Mes-cours-${PARENT_PAGE_ID.replace(/-/g, '')}`);
+    await options.locator('#notion-connect').click();
+    await expect(options.locator('#notion-badge')).toHaveText(/^Connecté/);
+    await options.close();
+
+    await useGroq(sw, ai.base);
+    await sw.evaluate(async ({ key, t }) => chrome.storage.local.set({ [key]: t }), { key: `transcript:${NOTE_ID}`, t: transcriptOf(CUES, 30) });
+    await openWatch(page);
+    await openNotes(sw, page);
+    const p = panel(page);
+    await page.keyboard.type('Ma première note');
+    await p.getByRole('tab', { name: 'Résumé' }).click();
+    await p.getByRole('button', { name: 'Générer le résumé' }).click();
+    await expect(p.getByRole('region', { name: 'Problématique' })).toBeVisible({ timeout: 15_000 });
+    await p.getByRole('button', { name: 'Insérer dans la note' }).click();
+    await expect.poll(async () => (await storedNote(sw))?.markdown ?? '').toContain('[!summary]');
+    await p.getByRole('tab', { name: 'Résumé' }).click();
+
+    // The small button: the summary, large.
+    const opened = context.waitForEvent('page', { predicate: (x) => x.url().includes(`/summary/summary.html?note=`) });
+    await p.getByRole('button', { name: 'En grand : modifier, PDF' }).click();
+    const big: Page = await opened;
+    await big.setViewportSize({ width: 1400, height: 1000 });
+    await expect(big.getByRole('heading', { level: 1 })).toHaveText('Vidéo de test E2E');
+    await expect(big.getByRole('region', { name: 'Plan du cours' }).locator('.sum-pt')).toHaveCount(7);
+
+    // « Modifier »: a text, a point's kind and explanation, a point removed, one added with its moment, a goal added.
+    await big.getByRole('button', { name: 'Modifier' }).click();
+    await expect(big.locator('.ed-banner')).toContainText('Vous modifiez le résumé');
+    await big.getByRole('textbox', { name: 'Problématique' }).fill('Comment écrire sur un data lake sans corrompre la table ?');
+    const garantie = big.locator('.ed-pt', { hasText: 'Aucune garantie' });
+    await garantie.locator('.ed-kind').selectOption('definition');
+    await big.locator('.ed-pt', { hasText: 'Aucune garantie' }).locator('.ed-detail').fill('Aucune règle n’empêche deux écritures de se mêler.');
+    await big.locator('.ed-pt', { hasText: 'Lectures atomiques' }).getByRole('button', { name: 'Supprimer le point' }).click();
+    const travel = big.locator('.ed-part').nth(2);
+    await travel.getByRole('button', { name: 'Ajouter un point' }).click();
+    const added = travel.locator('.ed-pt').last();
+    await added.locator('.ed-pt-title').fill('VACUUM');
+    await added.locator('.ed-detail').fill('Efface les vieux fichiers : le time travel ne remonte plus avant.');
+    await added.locator('.ed-kind').selectOption('warning');
+    await travel.locator('.ed-pt').last().locator('.ed-time').fill('00:19');
+    await big.getByRole('button', { name: 'Ajouter un objectif' }).click();
+    await big.getByRole('textbox', { name: 'Objectif 3' }).fill('Nettoyer une table avec VACUUM');
+    await big.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(big.locator('#toast')).toContainText('Résumé enregistré — mis à jour dans la note et Notion');
+
+    // Kept as edited, said so.
+    const kept = await sw.evaluate(async (k) => (await chrome.storage.local.get(k))[k], `summary:${NOTE_ID}`) as { edited?: number; problem: { text: string }; goals: Array<{ text: string }>; plan: Array<{ children: Array<{ title: string; kind?: string; detail?: string; at: number | null }> }> };
+    expect(kept.edited).toBeGreaterThan(0);
+    expect(kept.problem.text).toBe('Comment écrire sur un data lake sans corrompre la table ?');
+    expect(kept.goals.map((g) => g.text)).toContain('Nettoyer une table avec VACUUM');
+    expect(kept.plan[0].children[1]).toMatchObject({ title: 'Aucune garantie', kind: 'definition', detail: 'Aucune règle n’empêche deux écritures de se mêler.' });
+    expect(kept.plan[1].children.map((c) => c.title)).not.toContain('Lectures atomiques');
+    expect(kept.plan[2].children.at(-1)).toMatchObject({ title: 'VACUUM', kind: 'warning', at: 19 });
+    await expect(big.locator('.sum-ai')).toHaveText('IA · modifié');
+    await expect(big.locator('.sum-pt.k-warning')).toContainText('VACUUM — Efface les vieux fichiers');
+    await expect(p.locator('.sum-ai')).toHaveText('IA · modifié');
+
+    // The note's summary block follows.
+    await expect.poll(async () => (await storedNote(sw))?.markdown ?? '').toContain('> **Problématique —** Comment écrire sur un data lake sans corrompre la table ?');
+    const md = (await storedNote(sw))!.markdown;
+    expect(md).toMatch(/^> \[!summary\] Résumé de la leçon · IA d’après la transcription, modifié par vous\n/);
+    expect(md).toContain('>    - ⚠️ **Attention — VACUUM :** Efface les vieux fichiers : le time travel ne remonte plus avant. [00:19]');
+    expect(md).not.toContain('Lectures atomiques');
+    expect(md).toMatch(/\[00:\d\d\] Ma première note$/);
+
+    // The PDF: the summary as saved (its new moment a link to the video there).
+    await sw.evaluate(() => chrome.downloads.erase({}));
+    await big.getByRole('button', { name: 'PDF du résumé' }).click();
+    const pdf = await lastPdf(sw);
+    expect(pdf.uris).toContain('https://www.youtube.com/watch?v=e2eTest0001#t=19');
+
+    // Notion: the lesson's page written again, as edited.
+    await expect
+      .poll(async () => {
+        const pages = [...notion.state.pages.values()].filter((x) => x.parent?.database_id);
+        return pages.length ? JSON.stringify(notion.pageContent(pages[0].id)) : '';
+      }, { timeout: 30_000 })
+      .toContain('Comment écrire sur un data lake sans corrompre la table ?');
+    const content = JSON.stringify(notion.pageContent([...notion.state.pages.values()].find((x) => x.parent?.database_id)!.id));
+    expect(content).toContain('modifié par vous le');
+    expect(content).toContain('⚠️ Attention — VACUUM : Efface les vieux fichiers');
+    expect(content).not.toContain('Lectures atomiques');
+  } finally {
+    await ai.close();
+    await notion.close();
   }
 });
 

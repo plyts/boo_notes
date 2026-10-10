@@ -37,6 +37,8 @@ export interface SummaryHooks {
   notify(text: string, kind?: 'info' | 'success' | 'error'): void;
   /** The course's page (large). */
   openCourse(course: string): void;
+  /** The lesson's summary, large (to edit it, its PDF). */
+  openLesson(noteId: string): void;
   openOptions(): void;
 }
 
@@ -270,11 +272,20 @@ export class SummaryView {
       return b;
     };
     const ai = this.scope === 'lesson' ? this.lesson : this.course;
+    const by = ai ? `${providerLabel(ai.provider as never) || ai.provider} (${ai.model})` : '';
+    const badge = !ai || this.run ? null : ai.edited ? h('span', { class: 'sum-ai edited', title: `Écrit par ${by}, modifié par vous` }, icon('edit', 12), 'IA · modifié') : h('span', { class: 'sum-ai', title: `Écrit par ${by} — à vérifier` }, icon('sparkles', 12), 'IA · à vérifier');
+    // The summary large: to read it wide, edit it, download it.
+    const ctx = this.ctx;
+    const large =
+      ai && !this.run
+        ? h('button', { type: 'button', class: 'sum-large', title: 'En grand — modifier, télécharger en PDF', 'aria-label': 'En grand : modifier, PDF' }, icon('expand', 14))
+        : null;
+    large?.addEventListener('click', () => (this.scope === 'course' && ctx.course ? this.hooks.openCourse(ctx.course) : this.hooks.openLesson(ctx.noteId)));
     return h(
       'div',
       { class: 'sum-bar' },
       h('div', { class: 'sum-seg', role: 'tablist', 'aria-label': 'Résumé de' }, seg('lesson', 'Cette leçon'), seg('course', 'Tout le cours')),
-      ai && !this.run ? h('span', { class: 'sum-ai', title: `Écrit par ${providerLabel(ai.provider as never) || ai.provider} (${ai.model}) — à vérifier` }, icon('sparkles', 12), 'IA · à vérifier') : null,
+      h('span', { class: 'sum-bar-end' }, badge, large),
     );
   }
 
@@ -509,7 +520,9 @@ export class SummaryView {
       const pdf = h('button', { type: 'button', class: 'sum-btn', title: 'Télécharger le résumé en PDF' }, icon('download', 15), 'PDF');
       pdf.addEventListener('click', () => void this.pdf({ type: 'summary:pdf', noteId }));
       const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé', 'aria-label': 'Régénérer' }, icon('refresh', 15));
-      again.addEventListener('click', () => void this.generateLesson());
+      again.addEventListener('click', () => {
+        if (!s.edited || confirm('Ce résumé a été modifié à la main : le refaire remplace vos modifications. Continuer ?')) void this.generateLesson();
+      });
       buttons.push(insert, copy, pdf, h('span', { class: 'spacer' }), again);
     }
     if (!this.run && this.scope === 'course' && this.course && this.content && this.ctx?.course) {
@@ -523,7 +536,9 @@ export class SummaryView {
       const pdf = h('button', { type: 'button', class: 'sum-btn', title: 'Télécharger le résumé du cours en PDF' }, icon('download', 15), 'PDF');
       pdf.addEventListener('click', () => void this.pdf({ type: 'course:summary-pdf', course }));
       const again = h('button', { type: 'button', class: 'sum-btn ghost icon-only', title: 'Régénérer le résumé du cours', 'aria-label': 'Régénérer' }, icon('refresh', 15));
-      again.addEventListener('click', () => void this.generateCourse());
+      again.addEventListener('click', () => {
+        if (!s.edited || confirm('Le résumé du cours a été modifié à la main : le refaire remplace vos modifications. Continuer ?')) void this.generateCourse();
+      });
       buttons.push(open, copy, pdf, h('span', { class: 'spacer' }), again);
     }
     this.foot.replaceChildren(...buttons);
